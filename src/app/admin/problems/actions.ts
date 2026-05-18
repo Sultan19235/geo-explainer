@@ -6,6 +6,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const BUCKET = "lessons";
+const HTML_CONTENT_TYPE = "text/html; charset=utf-8";
 const VALID_DIFFICULTIES = ["easy", "med", "hard"] as const;
 type Difficulty = (typeof VALID_DIFFICULTIES)[number];
 
@@ -49,10 +50,11 @@ async function uploadProblemFile(
   const admin = createAdminClient();
   const path = problemPath(problemId);
   const arrayBuffer = await file.arrayBuffer();
+  const body = new Blob([arrayBuffer], { type: HTML_CONTENT_TYPE });
   const { error } = await admin.storage
     .from(BUCKET)
-    .upload(path, new Uint8Array(arrayBuffer), {
-      contentType: "text/html",
+    .upload(path, body, {
+      contentType: HTML_CONTENT_TYPE,
       upsert: true,
     });
   if (error) {

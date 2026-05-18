@@ -6,6 +6,7 @@ import { requireAdmin } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const BUCKET = "lessons";
+const HTML_CONTENT_TYPE = "text/html; charset=utf-8";
 
 function theoryPath(topicId: string) {
   return `theory/${topicId}.html`;
@@ -33,10 +34,11 @@ async function uploadTheoryFile(
   const admin = createAdminClient();
   const path = theoryPath(topicId);
   const arrayBuffer = await file.arrayBuffer();
+  const body = new Blob([arrayBuffer], { type: HTML_CONTENT_TYPE });
   const { error } = await admin.storage
     .from(BUCKET)
-    .upload(path, new Uint8Array(arrayBuffer), {
-      contentType: "text/html",
+    .upload(path, body, {
+      contentType: HTML_CONTENT_TYPE,
       upsert: true,
     });
   if (error) {

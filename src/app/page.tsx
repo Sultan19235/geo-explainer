@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 
 export default function HomePage() {
   return (
@@ -10,13 +10,19 @@ export default function HomePage() {
       <p className="mt-4 max-w-xl text-base text-muted-foreground sm:text-lg">
         Математика мұғалімдеріне арналған интерактивті геометрия сабақтары
       </p>
-      <div className="mt-8 flex gap-3">
-        <Button size="lg" render={<Link href="/login" />}>
+      <div className="mt-8 flex flex-wrap justify-center gap-3">
+        <Link href="/grades" className={buttonVariants({ size: "lg" })}>
+          Сабақтарды қарау
+        </Link>
+        <Link href="/login" className={buttonVariants({ size: "lg" })}>
           Кіру
-        </Button>
-        <Button size="lg" variant="outline" render={<Link href="/signup" />}>
+        </Link>
+        <Link
+          href="/signup"
+          className={buttonVariants({ size: "lg", variant: "outline" })}
+        >
           Тіркелу
-        </Button>
+        </Link>
       </div>
     </main>
   );

@@ -36,6 +36,12 @@ export default async function DashboardPage() {
         Сәлеметсіз бе, {user.email}
       </h1>
       <div className="flex flex-col items-center gap-3">
+        <Link
+          href="/grades"
+          className={buttonVariants({ variant: "outline" })}
+        >
+          Менің сабақтарым
+        </Link>
         {isAdmin && (
           <Link href="/admin/topics" className={buttonVariants()}>
             Әкімші панелі

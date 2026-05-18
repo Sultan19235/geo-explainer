@@ -43,3 +43,4 @@ next-env.d.ts
 # quarto / rendered html artifacts
 /*.html
 README_files/
+_reference/
