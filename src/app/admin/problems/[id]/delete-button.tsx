@@ -2,21 +2,19 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/lib/i18n/context";
 
 type Props = {
   action: () => Promise<void>;
 };
 
 export function DeleteProblemButton({ action }: Props) {
+  const { t } = useT();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function handleClick() {
-    if (
-      !window.confirm(
-        "Осы есепті жою керек пе? Бұл әрекетті қайтару мүмкін емес.",
-      )
-    ) {
+    if (!window.confirm(t("delete_problem_confirm"))) {
       return;
     }
     setError(null);
@@ -28,7 +26,7 @@ export function DeleteProblemButton({ action }: Props) {
           if (e.message === "NEXT_REDIRECT") throw e;
           setError(e.message);
         } else {
-          setError("Жою кезінде қате.");
+          setError(t("delete_error"));
         }
       }
     });
@@ -42,7 +40,7 @@ export function DeleteProblemButton({ action }: Props) {
         onClick={handleClick}
         disabled={isPending}
       >
-        {isPending ? "Жойылуда..." : "Жою"}
+        {isPending ? t("delete_pending") : t("delete_button")}
       </Button>
       {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
     </div>

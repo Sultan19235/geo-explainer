@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -7,12 +6,17 @@ import {
   type ProblemFormValues,
   type TopicOption,
 } from "../problem-form";
+import {
+  EditProblemHeading,
+  ProblemBackLink,
+} from "../problem-back-link";
 import { updateProblemAction, deleteProblemAction } from "../actions";
 import { DeleteProblemButton } from "./delete-button";
 
 type RawTopic = {
   id: string;
   name_kz: string;
+  name_ru: string | null;
   display_order: number;
   grade_id: number | null;
 };
@@ -36,7 +40,7 @@ export default async function EditProblemPage({
       .maybeSingle(),
     admin
       .from("topics")
-      .select("id, name_kz, display_order, grade_id")
+      .select("id, name_kz, name_ru, display_order, grade_id")
       .order("display_order", { ascending: true })
       .returns<RawTopic[]>(),
   ]);
@@ -45,10 +49,11 @@ export default async function EditProblemPage({
     notFound();
   }
 
-  const topics: TopicOption[] = (rawTopics ?? []).map((t) => ({
-    id: t.id,
-    name_kz: t.name_kz,
-    grade: t.grade_id ?? 0,
+  const topics: TopicOption[] = (rawTopics ?? []).map((topic) => ({
+    id: topic.id,
+    name_kz: topic.name_kz,
+    name_ru: topic.name_ru,
+    grade: topic.grade_id ?? 0,
   }));
 
   const difficulty: ProblemFormValues["difficulty"] =
@@ -82,22 +87,17 @@ export default async function EditProblemPage({
   return (
     <div>
       <div className="mb-4 text-sm">
-        <Link
-          href="/admin/problems"
-          className="text-muted-foreground hover:underline"
-        >
-          ← Есептер
-        </Link>
+        <ProblemBackLink />
       </div>
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Есепті өңдеу</h1>
+        <EditProblemHeading />
         <DeleteProblemButton action={remove} />
       </div>
       <ProblemForm
         action={update}
         topics={topics}
         initial={initial}
-        submitLabel="Сақтау"
+        submitLabelKey="submit_save"
       />
     </div>
   );

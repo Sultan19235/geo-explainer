@@ -1,18 +1,20 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
   teacherHasGradeAccess,
   type TeacherAccessRow,
 } from "@/lib/teacher-access";
-import { TopicListClient, type GradeTopicListItem } from "./topic-list-client";
+import { GradeDetailClient } from "./grade-detail-client";
+import type { GradeTopicListItem } from "./topic-list-client";
 
 type TopicRow = {
   id: string;
   grade_id: number;
   slug: string;
   name_kz: string;
+  name_ru: string | null;
   description_kz: string | null;
+  description_ru: string | null;
   is_free_sample: boolean;
 };
 
@@ -40,7 +42,9 @@ export default async function GradeTopicsPage({
   const [{ data: topics, error }, { data: teacher }] = await Promise.all([
     supabase
       .from("topics")
-      .select("id, grade_id, slug, name_kz, description_kz, is_free_sample")
+      .select(
+        "id, grade_id, slug, name_kz, name_ru, description_kz, description_ru, is_free_sample",
+      )
       .eq("grade_id", gradeId)
       .eq("is_published", true)
       .order("display_order", { ascending: true })
@@ -61,44 +65,19 @@ export default async function GradeTopicsPage({
     gradeId,
     slug: topic.slug,
     name_kz: topic.name_kz,
+    name_ru: topic.name_ru,
     description_kz: topic.description_kz,
+    description_ru: topic.description_ru,
     is_free_sample: topic.is_free_sample,
     isAccessible: topic.is_free_sample || hasGradeAccess,
   }));
 
   return (
-    <main className="min-h-screen bg-muted/30 px-6 py-10">
-      <div className="mx-auto max-w-4xl">
-        <Link
-          href="/grades"
-          className="text-sm text-muted-foreground hover:underline"
-        >
-          ← Сыныптар
-        </Link>
-
-        <div className="mt-4 mb-8">
-          <h1 className="text-3xl font-semibold tracking-tight">
-            {gradeId}-сынып
-          </h1>
-          <p className="mt-2 text-muted-foreground">
-            Жарияланған тақырыптар тізімі.
-          </p>
-        </div>
-
-        {query.access === "required" && (
-          <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Кіру қажет — әкімшіге хабарласыңыз.
-          </div>
-        )}
-
-        {error ? (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            Тақырыптарды жүктеу қатесі: {error.message}
-          </div>
-        ) : (
-          <TopicListClient topics={items} />
-        )}
-      </div>
-    </main>
+    <GradeDetailClient
+      gradeId={gradeId}
+      topics={items}
+      errorMessage={error?.message ?? null}
+      accessRequired={query.access === "required"}
+    />
   );
 }

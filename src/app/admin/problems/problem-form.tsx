@@ -5,10 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useT } from "@/lib/i18n/context";
 
 export type TopicOption = {
   id: string;
   name_kz: string;
+  name_ru: string | null;
   grade: number;
 };
 
@@ -29,10 +31,16 @@ type Props = {
   action: (formData: FormData) => Promise<void>;
   topics: TopicOption[];
   initial?: ProblemFormValues;
-  submitLabel: string;
+  submitLabelKey: "submit_create" | "submit_save";
 };
 
-export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
+export function ProblemForm({
+  action,
+  topics,
+  initial,
+  submitLabelKey,
+}: Props) {
+  const { t, lang } = useT();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -46,7 +54,7 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
           if (e.message === "NEXT_REDIRECT") throw e;
           setError(e.message);
         } else {
-          setError("Белгісіз қате.");
+          setError(t("unknown_error"));
         }
       }
     });
@@ -55,7 +63,7 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
   return (
     <form action={handleSubmit} className="max-w-2xl space-y-5">
       <div className="space-y-2">
-        <Label htmlFor="topic_id">Тақырып</Label>
+        <Label htmlFor="topic_id">{t("field_topic")}</Label>
         <select
           id="topic_id"
           name="topic_id"
@@ -64,18 +72,19 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
           className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
         >
           <option value="" disabled>
-            Таңдаңыз
+            {t("field_grade_choose")}
           </option>
-          {topics.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.grade}-сынып — {t.name_kz}
+          {topics.map((topic) => (
+            <option key={topic.id} value={topic.id}>
+              {t("grade_label")(topic.grade)} —{" "}
+              {lang === "ru" ? topic.name_ru ?? topic.name_kz : topic.name_kz}
             </option>
           ))}
         </select>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="number">Нөмір</Label>
+        <Label htmlFor="number">{t("field_number")}</Label>
         <Input
           id="number"
           name="number"
@@ -86,7 +95,7 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="title_kz">Тақырыбы (қаз)</Label>
+        <Label htmlFor="title_kz">{t("field_title_kz")}</Label>
         <Input
           id="title_kz"
           name="title_kz"
@@ -96,7 +105,7 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="title_ru">Тақырыбы (орыс)</Label>
+        <Label htmlFor="title_ru">{t("field_title_ru")}</Label>
         <Input
           id="title_ru"
           name="title_ru"
@@ -105,7 +114,7 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label>Қиындық</Label>
+        <Label>{t("field_difficulty")}</Label>
         <div className="flex gap-4">
           {(["easy", "med", "hard"] as const).map((d) => (
             <label key={d} className="flex items-center gap-2 text-sm">
@@ -116,14 +125,18 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
                 defaultChecked={(initial?.difficulty ?? "easy") === d}
                 required
               />
-              {d === "easy" ? "Жеңіл" : d === "med" ? "Орташа" : "Қиын"}
+              {d === "easy"
+                ? t("difficulty_easy")
+                : d === "med"
+                  ? t("difficulty_med")
+                  : t("difficulty_hard")}
             </label>
           ))}
         </div>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="tags_kz">Тегтер (қаз) — үтірмен бөліңіз</Label>
+        <Label htmlFor="tags_kz">{t("field_tags_kz")}</Label>
         <Input
           id="tags_kz"
           name="tags_kz"
@@ -133,7 +146,7 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="tags_ru">Тегтер (орыс) — үтірмен бөліңіз</Label>
+        <Label htmlFor="tags_ru">{t("field_tags_ru")}</Label>
         <Input
           id="tags_ru"
           name="tags_ru"
@@ -143,7 +156,7 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="display_order">Реттік нөмір</Label>
+        <Label htmlFor="display_order">{t("field_display_order")}</Label>
         <Input
           id="display_order"
           name="display_order"
@@ -158,11 +171,11 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
           name="is_ready"
           defaultChecked={initial?.is_ready ?? false}
         />
-        <Label htmlFor="is_ready">Дайын</Label>
+        <Label htmlFor="is_ready">{t("field_is_ready")}</Label>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="problem_file">Есеп HTML файлы (қажет болса)</Label>
+        <Label htmlFor="problem_file">{t("field_problem_file")}</Label>
         <Input
           id="problem_file"
           name="problem_file"
@@ -171,7 +184,7 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
         />
         {initial?.problem_html_path && (
           <p className="text-xs text-muted-foreground">
-            Қазіргі файл: {initial.problem_html_path}
+            {t("current_file")}: {initial.problem_html_path}
           </p>
         )}
       </div>
@@ -179,7 +192,7 @@ export function ProblemForm({ action, topics, initial, submitLabel }: Props) {
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Button type="submit" disabled={isPending}>
-        {isPending ? "Сақталуда..." : submitLabel}
+        {isPending ? t("submit_saving") : t(submitLabelKey)}
       </Button>
     </form>
   );

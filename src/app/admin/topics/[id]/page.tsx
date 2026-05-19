@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -7,6 +6,10 @@ import {
   type GradeOption,
   type TopicFormValues,
 } from "../topic-form";
+import {
+  EditTopicHeading,
+  TopicBackLink,
+} from "../topic-back-link";
 import { updateTopicAction, deleteTopicAction } from "../actions";
 import { DeleteTopicButton } from "./delete-button";
 
@@ -64,22 +67,17 @@ export default async function EditTopicPage({
   return (
     <div>
       <div className="mb-4 text-sm">
-        <Link
-          href="/admin/topics"
-          className="text-muted-foreground hover:underline"
-        >
-          ← Тақырыптар
-        </Link>
+        <TopicBackLink />
       </div>
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Тақырыпты өңдеу</h1>
+        <EditTopicHeading />
         <DeleteTopicButton action={remove} />
       </div>
       <TopicForm
         action={update}
         grades={grades ?? []}
         initial={initial}
-        submitLabel="Сақтау"
+        submitLabelKey="submit_save"
       />
     </div>
   );

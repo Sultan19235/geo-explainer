@@ -1,8 +1,7 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { DashboardClient } from "./dashboard-client";
 
 async function logout() {
   "use server";
@@ -31,28 +30,10 @@ export default async function DashboardPage() {
   const isAdmin = !!teacher?.is_admin;
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
-      <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-        Сәлеметсіз бе, {user.email}
-      </h1>
-      <div className="flex flex-col items-center gap-3">
-        <Link
-          href="/grades"
-          className={buttonVariants({ variant: "outline" })}
-        >
-          Менің сабақтарым
-        </Link>
-        {isAdmin && (
-          <Link href="/admin/topics" className={buttonVariants()}>
-            Әкімші панелі
-          </Link>
-        )}
-        <form action={logout}>
-          <Button type="submit" variant="outline">
-            Шығу
-          </Button>
-        </form>
-      </div>
-    </main>
+    <DashboardClient
+      email={user.email ?? ""}
+      isAdmin={isAdmin}
+      logoutAction={logout}
+    />
   );
 }

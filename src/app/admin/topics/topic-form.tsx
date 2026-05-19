@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useT } from "@/lib/i18n/context";
 
 export type GradeOption = { id: number };
 
@@ -26,10 +27,11 @@ type Props = {
   action: (formData: FormData) => Promise<void>;
   grades: GradeOption[];
   initial?: TopicFormValues;
-  submitLabel: string;
+  submitLabelKey: "submit_create" | "submit_save";
 };
 
-export function TopicForm({ action, grades, initial, submitLabel }: Props) {
+export function TopicForm({ action, grades, initial, submitLabelKey }: Props) {
+  const { t } = useT();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -40,11 +42,10 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
         await action(formData);
       } catch (e) {
         if (e instanceof Error) {
-          // NEXT_REDIRECT is thrown by redirect() in server actions — let it bubble.
           if (e.message === "NEXT_REDIRECT") throw e;
           setError(e.message);
         } else {
-          setError("Белгісіз қате.");
+          setError(t("unknown_error"));
         }
       }
     });
@@ -53,7 +54,7 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
   return (
     <form action={handleSubmit} className="max-w-2xl space-y-5">
       <div className="space-y-2">
-        <Label htmlFor="grade_id">Сынып</Label>
+        <Label htmlFor="grade_id">{t("field_grade")}</Label>
         <select
           id="grade_id"
           name="grade_id"
@@ -62,18 +63,18 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
           className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
         >
           <option value="" disabled>
-            Таңдаңыз
+            {t("field_grade_choose")}
           </option>
           {grades.map((g) => (
             <option key={g.id} value={g.id}>
-              {g.id}-сынып
+              {t("grade_label")(g.id)}
             </option>
           ))}
         </select>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="slug">Slug</Label>
+        <Label htmlFor="slug">{t("field_slug")}</Label>
         <Input
           id="slug"
           name="slug"
@@ -84,7 +85,7 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="name_kz">Атау (қаз)</Label>
+        <Label htmlFor="name_kz">{t("field_name_kz")}</Label>
         <Input
           id="name_kz"
           name="name_kz"
@@ -94,7 +95,7 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="name_ru">Атау (орыс)</Label>
+        <Label htmlFor="name_ru">{t("field_name_ru")}</Label>
         <Input
           id="name_ru"
           name="name_ru"
@@ -103,7 +104,7 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="description_kz">Сипаттама (қаз)</Label>
+        <Label htmlFor="description_kz">{t("field_description_kz")}</Label>
         <Textarea
           id="description_kz"
           name="description_kz"
@@ -113,7 +114,7 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="description_ru">Сипаттама (орыс)</Label>
+        <Label htmlFor="description_ru">{t("field_description_ru")}</Label>
         <Textarea
           id="description_ru"
           name="description_ru"
@@ -123,7 +124,7 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="display_order">Реттік нөмір</Label>
+        <Label htmlFor="display_order">{t("field_display_order")}</Label>
         <Input
           id="display_order"
           name="display_order"
@@ -138,7 +139,7 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
           name="is_published"
           defaultChecked={initial?.is_published ?? false}
         />
-        <Label htmlFor="is_published">Жарияланған</Label>
+        <Label htmlFor="is_published">{t("field_is_published")}</Label>
       </div>
 
       <div className="flex items-center gap-2">
@@ -147,11 +148,11 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
           name="is_free_sample"
           defaultChecked={initial?.is_free_sample ?? false}
         />
-        <Label htmlFor="is_free_sample">Тегін үлгі</Label>
+        <Label htmlFor="is_free_sample">{t("field_is_free_sample")}</Label>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="theory_file">Теория HTML файлы</Label>
+        <Label htmlFor="theory_file">{t("field_theory_file")}</Label>
         <Input
           id="theory_file"
           name="theory_file"
@@ -160,7 +161,7 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
         />
         {initial?.theory_html_path && (
           <p className="text-xs text-muted-foreground">
-            Қазіргі файл: {initial.theory_html_path}
+            {t("current_file")}: {initial.theory_html_path}
           </p>
         )}
       </div>
@@ -168,7 +169,7 @@ export function TopicForm({ action, grades, initial, submitLabel }: Props) {
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Button type="submit" disabled={isPending}>
-        {isPending ? "Сақталуда..." : submitLabel}
+        {isPending ? t("submit_saving") : t(submitLabelKey)}
       </Button>
     </form>
   );

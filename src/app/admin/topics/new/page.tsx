@@ -1,7 +1,10 @@
-import Link from "next/link";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TopicForm, type GradeOption } from "../topic-form";
+import {
+  NewTopicHeading,
+  TopicBackLink,
+} from "../topic-back-link";
 import { createTopicAction } from "../actions";
 
 export default async function NewTopicPage() {
@@ -17,15 +20,13 @@ export default async function NewTopicPage() {
   return (
     <div>
       <div className="mb-4 text-sm">
-        <Link href="/admin/topics" className="text-muted-foreground hover:underline">
-          ← Тақырыптар
-        </Link>
+        <TopicBackLink />
       </div>
-      <h1 className="mb-6 text-2xl font-semibold">Жаңа тақырып</h1>
+      <NewTopicHeading />
       <TopicForm
         action={createTopicAction}
         grades={grades ?? []}
-        submitLabel="Құру"
+        submitLabelKey="submit_create"
       />
     </div>
   );
