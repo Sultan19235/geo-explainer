@@ -45,6 +45,14 @@ export type Problem = {
   signed_url: string | null;
 };
 
+export type Quiz = {
+  id: string;
+  title_kz: string;
+  title_ru: string | null;
+  // Same-origin proxy URL for the teacher console, or null if no file / not ready.
+  signed_url: string | null;
+};
+
 type Topic = {
   gradeId: number;
   slug: string;
@@ -58,6 +66,7 @@ type TopicPageClientProps = {
   topic: Topic;
   theoryUrl: string | null;
   problems: Problem[];
+  quizzes: Quiz[];
 };
 
 type DifficultyFilter = "all" | Difficulty;
@@ -107,6 +116,7 @@ export function TopicPageClient({
   topic,
   theoryUrl,
   problems,
+  quizzes,
 }: TopicPageClientProps) {
   const { lang } = useT();
   const [bankOpen, setBankOpen] = useState(false);
@@ -303,6 +313,8 @@ export function TopicPageClient({
             onReorder={reorderPicked}
           />
         </section>
+
+        <QuizSection quizzes={quizzes} lang={lang} />
       </main>
 
       {!activeProblem && (
@@ -391,6 +403,46 @@ function TheoryCard({
         </div>
       )}
     </section>
+  );
+}
+
+function QuizSection({ quizzes, lang }: { quizzes: Quiz[]; lang: Lang }) {
+  const { t } = useT();
+
+  // Only quizzes with a usable teacher console are shown — no empty cards.
+  const usable = quizzes.filter((quiz) => Boolean(quiz.signed_url));
+  if (usable.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 flex flex-col gap-4">
+      {usable.map((quiz) => {
+        const title = lang === "ru" ? quiz.title_ru ?? quiz.title_kz : quiz.title_kz;
+        return (
+          <section
+            key={quiz.id}
+            className="overflow-hidden rounded-xl border-[1.5px] border-[#d8dde5] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+          >
+            <div className="flex min-h-12 items-center gap-3 border-b-[1.5px] border-[#d8dde5] px-[18px] py-[11px]">
+              <span className="inline-flex items-center rounded bg-[#eff6ff] px-[9px] py-[3px] text-[10.5px] font-bold uppercase tracking-[0.05em] text-[#2563eb]">
+                {t("quiz_badge")}
+              </span>
+              <h2 className="truncate text-sm font-semibold text-[#1a1a2e]">
+                {title}
+              </h2>
+            </div>
+            <IframeWithLoader
+              key={`quiz:${quiz.id}:${lang}`}
+              src={appendLang(quiz.signed_url, lang) ?? undefined}
+              title={title}
+              sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+              className="block h-[640px] w-full border-0 bg-white md:h-[760px]"
+            />
+          </section>
+        );
+      })}
+    </div>
   );
 }
 

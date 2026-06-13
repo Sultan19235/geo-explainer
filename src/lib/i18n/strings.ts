@@ -70,6 +70,7 @@ export const STRINGS = {
     // Topic page
     topic_home_button: "Басты бет",
     theory_badge: "Теория",
+    quiz_badge: "Тест",
     theory_heading_suffix: "— теория және формулалар",
     theory_not_uploaded: "Теория файлы әлі жүктелмеген.",
     bank_button: "Есептер банкы",
@@ -265,6 +266,7 @@ export const STRINGS = {
     // Topic page
     topic_home_button: "Главная",
     theory_badge: "Теория",
+    quiz_badge: "Тест",
     theory_heading_suffix: "— теория и формулы",
     theory_not_uploaded: "Файл теории ещё не загружен.",
     bank_button: "Банк задач",

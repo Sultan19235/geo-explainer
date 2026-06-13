@@ -5,7 +5,11 @@ import {
   teacherHasGradeAccess,
   type TeacherAccessRow,
 } from "@/lib/teacher-access";
-import { TopicPageClient, type Problem } from "./topic-page-client";
+import {
+  TopicPageClient,
+  type Problem,
+  type Quiz,
+} from "./topic-page-client";
 
 const BUCKET = "lessons";
 const VALID_GRADES = new Set([7, 8, 9, 10, 11]);
@@ -37,6 +41,15 @@ type ProblemRow = {
   display_order: number;
   is_ready: boolean;
   problem_html_path: string | null;
+};
+
+type QuizRow = {
+  id: string;
+  title_kz: string;
+  title_ru: string | null;
+  display_order: number;
+  is_ready: boolean;
+  teacher_html_path: string | null;
 };
 
 async function createSignedUrl(path: string | null) {
@@ -118,7 +131,20 @@ export default async function TopicPage({
     throw new Error(`Есептерді жүктеу қатесі: ${problemsError.message}`);
   }
 
-  const [theorySignedUrl, problems] = await Promise.all([
+  // Quizzes embed below problems on this (already gated) page. Only ready
+  // quizzes with a teacher file are fetched; each is signed and proxied like
+  // theory/problems. A missing quizzes table (migration not yet run) is
+  // tolerated — we just render no quiz section rather than crashing the page.
+  const { data: quizRows } = await supabase
+    .from("quizzes")
+    .select("id, title_kz, title_ru, display_order, is_ready, teacher_html_path")
+    .eq("topic_id", topic.id)
+    .eq("is_ready", true)
+    .not("teacher_html_path", "is", null)
+    .order("display_order", { ascending: true })
+    .returns<QuizRow[]>();
+
+  const [theorySignedUrl, problems, quizzes] = await Promise.all([
     createSignedUrl(topic.theory_html_path),
     Promise.all(
       (problemRows ?? []).map(async (problem): Promise<Problem> => {
@@ -141,6 +167,20 @@ export default async function TopicPage({
         };
       }),
     ),
+    Promise.all(
+      (quizRows ?? []).map(async (quiz): Promise<Quiz> => {
+        const signedUrl = quiz.teacher_html_path
+          ? await createSignedUrl(quiz.teacher_html_path)
+          : null;
+
+        return {
+          id: quiz.id,
+          title_kz: quiz.title_kz,
+          title_ru: quiz.title_ru,
+          signed_url: createLessonHtmlFrameUrl(signedUrl),
+        };
+      }),
+    ),
   ]);
 
   return (
@@ -155,6 +195,7 @@ export default async function TopicPage({
       }}
       theoryUrl={createLessonHtmlFrameUrl(theorySignedUrl)}
       problems={problems}
+      quizzes={quizzes}
     />
   );
 }
