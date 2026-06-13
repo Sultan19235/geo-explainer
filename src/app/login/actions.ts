@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { ensureTeacherProfile } from "@/lib/auth/ensure-teacher-profile";
 
 export async function login(
   _prevState: { error?: string } | undefined,
@@ -16,10 +17,20 @@ export async function login(
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
   if (error) {
     return { error: error.message };
+  }
+
+  // Self-heal: guarantee a teachers profile exists on every login. This is the
+  // backstop for any row that failed to write at signup time. Best-effort —
+  // don't block sign-in if it fails.
+  if (data.user) {
+    await ensureTeacherProfile(data.user.id);
   }
 
   revalidatePath("/", "layout");

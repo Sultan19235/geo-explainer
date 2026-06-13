@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { ensureTeacherProfile } from "@/lib/auth/ensure-teacher-profile";
 
 export async function signup(
   _prevState: { error?: string } | undefined,
@@ -23,10 +24,17 @@ export async function signup(
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({ email, password });
 
   if (error) {
     return { error: error.message };
+  }
+
+  // Best-effort: create the teachers profile now. If it fails, the user's next
+  // login repairs it (see ensureTeacherProfile + login action), so we don't
+  // block signup on it.
+  if (data.user) {
+    await ensureTeacherProfile(data.user.id);
   }
 
   revalidatePath("/", "layout");
