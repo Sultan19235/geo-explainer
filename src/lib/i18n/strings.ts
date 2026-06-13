@@ -103,6 +103,7 @@ export const STRINGS = {
     admin_section: "Әкімші",
     admin_nav_topics: "Тақырыптар",
     admin_nav_problems: "Есептер",
+    admin_nav_quizzes: "Тесттер",
     admin_nav_teachers: "Мұғалімдер",
     admin_back_home: "← Басты бет",
 
@@ -173,6 +174,21 @@ export const STRINGS = {
     field_tags_ru: "Тегтер (орыс) — үтірмен бөліңіз",
     field_is_ready: "Дайын",
     field_problem_file: "Есеп HTML файлы (қажет болса)",
+
+    // Admin: quizzes
+    quizzes_title: "Тесттер",
+    quizzes_new: "+ Жаңа тест",
+    quizzes_none: "Әзірге тест жоқ.",
+    quizzes_table_title: "Атауы",
+    quizzes_table_teacher_file: "Мұғалім файлы",
+    quizzes_table_student_file: "Оқушы файлы",
+    new_quiz_title: "Жаңа тест",
+    edit_quiz_title: "Тестті өңдеу",
+    back_to_quizzes: "← Тесттер",
+    field_quiz_teacher_file: "Мұғалім HTML файлы",
+    field_quiz_student_file: "Оқушы HTML файлы (қажет болса)",
+    delete_quiz_confirm:
+      "Осы тестті жою керек пе? Бұл әрекетті қайтару мүмкін емес.",
 
     // Teachers stub
     teachers_stub: "Кейінірек қосылады",
@@ -282,6 +298,7 @@ export const STRINGS = {
     admin_section: "Администратор",
     admin_nav_topics: "Темы",
     admin_nav_problems: "Задачи",
+    admin_nav_quizzes: "Тесты",
     admin_nav_teachers: "Учителя",
     admin_back_home: "← Главная",
 
@@ -352,6 +369,21 @@ export const STRINGS = {
     field_tags_ru: "Теги (рус) — через запятую",
     field_is_ready: "Готова",
     field_problem_file: "HTML файл задачи (если нужен)",
+
+    // Admin: quizzes
+    quizzes_title: "Тесты",
+    quizzes_new: "+ Новый тест",
+    quizzes_none: "Пока нет тестов.",
+    quizzes_table_title: "Название",
+    quizzes_table_teacher_file: "Файл учителя",
+    quizzes_table_student_file: "Файл ученика",
+    new_quiz_title: "Новый тест",
+    edit_quiz_title: "Редактировать тест",
+    back_to_quizzes: "← Тесты",
+    field_quiz_teacher_file: "HTML файл учителя",
+    field_quiz_student_file: "HTML файл ученика (если нужен)",
+    delete_quiz_confirm:
+      "Удалить этот тест? Это действие необратимо.",
 
     // Teachers stub
     teachers_stub: "Будет добавлено позже",
