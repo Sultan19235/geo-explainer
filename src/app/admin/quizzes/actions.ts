@@ -19,6 +19,22 @@ function studentPath(quizId: string) {
   return `quiz/${quizId}/student.html`;
 }
 
+// The public URL students open by QR. Points at our own /play/q/<id> route
+// (which serves the student file as real text/html — Supabase's public bucket
+// serves stored .html as text/plain). The teacher console's STUDENT_URL is
+// rewritten to this on upload so the QR always points at this quiz's own
+// student page (the author can't know the quiz id ahead of time). Absolute
+// because students scan it externally on phones.
+function studentPageUrl(quizId: string): string {
+  const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "");
+  if (!base) {
+    throw new Error(
+      "NEXT_PUBLIC_SITE_URL is not set — cannot build the student QR URL.",
+    );
+  }
+  return `${base}/play/q/${quizId}`;
+}
+
 function getCheckbox(formData: FormData, name: string): boolean {
   const v = formData.get(name);
   return v === "on" || v === "true";
@@ -34,21 +50,41 @@ function getOptionalString(formData: FormData, name: string): string | null {
   return v === "" ? null : v;
 }
 
-async function uploadHtml(
-  bucket: string,
-  path: string,
-  file: File,
-): Promise<void> {
+async function uploadBlob(bucket: string, path: string, blob: Blob) {
   const admin = createAdminClient();
-  const arrayBuffer = await file.arrayBuffer();
-  const body = new Blob([arrayBuffer], { type: HTML_CONTENT_TYPE });
-  const { error } = await admin.storage.from(bucket).upload(path, body, {
+  const { error } = await admin.storage.from(bucket).upload(path, blob, {
     contentType: HTML_CONTENT_TYPE,
     upsert: true,
   });
   if (error) {
     throw new Error(`Файлды жүктеу қатесі: ${error.message}`);
   }
+}
+
+async function uploadStudentFile(quizId: string, file: File): Promise<void> {
+  const arrayBuffer = await file.arrayBuffer();
+  await uploadBlob(
+    STUDENT_BUCKET,
+    studentPath(quizId),
+    new Blob([arrayBuffer], { type: HTML_CONTENT_TYPE }),
+  );
+}
+
+// Uploads the teacher console, rewriting its `const STUDENT_URL = '...'` line to
+// this quiz's student public URL so the embedded console's QR resolves. If the
+// file has no STUDENT_URL line, it's uploaded unchanged.
+async function uploadTeacherFile(quizId: string, file: File): Promise<void> {
+  const original = await file.text();
+  const target = studentPageUrl(quizId);
+  const rewritten = original.replace(
+    /(const\s+STUDENT_URL\s*=\s*)(['"])(?:\\.|(?!\2).)*\2/,
+    `$1$2${target}$2`,
+  );
+  await uploadBlob(
+    TEACHER_BUCKET,
+    teacherPath(quizId),
+    new Blob([rewritten], { type: HTML_CONTENT_TYPE }),
+  );
 }
 
 export async function createQuizAction(formData: FormData) {
@@ -82,15 +118,15 @@ export async function createQuizAction(formData: FormData) {
   }
 
   const update: { teacher_html_path?: string; student_html_path?: string } = {};
-  if (hasTeacher) {
-    const path = teacherPath(inserted.id);
-    await uploadHtml(TEACHER_BUCKET, path, teacherFile as File);
-    update.teacher_html_path = path;
-  }
+  // Upload the student file first so its public URL exists before the teacher
+  // file's STUDENT_URL is rewritten to point at it.
   if (hasStudent) {
-    const path = studentPath(inserted.id);
-    await uploadHtml(STUDENT_BUCKET, path, studentFile as File);
-    update.student_html_path = path;
+    await uploadStudentFile(inserted.id, studentFile as File);
+    update.student_html_path = studentPath(inserted.id);
+  }
+  if (hasTeacher) {
+    await uploadTeacherFile(inserted.id, teacherFile as File);
+    update.teacher_html_path = teacherPath(inserted.id);
   }
 
   if (Object.keys(update).length > 0) {
@@ -136,16 +172,16 @@ export async function updateQuizAction(id: string, formData: FormData) {
     student_html_path?: string;
   } = { topic_id, title_kz, title_ru, display_order, is_ready };
 
-  if (hasTeacher) {
-    const path = teacherPath(id);
-    await uploadHtml(TEACHER_BUCKET, path, teacherFile as File);
-    update.teacher_html_path = path;
-    update.is_ready = true;
-  }
+  // Student first, so the teacher file's STUDENT_URL is rewritten to point at
+  // the up-to-date student public URL.
   if (hasStudent) {
-    const path = studentPath(id);
-    await uploadHtml(STUDENT_BUCKET, path, studentFile as File);
-    update.student_html_path = path;
+    await uploadStudentFile(id, studentFile as File);
+    update.student_html_path = studentPath(id);
+  }
+  if (hasTeacher) {
+    await uploadTeacherFile(id, teacherFile as File);
+    update.teacher_html_path = teacherPath(id);
+    update.is_ready = true;
   }
 
   const { error } = await admin.from("quizzes").update(update).eq("id", id);
