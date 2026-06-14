@@ -436,7 +436,7 @@ function QuizSection({ quizzes, lang }: { quizzes: Quiz[]; lang: Lang }) {
               key={`quiz:${quiz.id}:${lang}`}
               src={appendLang(quiz.signed_url, lang) ?? undefined}
               title={title}
-              sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+              sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-modals"
               className="block h-[640px] w-full border-0 bg-white md:h-[760px]"
             />
           </section>
