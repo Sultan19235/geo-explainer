@@ -53,6 +53,26 @@ export const STRINGS = {
     dashboard_my_lessons: "Менің сабақтарым",
     dashboard_admin_panel: "Әкімші панелі",
 
+    // Profile
+    profile_title: "Профиль",
+    profile_account: "Аккаунт",
+    profile_name: "Аты-жөні",
+    profile_email: "Электрондық пошта",
+    profile_phone: "Телефон",
+    profile_member_since: "Тіркелген күні",
+    profile_not_set: "—",
+    profile_purchased_grades: "Сатып алынған сыныптар",
+    profile_purchased_subtitle: "Сізге қолжетімді сыныптар.",
+    profile_no_grades: "Әзірге сатып алынған сынып жоқ.",
+    profile_no_grades_hint: "Сынып ашу үшін әкімшіге хабарласыңыз.",
+    profile_open_grade: "Ашу",
+    profile_browse_catalog: "Барлық сыныптарды қарау",
+    profile_access_unlimited: "Мерзімсіз қолжетімділік",
+    profile_access_until: (date: string) => `${date} дейін қолжетімді`,
+    profile_access_expired: (date: string) => `Мерзімі бітті: ${date}`,
+    profile_status_active: "Белсенді",
+    profile_status_expired: "Мерзімі бітті",
+
     // Grades catalog
     grades_title: "Сабақтар каталогы",
     grades_subtitle: "Сыныпты таңдаңыз және жарияланған тақырыптарды қараңыз.",
@@ -263,6 +283,26 @@ export const STRINGS = {
     dashboard_greeting: "Здравствуйте",
     dashboard_my_lessons: "Мои уроки",
     dashboard_admin_panel: "Панель администратора",
+
+    // Profile
+    profile_title: "Профиль",
+    profile_account: "Аккаунт",
+    profile_name: "Имя",
+    profile_email: "Электронная почта",
+    profile_phone: "Телефон",
+    profile_member_since: "Дата регистрации",
+    profile_not_set: "—",
+    profile_purchased_grades: "Купленные классы",
+    profile_purchased_subtitle: "Классы, доступные вам.",
+    profile_no_grades: "Пока нет купленных классов.",
+    profile_no_grades_hint: "Чтобы открыть класс, обратитесь к администратору.",
+    profile_open_grade: "Открыть",
+    profile_browse_catalog: "Смотреть все классы",
+    profile_access_unlimited: "Бессрочный доступ",
+    profile_access_until: (date: string) => `Доступ до ${date}`,
+    profile_access_expired: (date: string) => `Срок истёк: ${date}`,
+    profile_status_active: "Активен",
+    profile_status_expired: "Срок истёк",
 
     // Grades catalog
     grades_title: "Каталог уроков",
