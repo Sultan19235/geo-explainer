@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useActionState } from "react";
 import { signup } from "./actions";
+import { GoogleButton } from "@/app/auth/google-button";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import {
@@ -67,19 +68,27 @@ export default function SignupPage() {
               {state?.error ? (
                 <p className="text-sm text-destructive">{state.error}</p>
               ) : null}
-            </CardContent>
-            <CardFooter className="mt-4 flex flex-col gap-3">
-              <Button type="submit" className="w-full" disabled={pending}>
+              <Button type="submit" className="mt-2 w-full" disabled={pending}>
                 {pending ? t("signup_pending") : t("signup_button")}
               </Button>
-              <p className="text-sm text-muted-foreground">
-                {t("have_account")}{" "}
-                <Link href="/login" className="underline">
-                  {t("login_button")}
-                </Link>
-              </p>
-            </CardFooter>
+            </CardContent>
           </form>
+          <CardFooter className="mt-4 flex flex-col gap-4">
+            <div className="flex w-full items-center gap-3">
+              <span className="h-px flex-1 bg-border" />
+              <span className="text-xs text-muted-foreground uppercase">
+                {t("or_divider")}
+              </span>
+              <span className="h-px flex-1 bg-border" />
+            </div>
+            <GoogleButton />
+            <p className="text-sm text-muted-foreground">
+              {t("have_account")}{" "}
+              <Link href="/login" className="underline">
+                {t("login_button")}
+              </Link>
+            </p>
+          </CardFooter>
         </Card>
       </main>
     </div>
