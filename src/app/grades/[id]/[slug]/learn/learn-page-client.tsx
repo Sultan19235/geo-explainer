@@ -1,9 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import {
-  ArrowLeftIcon,
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -13,7 +11,6 @@ import {
   SearchIcon,
   XIcon,
 } from "lucide-react";
-import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,6 +25,7 @@ import { useT } from "@/lib/i18n/context";
 import type { Lang } from "@/lib/i18n/strings";
 import { cn } from "@/lib/utils";
 import { IframeWithLoader } from "@/components/iframe-with-loader";
+import { LessonHeader } from "../lesson-header";
 
 export type Difficulty = "easy" | "med" | "hard";
 
@@ -45,14 +43,6 @@ export type Problem = {
   signed_url: string | null;
 };
 
-export type Quiz = {
-  id: string;
-  title_kz: string;
-  title_ru: string | null;
-  // Same-origin proxy URL for the teacher console, or null if no file / not ready.
-  signed_url: string | null;
-};
-
 type Topic = {
   gradeId: number;
   slug: string;
@@ -62,11 +52,10 @@ type Topic = {
   description_ru: string | null;
 };
 
-type TopicPageClientProps = {
+type LearnPageClientProps = {
   topic: Topic;
   theoryUrl: string | null;
   problems: Problem[];
-  quizzes: Quiz[];
 };
 
 type DifficultyFilter = "all" | Difficulty;
@@ -112,13 +101,12 @@ function isUsableProblem(problem: Problem) {
   return problem.is_ready && Boolean(problem.signed_url);
 }
 
-export function TopicPageClient({
+export function LearnPageClient({
   topic,
   theoryUrl,
   problems,
-  quizzes,
-}: TopicPageClientProps) {
-  const { lang } = useT();
+}: LearnPageClientProps) {
+  const { t, lang } = useT();
   const [bankOpen, setBankOpen] = useState(false);
   const [pickedIds, setPickedIds] = useState<string[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -286,7 +274,12 @@ export function TopicPageClient({
 
   return (
     <div className="min-h-screen bg-[#f8f9fb] text-[#1a1a2e]">
-      <AppHeader topic={topic} localizedName={localizedTopicName} />
+      <LessonHeader
+        gradeId={topic.gradeId}
+        localizedName={localizedTopicName}
+        backHref={`/grades/${topic.gradeId}/${topic.slug}`}
+        backLabel={t("hub_back_to_lesson")}
+      />
 
       <main className="w-full px-4 py-3">
         <TheoryCard
@@ -313,8 +306,6 @@ export function TopicPageClient({
             onReorder={reorderPicked}
           />
         </section>
-
-        <QuizSection quizzes={quizzes} lang={lang} />
       </main>
 
       {!activeProblem && (
@@ -333,38 +324,6 @@ export function TopicPageClient({
         onUse={usePlaylist}
       />
     </div>
-  );
-}
-
-function AppHeader({
-  topic,
-  localizedName,
-}: {
-  topic: Topic;
-  localizedName: string;
-}) {
-  const { t } = useT();
-  return (
-    <header className="sticky top-0 z-30 flex min-h-[54px] items-center justify-between gap-3 border-b-[1.5px] border-[#d8dde5] bg-white px-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-      <div className="flex min-w-0 items-center gap-3">
-        <Link
-          href={`/grades/${topic.gradeId}`}
-          className="inline-flex items-center gap-1.5 rounded-md border-[1.5px] border-[#d8dde5] bg-transparent px-3 py-1.5 text-[13px] font-medium text-[#6b7280] transition-colors hover:border-[#c5cad3] hover:bg-[#f1f3f7] hover:text-[#1a1a2e]"
-        >
-          <ArrowLeftIcon className="size-3.5" />
-          <span>{t("topic_home_button")}</span>
-        </Link>
-        <div className="min-w-0">
-          <h1 className="truncate text-base font-bold leading-tight text-[#1a1a2e]">
-            {localizedName}
-          </h1>
-          <p className="mt-0.5 truncate text-xs font-medium text-[#6b7280]">
-            {t("grade_label")(topic.gradeId)}
-          </p>
-        </div>
-      </div>
-      <LanguageToggle />
-    </header>
   );
 }
 
@@ -403,46 +362,6 @@ function TheoryCard({
         </div>
       )}
     </section>
-  );
-}
-
-function QuizSection({ quizzes, lang }: { quizzes: Quiz[]; lang: Lang }) {
-  const { t } = useT();
-
-  // Only quizzes with a usable teacher console are shown — no empty cards.
-  const usable = quizzes.filter((quiz) => Boolean(quiz.signed_url));
-  if (usable.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="mt-4 flex flex-col gap-4">
-      {usable.map((quiz) => {
-        const title = lang === "ru" ? quiz.title_ru ?? quiz.title_kz : quiz.title_kz;
-        return (
-          <section
-            key={quiz.id}
-            className="overflow-hidden rounded-xl border-[1.5px] border-[#d8dde5] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
-          >
-            <div className="flex min-h-12 items-center gap-3 border-b-[1.5px] border-[#d8dde5] px-[18px] py-[11px]">
-              <span className="inline-flex items-center rounded bg-[#eff6ff] px-[9px] py-[3px] text-[10.5px] font-bold uppercase tracking-[0.05em] text-[#2563eb]">
-                {t("quiz_badge")}
-              </span>
-              <h2 className="truncate text-sm font-semibold text-[#1a1a2e]">
-                {title}
-              </h2>
-            </div>
-            <IframeWithLoader
-              key={`quiz:${quiz.id}:${lang}`}
-              src={appendLang(quiz.signed_url, lang) ?? undefined}
-              title={title}
-              sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-modals"
-              className="block h-[640px] w-full border-0 bg-white md:h-[760px]"
-            />
-          </section>
-        );
-      })}
-    </div>
   );
 }
 

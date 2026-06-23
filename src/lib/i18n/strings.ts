@@ -22,6 +22,9 @@ export const STRINGS = {
     signup_pending: "Тіркелуде...",
     have_account: "Аккаунтыңыз бар ма?",
     no_account: "Аккаунтыңыз жоқ па?",
+    google_button: "Google арқылы жалғастыру",
+    google_pending: "Бағыттауда...",
+    or_divider: "немесе",
 
     // Landing
     hero_title:
@@ -99,6 +102,18 @@ export const STRINGS = {
     nav_prev: "Алдыңғы",
     nav_next: "Келесі",
     nav_bank: "Банк",
+
+    // Lesson hub
+    hub_back_to_lessons: "Тақырыптар",
+    hub_back_to_lesson: "Тақырып",
+    hub_learn_title: "Теория және есептер",
+    hub_learn_subtitle: "Теория, формулалар және есептер банкы",
+    hub_quizzes_title: "Тесттер",
+    hub_quizzes_subtitle: "Сабаққа арналған интерактивті тесттер",
+    hub_problems_count: (n: number) => `${n} есеп`,
+    hub_quizzes_count: (n: number) => `${n} тест`,
+    hub_quizzes_empty: "Әзірге тест жоқ",
+    quizzes_subtitle: "Тесттер",
 
     // Admin
     admin_section: "Әкімші",
@@ -218,6 +233,9 @@ export const STRINGS = {
     signup_pending: "Регистрация...",
     have_account: "У вас уже есть аккаунт?",
     no_account: "Нет аккаунта?",
+    google_button: "Продолжить через Google",
+    google_pending: "Перенаправление...",
+    or_divider: "или",
 
     // Landing
     hero_title:
@@ -295,6 +313,18 @@ export const STRINGS = {
     nav_prev: "Назад",
     nav_next: "Далее",
     nav_bank: "Банк",
+
+    // Lesson hub
+    hub_back_to_lessons: "Темы",
+    hub_back_to_lesson: "Тема",
+    hub_learn_title: "Теория и задачи",
+    hub_learn_subtitle: "Теория, формулы и банк задач",
+    hub_quizzes_title: "Тесты",
+    hub_quizzes_subtitle: "Интерактивные тесты к уроку",
+    hub_problems_count: (n: number) => `${n} задач`,
+    hub_quizzes_count: (n: number) => `${n} тестов`,
+    hub_quizzes_empty: "Тестов пока нет",
+    quizzes_subtitle: "Тесты",
 
     // Admin
     admin_section: "Администратор",
