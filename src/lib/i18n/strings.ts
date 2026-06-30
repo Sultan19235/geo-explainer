@@ -26,6 +26,14 @@ export const STRINGS = {
     google_button: "Google арқылы жалғастыру",
     google_pending: "Бағыттауда...",
     or_divider: "немесе",
+    email_invalid: "Жарамды электрондық пошта енгізіңіз.",
+    password_mismatch: "Құпиясөздер сәйкес келмейді.",
+    password_strength_label: "Құпиясөз күші",
+    password_strength_0: "Тым әлсіз",
+    password_strength_1: "Әлсіз",
+    password_strength_2: "Орташа",
+    password_strength_3: "Жақсы",
+    password_strength_4: "Күшті",
 
     // Landing
     hero_title:
@@ -258,6 +266,14 @@ export const STRINGS = {
     google_button: "Продолжить через Google",
     google_pending: "Перенаправление...",
     or_divider: "или",
+    email_invalid: "Введите корректный адрес электронной почты.",
+    password_mismatch: "Пароли не совпадают.",
+    password_strength_label: "Надёжность пароля",
+    password_strength_0: "Очень слабый",
+    password_strength_1: "Слабый",
+    password_strength_2: "Средний",
+    password_strength_3: "Хороший",
+    password_strength_4: "Надёжный",
 
     // Landing
     hero_title:
