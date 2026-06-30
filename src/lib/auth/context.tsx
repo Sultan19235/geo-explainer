@@ -30,6 +30,14 @@ export function AuthProvider({
 }) {
   const [user, setUser] = useState<AuthUser | null>(initialUser);
 
+  // The root layout re-runs on every navigation (including after a server-side
+  // sign-out + redirect), so keep state in sync with the server's view of the
+  // session. Keyed on the user id so a client-driven sign-in isn't clobbered.
+  useEffect(() => {
+    setUser(initialUser);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialUser?.id ?? null]);
+
   useEffect(() => {
     const supabase = createClient();
 

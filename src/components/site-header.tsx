@@ -65,12 +65,20 @@ export function SiteHeader({
               </Link>
             ) : (
               showLoginButton && (
-                <Link
-                  href="/login"
-                  className={buttonVariants({ size: "sm" })}
-                >
-                  {t("login_button")}
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href="/login"
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
+                    {t("login_button")}
+                  </Link>
+                  <Link
+                    href="/signup"
+                    className={buttonVariants({ size: "sm" })}
+                  >
+                    {t("signup_button")}
+                  </Link>
+                </div>
               )
             ))}
         </div>
