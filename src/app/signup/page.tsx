@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { Eye, EyeOff, Check, X } from "lucide-react";
 import { signup } from "./actions";
+import { VerifyStep } from "./verify-step";
 import { GoogleButton } from "@/app/auth/google-button";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
@@ -59,6 +60,16 @@ export default function SignupPage() {
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [verifyData, setVerifyData] = useState<{
+    email: string;
+    fullName: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (state?.ok && state.email) {
+      setVerifyData({ email: state.email, fullName: state.fullName ?? "" });
+    }
+  }, [state]);
 
   const emailError =
     emailTouched && email.length > 0 && !isValidEmail(email)
@@ -83,6 +94,14 @@ export default function SignupPage() {
       <SiteHeader />
       <main className="flex flex-1 items-center justify-center px-6 py-10">
         <Card className="w-full max-w-sm">
+          {verifyData ? (
+            <VerifyStep
+              email={verifyData.email}
+              fullName={verifyData.fullName}
+              onBack={() => setVerifyData(null)}
+            />
+          ) : (
+            <>
           <CardHeader>
             <CardTitle>{t("signup_title")}</CardTitle>
             <CardDescription>{t("signup_description")}</CardDescription>
@@ -269,6 +288,8 @@ export default function SignupPage() {
               </Link>
             </p>
           </CardFooter>
+            </>
+          )}
         </Card>
       </main>
     </div>

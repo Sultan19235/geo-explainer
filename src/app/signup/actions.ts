@@ -6,10 +6,17 @@ import { createClient } from "@/lib/supabase/server";
 import { ensureTeacherProfile } from "@/lib/auth/ensure-teacher-profile";
 import { isValidEmail, MIN_PASSWORD_LENGTH } from "@/lib/auth/password-strength";
 
+export type SignupState = {
+  error?: string;
+  ok?: boolean;
+  email?: string;
+  fullName?: string;
+};
+
 export async function signup(
-  _prevState: { error?: string } | undefined,
+  _prevState: SignupState | undefined,
   formData: FormData,
-): Promise<{ error?: string }> {
+): Promise<SignupState> {
   const firstName = String(formData.get("first_name") ?? "").trim();
   const lastName = String(formData.get("last_name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
@@ -34,7 +41,7 @@ export async function signup(
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({
+  const { error } = await supabase.auth.signUp({
     email,
     password,
     options: { data: { full_name: fullName } },
@@ -44,13 +51,59 @@ export async function signup(
     return { error: error.message };
   }
 
-  // Best-effort: create the teachers profile now. If it fails, the user's next
-  // login repairs it (see ensureTeacherProfile + login action), so we don't
-  // block signup on it.
-  if (data.user) {
-    await ensureTeacherProfile(data.user.id, { fullName, email });
+  // Supabase emailed a 6-digit confirmation code. Switch the UI to the
+  // code-entry step; the teacher profile is created after the code verifies.
+  return { ok: true, email, fullName };
+}
+
+export type VerifyState = { error?: string };
+
+export async function verifyOtp(
+  _prevState: VerifyState | undefined,
+  formData: FormData,
+): Promise<VerifyState> {
+  const email = String(formData.get("email") ?? "").trim();
+  const fullName = String(formData.get("full_name") ?? "").trim();
+  const token = String(formData.get("token") ?? "").replace(/\D/g, "");
+
+  if (!email || token.length !== 6) {
+    return { error: "Код қате немесе мерзімі өтіп кеткен." };
   }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.verifyOtp({
+    email,
+    token,
+    type: "signup",
+  });
+
+  if (error || !data.user) {
+    return { error: "Код қате немесе мерзімі өтіп кеткен." };
+  }
+
+  // The account is confirmed and a session now exists. Best-effort profile
+  // creation; the next login repairs it if this fails (see ensureTeacherProfile).
+  await ensureTeacherProfile(data.user.id, { fullName, email });
 
   revalidatePath("/", "layout");
   redirect("/dashboard");
+}
+
+export type ResendState = { error?: string; sent?: boolean };
+
+export async function resendOtp(
+  _prevState: ResendState | undefined,
+  formData: FormData,
+): Promise<ResendState> {
+  const email = String(formData.get("email") ?? "").trim();
+  if (!email || !isValidEmail(email)) {
+    return { error: "Жарамды электрондық пошта енгізіңіз." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.auth.resend({ type: "signup", email });
+  if (error) {
+    return { error: error.message };
+  }
+  return { sent: true };
 }

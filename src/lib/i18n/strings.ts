@@ -44,6 +44,19 @@ export const STRINGS = {
     password_rule_number: "Кемінде бір сан",
     password_rule_symbol: "Кемінде бір символ (!?@#…)",
 
+    // Email verification (OTP)
+    verify_title: "Поштаңызды растаңыз",
+    verify_description: "{email} мекенжайына 6 таңбалы код жібердік. Оны төменге енгізіңіз.",
+    verify_code_label: "Растау коды",
+    verify_button: "Растау",
+    verify_pending: "Тексерілуде...",
+    verify_invalid: "Код қате немесе мерзімі өтіп кеткен.",
+    verify_resend_prompt: "Код келмеді ме?",
+    verify_resend: "Кодты қайта жіберу",
+    verify_resend_cooldown: "Қайта жіберу {seconds} с кейін",
+    verify_resent: "Жаңа код жіберілді.",
+    verify_back: "Артқа",
+
     // Landing
     hero_title:
       "Математика мұғалімдеріне арналған интерактивті геометрия сабақтары",
@@ -292,6 +305,19 @@ export const STRINGS = {
     password_rule_case: "Заглавные и строчные буквы",
     password_rule_number: "Хотя бы одну цифру",
     password_rule_symbol: "Хотя бы один символ (!?@#…)",
+
+    // Email verification (OTP)
+    verify_title: "Подтвердите почту",
+    verify_description: "Мы отправили 6-значный код на {email}. Введите его ниже.",
+    verify_code_label: "Код подтверждения",
+    verify_button: "Подтвердить",
+    verify_pending: "Проверка...",
+    verify_invalid: "Неверный или просроченный код.",
+    verify_resend_prompt: "Код не пришёл?",
+    verify_resend: "Отправить код повторно",
+    verify_resend_cooldown: "Повторно через {seconds} с",
+    verify_resent: "Новый код отправлен.",
+    verify_back: "Назад",
 
     // Landing
     hero_title:
