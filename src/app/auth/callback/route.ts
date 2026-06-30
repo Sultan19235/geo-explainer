@@ -22,7 +22,17 @@ export async function GET(request: NextRequest) {
       // actions, so create their teachers profile here. Best-effort — the next
       // login repairs it if it fails (see ensureTeacherProfile).
       if (data.user) {
-        await ensureTeacherProfile(data.user.id);
+        const meta = data.user.user_metadata ?? {};
+        const fullName =
+          typeof meta.full_name === "string"
+            ? meta.full_name
+            : typeof meta.name === "string"
+              ? meta.name
+              : undefined;
+        await ensureTeacherProfile(data.user.id, {
+          fullName,
+          email: data.user.email ?? undefined,
+        });
       }
       return NextResponse.redirect(`${origin}${next}`);
     }

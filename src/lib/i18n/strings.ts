@@ -34,6 +34,15 @@ export const STRINGS = {
     password_strength_2: "Орташа",
     password_strength_3: "Жақсы",
     password_strength_4: "Күшті",
+    first_name_label: "Аты",
+    last_name_label: "Тегі",
+    password_show: "Құпиясөзді көрсету",
+    password_hide: "Құпиясөзді жасыру",
+    password_requirements_title: "Құпиясөз құрамында болуы керек:",
+    password_rule_length: "Кемінде 8 таңба",
+    password_rule_case: "Бас және кіші әріптер",
+    password_rule_number: "Кемінде бір сан",
+    password_rule_symbol: "Кемінде бір символ (!?@#…)",
 
     // Landing
     hero_title:
@@ -274,6 +283,15 @@ export const STRINGS = {
     password_strength_2: "Средний",
     password_strength_3: "Хороший",
     password_strength_4: "Надёжный",
+    first_name_label: "Имя",
+    last_name_label: "Фамилия",
+    password_show: "Показать пароль",
+    password_hide: "Скрыть пароль",
+    password_requirements_title: "Пароль должен содержать:",
+    password_rule_length: "Не менее 8 символов",
+    password_rule_case: "Заглавные и строчные буквы",
+    password_rule_number: "Хотя бы одну цифру",
+    password_rule_symbol: "Хотя бы один символ (!?@#…)",
 
     // Landing
     hero_title:

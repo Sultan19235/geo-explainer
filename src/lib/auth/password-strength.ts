@@ -13,19 +13,29 @@ export const MIN_PASSWORD_LENGTH = 6;
 
 export type PasswordScore = 0 | 1 | 2 | 3 | 4;
 
+// The four criteria that make up a strong password. `key` maps to an i18n
+// string so the UI can render a labelled checklist.
+export type PasswordRule = "length" | "case" | "number" | "symbol";
+
+export function passwordChecks(password: string): Record<PasswordRule, boolean> {
+  return {
+    length: password.length >= 8,
+    case: /[a-z]/.test(password) && /[A-Z]/.test(password),
+    number: /\d/.test(password),
+    symbol: /[^A-Za-z0-9]/.test(password),
+  };
+}
+
 // Counts how many "strength" criteria a password satisfies. Returns 0-4 so the
 // UI can render a 4-segment meter and pick a label.
 export function passwordScore(password: string): PasswordScore {
   if (!password) return 0;
 
-  let score = 0;
-  if (password.length >= 8) score += 1;
-  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
-  if (/\d/.test(password)) score += 1;
-  if (/[^A-Za-z0-9]/.test(password)) score += 1;
+  const checks = passwordChecks(password);
+  let score = Object.values(checks).filter(Boolean).length;
 
   // A short password can never read as more than "weak", regardless of variety.
-  if (password.length < 8 && score > 1) score = 1;
+  if (!checks.length && score > 1) score = 1;
 
   return score as PasswordScore;
 }

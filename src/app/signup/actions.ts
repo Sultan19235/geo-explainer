@@ -10,10 +10,16 @@ export async function signup(
   _prevState: { error?: string } | undefined,
   formData: FormData,
 ): Promise<{ error?: string }> {
+  const firstName = String(formData.get("first_name") ?? "").trim();
+  const lastName = String(formData.get("last_name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
   const confirm = String(formData.get("confirm") ?? "");
+  const fullName = [firstName, lastName].filter(Boolean).join(" ");
 
+  if (!firstName || !lastName) {
+    return { error: "Атыңыз бен тегіңізді енгізіңіз." };
+  }
   if (!email || !password) {
     return { error: "Электрондық пошта мен құпиясөзді енгізіңіз." };
   }
@@ -28,7 +34,11 @@ export async function signup(
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { full_name: fullName } },
+  });
 
   if (error) {
     return { error: error.message };
@@ -38,7 +48,7 @@ export async function signup(
   // login repairs it (see ensureTeacherProfile + login action), so we don't
   // block signup on it.
   if (data.user) {
-    await ensureTeacherProfile(data.user.id);
+    await ensureTeacherProfile(data.user.id, { fullName, email });
   }
 
   revalidatePath("/", "layout");
