@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { BookOpenIcon, CheckSquareIcon, PresentationIcon } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
+import { useAuth } from "@/lib/auth/context";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -16,6 +17,7 @@ const GRADES = [7, 8, 9, 10, 11] as const;
 
 export default function HomePage() {
   const { t } = useT();
+  const { user } = useAuth();
 
   const steps = [
     {
@@ -57,10 +59,10 @@ export default function HomePage() {
                 {t("hero_cta_primary")}
               </Link>
               <Link
-                href="/signup"
+                href={user ? "/dashboard" : "/signup"}
                 className={buttonVariants({ size: "lg", variant: "outline" })}
               >
-                {t("hero_cta_secondary")}
+                {user ? t("nav_profile") : t("hero_cta_secondary")}
               </Link>
             </div>
           </div>

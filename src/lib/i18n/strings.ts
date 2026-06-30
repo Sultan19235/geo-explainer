@@ -8,6 +8,7 @@ export const STRINGS = {
     // Auth
     login_button: "Кіру",
     logout_button: "Шығу",
+    nav_profile: "Профиль",
     signup_button: "Тіркелу",
     email_label: "Электрондық пошта",
     password_label: "Құпиясөз",
@@ -239,6 +240,7 @@ export const STRINGS = {
     // Auth
     login_button: "Войти",
     logout_button: "Выйти",
+    nav_profile: "Профиль",
     signup_button: "Регистрация",
     email_label: "Электронная почта",
     password_label: "Пароль",
