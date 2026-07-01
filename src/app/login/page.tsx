@@ -44,7 +44,15 @@ export default function LoginPage() {
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="password">{t("password_label")}</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">{t("password_label")}</Label>
+                  <Link
+                    href="/forgot-password"
+                    className="text-sm text-muted-foreground underline"
+                  >
+                    {t("forgot_link")}
+                  </Link>
+                </div>
                 <Input
                   id="password"
                   name="password"

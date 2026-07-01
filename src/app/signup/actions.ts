@@ -41,7 +41,7 @@ export async function signup(
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: { data: { full_name: fullName } },
@@ -49,6 +49,13 @@ export async function signup(
 
   if (error) {
     return { error: error.message };
+  }
+
+  // Supabase does not error on an already-registered email (anti-enumeration);
+  // instead it returns a user with an empty `identities` array and sends no
+  // confirmation code. Detect that and tell the user the email is taken.
+  if (!data.user || (data.user.identities?.length ?? 0) === 0) {
+    return { error: "Бұл электрондық пошта тіркелген. Кіріңіз." };
   }
 
   // Supabase emailed a 6-digit confirmation code. Switch the UI to the

@@ -57,6 +57,20 @@ export const STRINGS = {
     verify_resent: "Жаңа код жіберілді.",
     verify_back: "Артқа",
 
+    // Password recovery (OTP)
+    forgot_link: "Құпиясөзді ұмыттыңыз ба?",
+    forgot_title: "Құпиясөзді қалпына келтіру",
+    forgot_description:
+      "Электрондық поштаңызды енгізіңіз, біз растау коды бар хат жібереміз.",
+    forgot_button: "Кодты жіберу",
+    forgot_pending: "Жіберілуде...",
+    reset_title: "Жаңа құпиясөз орнату",
+    reset_description:
+      "{email} мекенжайына 6 таңбалы код жібердік. Оны енгізіп, жаңа құпиясөзді орнатыңыз.",
+    reset_new_password_label: "Жаңа құпиясөз",
+    reset_button: "Құпиясөзді жаңарту",
+    reset_pending: "Сақталуда...",
+
     // Landing
     hero_title:
       "Математика мұғалімдеріне арналған интерактивті геометрия сабақтары",
@@ -318,6 +332,20 @@ export const STRINGS = {
     verify_resend_cooldown: "Повторно через {seconds} с",
     verify_resent: "Новый код отправлен.",
     verify_back: "Назад",
+
+    // Password recovery (OTP)
+    forgot_link: "Забыли пароль?",
+    forgot_title: "Восстановление пароля",
+    forgot_description:
+      "Введите электронную почту — мы отправим письмо с кодом подтверждения.",
+    forgot_button: "Отправить код",
+    forgot_pending: "Отправка...",
+    reset_title: "Новый пароль",
+    reset_description:
+      "Мы отправили 6-значный код на {email}. Введите его и задайте новый пароль.",
+    reset_new_password_label: "Новый пароль",
+    reset_button: "Обновить пароль",
+    reset_pending: "Сохранение...",
 
     // Landing
     hero_title:
