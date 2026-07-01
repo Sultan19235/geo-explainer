@@ -9,9 +9,17 @@ type Translate = ReturnType<typeof useT>["t"];
 // flagged as possible account-sharing.
 export const SHARING_DEVICE_THRESHOLD = 3;
 
+// Pin all absolute timestamps to Kazakhstan time (UTC+5). This is a Kazakh
+// product, so admins/teachers read these in local time — but it's also load-
+// bearing for correctness: a fixed timeZone makes formatDateTime produce the
+// same string on the server (UTC on Vercel) and in the browser, avoiding a
+// React hydration mismatch on the SSR'd analytics timestamps.
+const APP_TIME_ZONE = "Asia/Almaty";
+
 export function formatDateTime(iso: string, lang: Lang): string {
   try {
     return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "kk-KZ", {
+      timeZone: APP_TIME_ZONE,
       day: "numeric",
       month: "short",
       hour: "2-digit",

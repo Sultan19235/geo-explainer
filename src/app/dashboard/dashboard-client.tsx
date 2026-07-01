@@ -57,7 +57,11 @@ export function DashboardClient({
     if (!value) return t("profile_not_set");
     const ts = Date.parse(value);
     if (!Number.isFinite(ts)) return t("profile_not_set");
+    // Pin to Kazakhstan time so this server-rendered client component formats
+    // the same date on the server (UTC) and the browser — otherwise a date near
+    // midnight UTC hydrates to a different day and React flags a mismatch.
     return new Date(ts).toLocaleDateString(locale, {
+      timeZone: "Asia/Almaty",
       day: "numeric",
       month: "long",
       year: "numeric",
