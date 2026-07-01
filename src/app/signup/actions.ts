@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ensureTeacherProfile } from "@/lib/auth/ensure-teacher-profile";
+import { startLoginSession } from "@/lib/analytics/track";
 import { isValidEmail, MIN_PASSWORD_LENGTH } from "@/lib/auth/password-strength";
 
 export type SignupState = {
@@ -91,6 +92,7 @@ export async function verifyOtp(
   // The account is confirmed and a session now exists. Best-effort profile
   // creation; the next login repairs it if this fails (see ensureTeacherProfile).
   await ensureTeacherProfile(data.user.id, { fullName, email });
+  await startLoginSession(data.user.id, "signup");
 
   revalidatePath("/", "layout");
   redirect("/dashboard");

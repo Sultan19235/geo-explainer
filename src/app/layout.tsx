@@ -3,6 +3,7 @@ import { IBM_Plex_Sans, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { LanguageProvider } from "@/lib/i18n/context";
 import { AuthProvider, type AuthUser } from "@/lib/auth/context";
+import { PresenceTracker } from "@/components/presence-tracker";
 import { createClient } from "@/lib/supabase/server";
 
 const ibmPlexSans = IBM_Plex_Sans({
@@ -50,6 +51,7 @@ export default async function RootLayout({
       >
         <AuthProvider initialUser={initialUser}>
           <LanguageProvider>{children}</LanguageProvider>
+          <PresenceTracker />
         </AuthProvider>
       </body>
     </html>

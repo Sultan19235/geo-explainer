@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logActivity } from "@/lib/analytics/track";
 import {
   teacherHasGradeAccess,
   type TeacherAccessRow,
@@ -58,6 +60,17 @@ export default async function GradeTopicsPage({
           .maybeSingle<TeacherAccessRow>()
       : Promise.resolve({ data: null }),
   ]);
+
+  // Track that a signed-in teacher opened this grade. Runs after the response
+  // is sent, so it never delays render.
+  if (user) {
+    after(() =>
+      logActivity(user.id, "view_grade", {
+        gradeId,
+        path: `/grades/${gradeId}`,
+      }),
+    );
+  }
 
   const hasGradeAccess = teacherHasGradeAccess(teacher, gradeId);
   const items: GradeTopicListItem[] = (topics ?? []).map((topic) => ({

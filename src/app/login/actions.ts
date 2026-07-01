@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ensureTeacherProfile } from "@/lib/auth/ensure-teacher-profile";
+import { startLoginSession } from "@/lib/analytics/track";
 
 export async function login(
   _prevState: { error?: string } | undefined,
@@ -31,6 +32,7 @@ export async function login(
   // don't block sign-in if it fails.
   if (data.user) {
     await ensureTeacherProfile(data.user.id);
+    await startLoginSession(data.user.id, "password");
   }
 
   revalidatePath("/", "layout");

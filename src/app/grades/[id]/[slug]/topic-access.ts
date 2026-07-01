@@ -71,7 +71,10 @@ export async function loadAccessibleTopic(gradeId: number, slug: string) {
     redirect(`/grades/${gradeId}?access=required`);
   }
 
-  return { supabase: supabase as SupabaseClient, topic };
+  // `user` is returned so callers can attribute analytics events. It is null for
+  // anonymous visitors on a free-sample topic — such visits are not tracked
+  // (analytics covers signed-in teachers only).
+  return { supabase: supabase as SupabaseClient, topic, user };
 }
 
 export async function createSignedUrl(path: string | null) {

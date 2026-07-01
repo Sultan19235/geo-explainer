@@ -1,3 +1,5 @@
+import { after } from "next/server";
+import { logActivity } from "@/lib/analytics/track";
 import {
   createLessonHtmlFrameUrl,
   createSignedUrl,
@@ -22,7 +24,7 @@ export default async function QuizzesPage({
   const { id, slug } = await params;
   const gradeId = Number(id);
 
-  const { supabase, topic } = await loadAccessibleTopic(gradeId, slug);
+  const { supabase, topic, user } = await loadAccessibleTopic(gradeId, slug);
 
   // Only ready quizzes with a teacher file are fetched; each is signed and
   // proxied like theory/problems. A missing quizzes table (migration not yet
@@ -35,6 +37,24 @@ export default async function QuizzesPage({
     .not("teacher_html_path", "is", null)
     .order("display_order", { ascending: true })
     .returns<QuizRow[]>();
+
+  // Each rendered quiz iframe is a "used" quiz — log one open_quiz per quiz the
+  // teacher is shown. Runs after the response, so it adds no render latency.
+  if (user && quizRows && quizRows.length > 0) {
+    const rows = quizRows;
+    after(() =>
+      Promise.all(
+        rows.map((quiz) =>
+          logActivity(user.id, "open_quiz", {
+            gradeId: topic.grade_id,
+            topicId: topic.id,
+            quizId: quiz.id,
+            path: `/grades/${gradeId}/${slug}/quizzes`,
+          }),
+        ),
+      ),
+    );
+  }
 
   const quizzes = await Promise.all(
     (quizRows ?? []).map(async (quiz): Promise<Quiz> => {

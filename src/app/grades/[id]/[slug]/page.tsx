@@ -1,3 +1,5 @@
+import { after } from "next/server";
+import { logActivity } from "@/lib/analytics/track";
 import { loadAccessibleTopic } from "./topic-access";
 import { LessonHubClient } from "./lesson-hub-client";
 
@@ -9,7 +11,17 @@ export default async function LessonHubPage({
   const { id, slug } = await params;
   const gradeId = Number(id);
 
-  const { supabase, topic } = await loadAccessibleTopic(gradeId, slug);
+  const { supabase, topic, user } = await loadAccessibleTopic(gradeId, slug);
+
+  if (user) {
+    after(() =>
+      logActivity(user.id, "view_lesson", {
+        gradeId: topic.grade_id,
+        topicId: topic.id,
+        path: `/grades/${gradeId}/${slug}`,
+      }),
+    );
+  }
 
   // Counts power the badges on the two hub cards. Quizzes mirror the filter used
   // by the quizzes sub-page (ready + has a teacher file) so the badge matches
