@@ -92,7 +92,8 @@ export function VerifyStep({
         </CardContent>
       </form>
       <CardFooter className="mt-4 flex flex-col gap-3">
-        <p className="text-sm text-muted-foreground">
+        {/* div, not p: a <form> may not sit inside a <p> (hydration error). */}
+        <div className="text-sm text-muted-foreground">
           {t("verify_resend_prompt")}{" "}
           <form ref={resendRef} action={resendAction} className="inline">
             <input type="hidden" name="email" value={email} />
@@ -113,7 +114,7 @@ export function VerifyStep({
               </button>
             )}
           </form>
-        </p>
+        </div>
         <button
           type="button"
           onClick={onBack}

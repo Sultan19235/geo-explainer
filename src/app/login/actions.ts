@@ -24,6 +24,16 @@ export async function login(
   });
 
   if (error) {
+    // Localize the common auth failures; anything rarer (rate limit, config)
+    // falls through with Supabase's own message.
+    if (error.code === "invalid_credentials") {
+      return { error: "Электрондық пошта немесе құпиясөз қате." };
+    }
+    if (error.code === "email_not_confirmed") {
+      return {
+        error: "Электрондық пошта расталмаған. Алдымен поштаңызды растаңыз.",
+      };
+    }
     return { error: error.message };
   }
 

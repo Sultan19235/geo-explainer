@@ -92,13 +92,26 @@ export async function touchSession(fingerprint?: string | null): Promise<void> {
     const id = await getSessionId();
     if (!id) return;
 
-    const patch: Record<string, unknown> = {
-      last_seen_at: new Date().toISOString(),
-    };
-    if (fingerprint) patch.fingerprint = fingerprint;
-
     const admin = createAdminClient();
-    await admin.from("login_sessions").update(patch).eq("id", id);
+    // Live sessions only: a stale or replayed cookie must not resurrect a
+    // session that already ended.
+    await admin
+      .from("login_sessions")
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("ended_at", null);
+
+    // Fingerprint is write-once: the first device to report one wins, so a
+    // later heartbeat (or a forged request) can't rewrite the recorded device
+    // hash and mask account sharing.
+    if (fingerprint) {
+      await admin
+        .from("login_sessions")
+        .update({ fingerprint })
+        .eq("id", id)
+        .is("ended_at", null)
+        .is("fingerprint", null);
+    }
   } catch {
     // ignore
   }

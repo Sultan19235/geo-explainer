@@ -13,18 +13,16 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 const STUDENT_BUCKET = "quizzes-public";
 
-function sanitizeId(raw: string): string {
-  // Quiz ids are UUIDs; allow only uuid chars to avoid anything odd in the lookup.
-  return raw.replace(/[^a-f0-9-]/gi, "");
-}
+// Quiz ids are UUIDs; anything else 404s before touching the database.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id: rawId } = await params;
-  const id = sanitizeId(rawId);
-  if (!id) {
+  const { id } = await params;
+  if (!UUID_RE.test(id)) {
     return new Response("Not found.", { status: 404 });
   }
 
@@ -40,18 +38,17 @@ export async function GET(
     return new Response("Not found.", { status: 404 });
   }
 
-  const { data: pub } = admin.storage
+  // Download straight from Storage instead of re-fetching our own public URL:
+  // one hop fewer, and it keeps working even if the bucket goes private.
+  const { data: file, error: downloadError } = await admin.storage
     .from(STUDENT_BUCKET)
-    .getPublicUrl(quiz.student_html_path);
+    .download(quiz.student_html_path);
 
-  const fileResponse = await fetch(pub.publicUrl, { cache: "no-store" });
-  if (!fileResponse.ok) {
-    return new Response("Student page is unavailable.", {
-      status: fileResponse.status,
-    });
+  if (downloadError || !file) {
+    return new Response("Student page is unavailable.", { status: 404 });
   }
 
-  const html = await fileResponse.text();
+  const html = await file.text();
 
   return new Response(html, {
     status: 200,

@@ -95,7 +95,7 @@ export async function createQuizAction(formData: FormData) {
   const title_kz = getString(formData, "title_kz");
   const title_ru = getOptionalString(formData, "title_ru");
   const display_order = Number(getString(formData, "display_order") || "0");
-  let is_ready = getCheckbox(formData, "is_ready");
+  const is_ready = getCheckbox(formData, "is_ready");
 
   if (!topic_id || !title_kz) {
     throw new Error("Тақырып және қазақша атау міндетті.");
@@ -105,7 +105,6 @@ export async function createQuizAction(formData: FormData) {
   const studentFile = formData.get("student_file");
   const hasTeacher = teacherFile instanceof File && teacherFile.size > 0;
   const hasStudent = studentFile instanceof File && studentFile.size > 0;
-  if (hasTeacher) is_ready = true;
 
   const { data: inserted, error: insertError } = await admin
     .from("quizzes")
@@ -117,7 +116,11 @@ export async function createQuizAction(formData: FormData) {
     throw new Error(insertError?.message ?? "Тест құру қатесі.");
   }
 
-  const update: { teacher_html_path?: string; student_html_path?: string } = {};
+  const update: {
+    teacher_html_path?: string;
+    student_html_path?: string;
+    is_ready?: boolean;
+  } = {};
   // Upload the student file first so its public URL exists before the teacher
   // file's STUDENT_URL is rewritten to point at it.
   if (hasStudent) {
@@ -127,6 +130,9 @@ export async function createQuizAction(formData: FormData) {
   if (hasTeacher) {
     await uploadTeacherFile(inserted.id, teacherFile as File);
     update.teacher_html_path = teacherPath(inserted.id);
+    // Only mark ready once the teacher file is actually uploaded — a failed
+    // upload must not leave a "ready" quiz with no file behind it.
+    update.is_ready = true;
   }
 
   if (Object.keys(update).length > 0) {
