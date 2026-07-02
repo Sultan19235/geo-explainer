@@ -129,3 +129,86 @@
     @apply font-sans;
   }
 }
+
+/* ── Live quiz (/play) ─────────────────────────────────────────────────── */
+
+/* Textbook math voice: formulas are set in serif italic, like a printed
+   math book, against the Plex UI voice. */
+.font-math {
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+}
+.font-math sup {
+  font-size: 0.62em;
+  font-style: normal;
+  margin-left: 1px;
+}
+
+/* Squared exercise-book paper (тор көз) — the backdrop of every quiz screen. */
+.quiz-grid-paper {
+  background-color: #f6f8fc;
+  background-image:
+    linear-gradient(to right, rgba(37, 99, 235, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(37, 99, 235, 0.06) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+@keyframes quiz-parabola-draw {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 1;
+  }
+  55% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  82% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+.quiz-parabola-path {
+  stroke-dasharray: 1;
+  animation: quiz-parabola-draw 2.8s ease-in-out infinite;
+}
+
+@keyframes quiz-confetti-fall {
+  from {
+    transform: translateY(-20px) rotate(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(110vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+.quiz-confetti-piece {
+  animation: quiz-confetti-fall linear forwards;
+}
+
+@keyframes quiz-pop {
+  0% {
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.quiz-pop {
+  animation: quiz-pop 0.35s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quiz-parabola-path,
+  .quiz-confetti-piece,
+  .quiz-pop {
+    animation: none;
+  }
+}

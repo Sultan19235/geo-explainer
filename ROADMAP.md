@@ -40,6 +40,27 @@ they end — **no class history is saved, by design** (product decision,
 - [x] Student heartbeat 5s → 15s (answers / focus changes still sent instantly).
       Together: ~3–4× less realtime load.
 
+### Native React quiz pages (2026-07-02)
+- [x] **Teacher console** at [/play/graph-quadratic/teacher](src/app/play/graph-quadratic/teacher/page.tsx)
+      (login-gated; fetches `/api/quiz-token` before `POST /session`, so Gate 2
+      works unchanged). Setup → lobby (code + QR pointing at the React student
+      page) → live cards over SSE → leaderboard. Section config lives in
+      [src/lib/quiz/quadratic.ts](src/lib/quiz/quadratic.ts) (`SECTION_INFO`) —
+      moving it to the DB/admin form is still the open product decision from
+      "Option 3" below. **Not yet linked from the lesson page**: the quizzes
+      tab still iframes the uploaded teacher.html.
+- [x] [/play/graph-quadratic](src/app/play/graph-quadratic/page.tsx) — the
+      student quiz rebuilt as a native Next.js page (join → lobby → quiz →
+      results) sharing the site's design system; engine + session logic live in
+      [src/lib/quiz/](src/lib/quiz/). Same `/status`+`/submit` protocol and the
+      same `ms_graph_*` localStorage key, so it can replace the uploaded
+      student HTML mid-semester without breaking reconnection. Backend host
+      comes from `NEXT_PUBLIC_QUIZ_BACKEND_URL` (defaults to prod). **Not yet
+      wired to the QR**: the admin upload still rewrites `STUDENT_URL` to
+      `/play/q/<id>` (the uploaded-HTML route). Switching that rewrite to the
+      React page is a product decision — the route is quiz-specific while the
+      upload flow is generic.
+
 ### Plumbing
 - [x] Room codes collision-checked (v1 could overwrite a live class).
 - [x] Admin upload rewrites `STUDENT_URL` (QR → this quiz's `/play/q/<id>`
@@ -70,11 +91,11 @@ they end — **no class history is saved, by design** (product decision,
 
 ## 🗓️ Later (product & scale)
 
-- [ ] **Native React teacher console (Option 3)** — remove the iframe; share the
-      site's theme, dark mode, and i18n. You'd stop uploading `teacher.html` and
-      only upload the student quiz; the section/topic config moves to the DB/admin
-      form. This is the original "make it feel native" goal — and a product
-      design decision (how section config is authored) before it's a coding task.
+- [ ] **Native React teacher console (Option 3)** — ~~remove the iframe~~ the
+      console itself is built (see Done above); what remains is the product
+      wiring: link/replace the lesson-page iframe, and decide how section/topic
+      config is authored (DB/admin form vs. code) so consoles generalize beyond
+      graph-quadratic.
 - [ ] **Shared versioned student runtime** (`/quiz-runtime.v1.js`) so the quiz
       engine isn't copy-pasted into every topic file — fix a bug once,
       everywhere. Premature while there's a single quiz; revisit at ~3+.
