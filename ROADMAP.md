@@ -4,32 +4,35 @@ Status of the live-quiz system (teacher launches a room → students join by QR 
 scores stream to the teacher's dashboard in realtime). Covers the Hetzner
 realtime backend ([server/](server/)) and the website pieces that talk to it.
 
-_Last updated: 2026-07-02._
+_Last updated: 2026-07-02 (server v3)._
 
 **Architecture at a glance:** Express + SSE backend on Hetzner (`89.167.9.192`,
 pm2 `mathsabaq-live`, port 3001 behind nginx) · Next.js site on Vercel ·
-Supabase for auth, content, and now quiz results. Sessions live in memory;
-final results persist to Supabase on end. See [server/README.md](server/README.md).
+Supabase for auth + content. Sessions live in memory only and evaporate when
+they end — **no class history is saved, by design** (product decision,
+2026-07-02). See [server/README.md](server/README.md).
 
 ---
 
 ## ✅ Done
 
-### Safety / durability
-- [x] Backend source recovered from the box and committed to git — v1 baseline
-      (`8978f7b`), so it can never be lost to a wiped server again.
-- [x] **Results persistence** — finished classes write to `quiz_session_results`
-      (per-student scores, focus/tab-switch stats, reason ended). Migration
-      [supabase/migrations/20260702080000_quiz_session_results.sql](supabase/migrations/20260702080000_quiz_session_results.sql).
-      Live on the box (`/health` → `persistence:true`). Failed writes retry 3×
-      then dump the row to pm2 logs as `PERSIST_FAILED` — never silently lost.
+### Safety
+- [x] Backend source lives in git — v1 baseline `8978f7b`, hardened v2
+      `917993b`, v3 in this commit. Can never be lost to a wiped server again.
 - [x] Reboot safety verified (pm2 resurrect) + documented `.bak` rollback path.
+- [x] ~~Results persistence~~ — built in v2, **removed in v3**: no class
+      history, per product decision. The revert migration is
+      [supabase/migrations/20260702120000_drop_quiz_session_results.sql](supabase/migrations/20260702120000_drop_quiz_session_results.sql)
+      (the table only ever held one smoke-test row). Also delete the now-unused
+      `SUPABASE_*` vars from `/root/.env` when deploying v3.
 
 ### Security
 - [x] Auth gate ("Gate 2") built end-to-end: website [/api/quiz-token](src/app/api/quiz-token/route.ts)
       issues short-lived HMAC tokens to signed-in teachers; server verifies on
-      `/session`. **Deployed but dormant** — activates only when `QUIZ_TOKEN_SECRET`
-      is set on both sides (see rollout order below).
+      `/session`. Verified against v3 locally: missing / garbage / wrong-secret
+      / expired tokens all 401, valid token opens a room. **Dormant** until
+      `QUIZ_TOKEN_SECRET` is set on both sides (rollout order in
+      [server/README.md](server/README.md)).
 - [x] Abuse limits: max sessions, max students per room, name/title length caps.
 
 ### Efficiency
@@ -39,43 +42,42 @@ final results persist to Supabase on end. See [server/README.md](server/README.m
 
 ### Plumbing
 - [x] Room codes collision-checked (v1 could overwrite a live class).
-- [x] Admin upload stamps `QUIZ_ID` into consoles (attributes results to a quiz);
-      optional `QUIZ_BACKEND_URL` rewrites `BACKEND` so the host can move via one
-      env var. [src/app/admin/quizzes/actions.ts](src/app/admin/quizzes/actions.ts)
+- [x] Admin upload rewrites `STUDENT_URL` (QR → this quiz's `/play/q/<id>`
+      page) and optionally `BACKEND` via the `QUIZ_BACKEND_URL` env var, so the
+      live server can move hosts with one env change.
+      (v2's `QUIZ_ID` stamping was removed along with persistence.)
 - [x] `server/README.md` runbook; `/health` reports version + enabled features.
-- [x] Verified (lint, build, server smoke tests), shipped to Vercel prod (`917993b`).
 
 ---
 
-## 🔜 Planned — near-term (small)
+## 🔜 Remaining manual steps (need prod access; everything is staged)
 
-- [ ] **Confidence test** — run one real class, confirm a row lands in
-      `quiz_session_results` (check the table, or pm2 logs for `PERSIST_FAILED`).
-- [ ] **Re-upload the graph-quadratic console** through the admin panel so it
-      gets `QUIZ_ID` stamped (results link to the quiz; works without it as
-      `quiz_id: null`).
-- [ ] **Turn on the auth gate** when ready to enforce paid-teacher-only rooms.
-      Order matters (see below).
-
-### Auth-gate rollout order
-1. `openssl rand -hex 32` → the secret.
-2. Vercel env `QUIZ_TOKEN_SECRET` → redeploy (activates `/api/quiz-token`).
-3. Re-upload teacher consoles via admin (v2 consoles fetch the token).
-4. **Only then** set the same secret in `/root/.env` on the box + restart.
-   (Setting it on the box first locks out every existing console.)
+1. **Deploy server v3 to the box** — commands in
+   [server/README.md](server/README.md) (§ Deploy). Until then the box still
+   runs v2 and keeps writing history rows. While there, remove `SUPABASE_URL`
+   + `SUPABASE_SERVICE_ROLE_KEY` from `/root/.env`.
+2. **Drop the results table** — run the drop migration in the Supabase
+   dashboard SQL editor (or `supabase db push`).
+3. **Re-upload the graph-quadratic quiz files** via `/admin/quizzes` (attach
+   [quiz-apps/graph-quadratic/teacher.html](quiz-apps/graph-quadratic/teacher.html)
+   + [public/play/graph-quadratic/index.html](public/play/graph-quadratic/index.html)
+   as teacher/student files). The stored copies predate v2: console isn't
+   token-aware, student file still heartbeats every 5s.
+4. **Optional — turn on the auth gate** (paid-teacher-only rooms). Strict
+   order in [server/README.md](server/README.md); step 3 must happen first.
 
 ---
 
-## 🗓️ Planned — bigger (product & scale)
+## 🗓️ Later (product & scale)
 
-- [ ] **Teacher results-history UI** — a page reading back `quiz_session_results`
-      (data layer exists; the screen does not).
 - [ ] **Native React teacher console (Option 3)** — remove the iframe; share the
       site's theme, dark mode, and i18n. You'd stop uploading `teacher.html` and
       only upload the student quiz; the section/topic config moves to the DB/admin
-      form. This is the original "make it feel native" goal.
+      form. This is the original "make it feel native" goal — and a product
+      design decision (how section config is authored) before it's a coding task.
 - [ ] **Shared versioned student runtime** (`/quiz-runtime.v1.js`) so the quiz
-      engine isn't copy-pasted into every topic file — fix a bug once, everywhere.
+      engine isn't copy-pasted into every topic file — fix a bug once,
+      everywhere. Premature while there's a single quiz; revisit at ~3+.
 - [ ] **Horizontal scale — only when approaching a few hundred concurrent rooms:**
       Redis for session state + pub/sub (plain pm2 cluster won't work — workers
       wouldn't share the in-memory Map); second box + failover; nginx
@@ -89,5 +91,7 @@ final results persist to Supabase on end. See [server/README.md](server/README.m
 
 ~5000 teachers/day × 30 students × 4×45-min periods → up to ~5000 concurrent
 rooms, ~150k students, ~30k `/submit`/s at peak. Bandwidth is trivial
-(~2–3 MB/lesson on the teacher's device); the real walls are single-core CPU
-and durability — addressed incrementally above, not a rewrite.
+(~2–3 MB/lesson on the teacher's device); the real wall is single-core CPU —
+addressed incrementally above, not a rewrite. (Durability stopped being a wall
+when class history was cut: a crashed box now loses at most the classes
+currently on screen.)

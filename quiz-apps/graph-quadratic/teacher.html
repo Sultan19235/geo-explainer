@@ -308,9 +308,6 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 // ═══════════════════════════════════════════════════════════════
 const BACKEND = 'https://mathsabaq.online';
 const STUDENT_URL = 'https://mathsabaq.online/play/graph-quadratic/index.html';
-// Rewritten to this quiz's id by the admin panel on upload (like STUDENT_URL);
-// ties saved results to the quiz. null when opened standalone.
-const QUIZ_ID = null;
 // ═══════════════════════════════════════════════════════════════
 
 const SECTIONS = [
@@ -385,7 +382,7 @@ async function createRoom() {
       if (tr.ok) token = (await tr.json()).token;
     } catch (_) {}
 
-    const res = await fetch(`${BACKEND}/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'Квадраттық функция', quizId: QUIZ_ID, token }) });
+    const res = await fetch(`${BACKEND}/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'Квадраттық функция', token }) });
     if (res.status === 401) {
       btn.disabled = false; btn.textContent = '🚀 Бөлме құру';
       document.getElementById('setup-err').textContent = '❌ Сайтқа кіру қажет — беттi жаңартып, қайта кіріңіз'; document.getElementById('setup-err').classList.add('on');

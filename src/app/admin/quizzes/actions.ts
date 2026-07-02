@@ -83,22 +83,16 @@ async function uploadStudentFile(quizId: string, file: File): Promise<void> {
 }
 
 // Uploads the teacher console, rewriting its `const STUDENT_URL = '...'` line to
-// this quiz's student public URL so the embedded console's QR resolves, and its
-// `const QUIZ_ID = ...` line to this quiz's id so live results are attributed
-// to it (the author can't know the id ahead of time). Lines that don't exist
-// are simply not rewritten — older files upload unchanged.
+// this quiz's student public URL so the embedded console's QR resolves (the
+// author can't know the quiz id ahead of time). A file without that line
+// uploads unchanged.
 async function uploadTeacherFile(quizId: string, file: File): Promise<void> {
   const original = await file.text();
   const target = studentPageUrl(quizId);
-  const rewritten = rewriteBackendUrl(original)
-    .replace(
-      /(const\s+STUDENT_URL\s*=\s*)(['"])(?:\\.|(?!\2).)*\2/,
-      `$1$2${target}$2`,
-    )
-    .replace(
-      /(const\s+QUIZ_ID\s*=\s*)[^;\n]*/,
-      `$1${JSON.stringify(quizId)}`,
-    );
+  const rewritten = rewriteBackendUrl(original).replace(
+    /(const\s+STUDENT_URL\s*=\s*)(['"])(?:\\.|(?!\2).)*\2/,
+    `$1$2${target}$2`,
+  );
   await uploadBlob(
     TEACHER_BUCKET,
     teacherPath(quizId),

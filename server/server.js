@@ -1,34 +1,27 @@
 /**
- * MathSabaq Live Score Server — v2
+ * MathSabaq Live Score Server — v3
  * Hetzner Node.js backend — HTTP POST + SSE
- * No Socket.io. Pure HTTP. Sessions live in memory; final results are
- * persisted to Supabase when a session ends.
+ * No Socket.io. Pure HTTP. Sessions live in memory ONLY: by product decision
+ * there is no class history — when a session ends, the scores the teacher saw
+ * are the whole story, and nothing is written anywhere.
  *
  * Session lifecycle:  waiting → active → ended
  *   POST /session   → creates session (status: waiting)      [token-gated*]
  *   POST /start     → teacher starts quiz (status: active, starts 45-min timer)
- *   POST /end       → teacher ends quiz   (status: ended, persists results)
+ *   POST /end       → teacher ends quiz   (status: ended)
  *   GET  /status    → students poll session state
  *   POST /submit    → student sends score (response includes status + timeLeft)
  *   GET  /live      → teacher SSE stream
  *   GET  /health    → sessions/students counts + enabled features
  *
- * v2 over v1:
- *   - room codes are collision-checked (v1 could silently overwrite a live room)
- *   - /submit only broadcasts when a student's state actually changed
- *     (kills the every-5s no-op chatter; lobby idles cost ~nothing)
- *   - results are persisted to Supabase (quiz_session_results) on end/timeout,
- *     via plain REST — no new dependencies. Off until env vars are set.
- *   - optional auth gate on /session: HMAC token issued by the website
- *     (/api/quiz-token, PLAN.md "Gate 2"). Off until QUIZ_TOKEN_SECRET is set
- *     on BOTH sides — old uploaded consoles keep working until then.
- *   - light abuse limits (max sessions, max students per session, name length)
+ * v3 over v2: results persistence removed (no Supabase, no history — sessions
+ * evaporate when they end / age out). v2 over v1: collision-checked room
+ * codes, /submit broadcasts only real changes, optional auth gate, abuse
+ * limits.
  *
  * Config (env or a .env file next to this script; real env vars win):
- *   PORT                        default 3000 (prod runs 3001 behind nginx)
- *   SUPABASE_URL                enables persistence together with…
- *   SUPABASE_SERVICE_ROLE_KEY   …this. Both unset → results are not saved.
- *   QUIZ_TOKEN_SECRET           enables the /session auth gate. Unset → open.
+ *   PORT                default 3000 (prod runs 3001 behind nginx)
+ *   QUIZ_TOKEN_SECRET   enables the /session auth gate. Unset → open.
  */
 
 const fs = require('fs');
@@ -57,19 +50,13 @@ app.use(cors());
 
 const SESSION_DURATION = 45 * 60 * 1000; // 45 minutes in ms
 
-const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const QUIZ_TOKEN_SECRET = process.env.QUIZ_TOKEN_SECRET || '';
-
-const PERSIST_ENABLED = Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 const AUTH_ENFORCED = Boolean(QUIZ_TOKEN_SECRET);
 
 // Safety valves — generous vs. the real classroom shape (30 students/room).
 const MAX_SESSIONS = 20000;
 const MAX_STUDENTS_PER_SESSION = 100;
 const MAX_NAME_LENGTH = 40;
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ─── In-memory session store ───────────────────────────────────────────────
 const sessions = new Map();
@@ -97,8 +84,8 @@ function broadcast(session, payload) {
 // here with the shared secret. No secret configured → gate is open (v1
 // behavior) so already-uploaded consoles keep working.
 function verifyQuizToken(token) {
-  if (!AUTH_ENFORCED) return { ok: true, uid: null };
-  if (typeof token !== 'string' || !token.includes('.')) return { ok: false };
+  if (!AUTH_ENFORCED) return true;
+  if (typeof token !== 'string' || !token.includes('.')) return false;
   const [payloadB64, sig] = token.split('.');
   try {
     const expected = crypto
@@ -107,75 +94,12 @@ function verifyQuizToken(token) {
       .digest('base64url');
     const a = Buffer.from(sig);
     const b = Buffer.from(expected);
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return { ok: false };
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-    if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return { ok: false };
-    return { ok: true, uid: typeof payload.uid === 'string' ? payload.uid : null };
+    return Boolean(payload.exp && payload.exp >= Math.floor(Date.now() / 1000));
   } catch (_) {
-    return { ok: false };
+    return false;
   }
-}
-
-// ─── Results persistence ───────────────────────────────────────────────────
-// One row per ended session in public.quiz_session_results (see the website
-// repo's supabase/migrations). Plain REST insert with the service-role key —
-// no client library needed. Persist is scheduled 3s after end so submits
-// already in flight still make it into the saved row.
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-async function persistResults(session, reason) {
-  if (!PERSIST_ENABLED) return;
-  if (session.students.size === 0) return; // empty test rooms → no junk rows
-
-  const row = {
-    quiz_id: session.quizId,
-    teacher_user_id: session.createdBy,
-    code: session.code,
-    title: session.title,
-    ended_reason: reason,
-    started_at: session.startedAt ? new Date(session.startedAt).toISOString() : null,
-    ended_at: new Date().toISOString(),
-    student_count: session.students.size,
-    students: Array.from(session.students.entries()).map(([id, s]) => ({
-      student_id: id,
-      name: s.name,
-      score: s.score,
-      total: s.total,
-      finished: s.finished,
-      tab_switches: s.tabSwitches,
-      away_seconds: s.awaySeconds
-    }))
-  };
-
-  for (const delayMs of [0, 2000, 8000]) {
-    if (delayMs) await sleep(delayMs);
-    try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/quiz_session_results`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: SUPABASE_SERVICE_ROLE_KEY,
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          Prefer: 'return=minimal'
-        },
-        body: JSON.stringify(row)
-      });
-      if (res.ok) return;
-      console.error(`persist: Supabase responded ${res.status}: ${await res.text()}`);
-    } catch (e) {
-      console.error(`persist: ${e.message}`);
-    }
-  }
-  // All retries failed — dump the row into pm2 logs so it can be recovered.
-  console.error('PERSIST_FAILED ' + JSON.stringify(row));
-}
-
-function schedulePersist(session, reason) {
-  if (session.persistScheduled) return;
-  session.persistScheduled = true;
-  setTimeout(() => {
-    persistResults(session, reason).catch(e => console.error('persist:', e));
-  }, 3000);
 }
 
 // Check if session should auto-end (45 min elapsed)
@@ -184,7 +108,6 @@ function checkAutoEnd(session) {
     if (Date.now() - session.startedAt >= SESSION_DURATION) {
       session.status = 'ended';
       broadcast(session, { type: 'ended', reason: 'timeout' });
-      schedulePersist(session, 'timeout');
     }
   }
 }
@@ -215,11 +138,10 @@ setInterval(() => {
 // ─── Routes ───────────────────────────────────────────────────────────────
 
 // Teacher creates a session → gets a code (status: waiting).
-// Body: { title, quizId?, token? } — quizId/token are sent by v2 consoles;
-// old consoles send only title and still work while the gate is open.
+// Body: { title, token? } — old consoles send only title and still work
+// while the gate is open. (quizId from older v2 consoles is ignored.)
 app.post('/session', (req, res) => {
-  const auth = verifyQuizToken(req.body.token);
-  if (!auth.ok) {
+  if (!verifyQuizToken(req.body.token)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
@@ -230,19 +152,12 @@ app.post('/session', (req, res) => {
   const code = generateCode();
   if (!code) return res.status(503).json({ error: 'Server full' });
 
-  const quizId = typeof req.body.quizId === 'string' && UUID_RE.test(req.body.quizId)
-    ? req.body.quizId
-    : null;
-
   sessions.set(code, {
     code,
     createdAt: Date.now(),
     title: String(req.body.title || 'Math Quiz').slice(0, 200),
-    quizId,
-    createdBy: auth.uid,
     status: 'waiting',
     startedAt: null,
-    persistScheduled: false,
     students: new Map(),
     teachers: new Set()
   });
@@ -278,7 +193,6 @@ app.post('/end', (req, res) => {
 
   // Broadcast to all teacher SSE streams
   broadcast(session, { type: 'ended', reason: 'teacher' });
-  schedulePersist(session, 'teacher');
 
   res.json({ ok: true });
 });
@@ -399,22 +313,16 @@ app.get('/live', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     ok: true,
-    version: 2,
+    version: 3,
     sessions: sessions.size,
     students: Array.from(sessions.values()).reduce((n, s) => n + s.students.size, 0),
-    persistence: PERSIST_ENABLED,
     authGate: AUTH_ENFORCED
   });
 });
 
-if (PERSIST_ENABLED && typeof fetch === 'undefined') {
-  console.error('❌ Persistence configured but this Node has no global fetch — Node 18+ required.');
-  process.exit(1);
-}
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ MathSabaq server v2 running on port ${PORT}`);
-  console.log(`   results persistence: ${PERSIST_ENABLED ? 'ON (Supabase)' : 'OFF — set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY'}`);
-  console.log(`   /session auth gate:  ${AUTH_ENFORCED ? 'ENFORCED' : 'OPEN — set QUIZ_TOKEN_SECRET to enforce'}`);
+  console.log(`✅ MathSabaq server v3 running on port ${PORT}`);
+  console.log(`   class history: never saved (by design)`);
+  console.log(`   /session auth gate: ${AUTH_ENFORCED ? 'ENFORCED' : 'OPEN — set QUIZ_TOKEN_SECRET to enforce'}`);
 });
