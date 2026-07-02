@@ -61,25 +61,44 @@ async function uploadBlob(bucket: string, path: string, blob: Blob) {
   }
 }
 
+// Optionally rewrites `const BACKEND = '...'` to QUIZ_BACKEND_URL. Lets the
+// live-quiz server move hosts (e.g. to api.mathsabaq.online) by changing one
+// env var instead of re-editing every quiz file. Unset env → file unchanged.
+function rewriteBackendUrl(html: string): string {
+  const backend = process.env.QUIZ_BACKEND_URL?.replace(/\/+$/, "");
+  if (!backend) return html;
+  return html.replace(
+    /(const\s+BACKEND\s*=\s*)(['"])(?:\\.|(?!\2).)*\2/,
+    `$1$2${backend}$2`,
+  );
+}
+
 async function uploadStudentFile(quizId: string, file: File): Promise<void> {
-  const arrayBuffer = await file.arrayBuffer();
+  const original = await file.text();
   await uploadBlob(
     STUDENT_BUCKET,
     studentPath(quizId),
-    new Blob([arrayBuffer], { type: HTML_CONTENT_TYPE }),
+    new Blob([rewriteBackendUrl(original)], { type: HTML_CONTENT_TYPE }),
   );
 }
 
 // Uploads the teacher console, rewriting its `const STUDENT_URL = '...'` line to
-// this quiz's student public URL so the embedded console's QR resolves. If the
-// file has no STUDENT_URL line, it's uploaded unchanged.
+// this quiz's student public URL so the embedded console's QR resolves, and its
+// `const QUIZ_ID = ...` line to this quiz's id so live results are attributed
+// to it (the author can't know the id ahead of time). Lines that don't exist
+// are simply not rewritten — older files upload unchanged.
 async function uploadTeacherFile(quizId: string, file: File): Promise<void> {
   const original = await file.text();
   const target = studentPageUrl(quizId);
-  const rewritten = original.replace(
-    /(const\s+STUDENT_URL\s*=\s*)(['"])(?:\\.|(?!\2).)*\2/,
-    `$1$2${target}$2`,
-  );
+  const rewritten = rewriteBackendUrl(original)
+    .replace(
+      /(const\s+STUDENT_URL\s*=\s*)(['"])(?:\\.|(?!\2).)*\2/,
+      `$1$2${target}$2`,
+    )
+    .replace(
+      /(const\s+QUIZ_ID\s*=\s*)[^;\n]*/,
+      `$1${JSON.stringify(quizId)}`,
+    );
   await uploadBlob(
     TEACHER_BUCKET,
     teacherPath(quizId),

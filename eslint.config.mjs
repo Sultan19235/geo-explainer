@@ -18,6 +18,8 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      // Hetzner backend — plain CommonJS Node, not part of the Next app.
+      "server/**",
     ],
   },
 ];

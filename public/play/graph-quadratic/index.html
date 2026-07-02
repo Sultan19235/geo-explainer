@@ -428,10 +428,12 @@ function startQuiz() {
   show('s-quiz');
   loadQuestion();
 
-  // Start submitting score every 5 seconds
+  // Heartbeat every 15s — answers and focus changes are sent immediately
+  // anyway (checkAnswer/markAway/markBack call sendScore), so this only keeps
+  // presence fresh. 15s instead of 5s cuts server load ~3× at scale.
   sendScore();
   if (submitInterval) clearInterval(submitInterval);
-  submitInterval = setInterval(sendScore, 5000);
+  submitInterval = setInterval(sendScore, 15000);
 }
 
 // ══════════════════════════════════════════════════════════
