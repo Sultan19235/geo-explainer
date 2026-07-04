@@ -22,6 +22,7 @@ export type QuizFormValues = {
   is_ready: boolean;
   teacher_html_path: string | null;
   student_html_path: string | null;
+  pack_path: string | null;
 };
 
 type Props = {
@@ -143,7 +144,27 @@ export function QuizForm({ action, topics, initial, submitLabelKey }: Props) {
         )}
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="space-y-2">
+        <Label htmlFor="pack_file">{t("field_quiz_pack_file")}</Label>
+        <Input
+          id="pack_file"
+          name="pack_file"
+          type="file"
+          accept=".json,application/json"
+        />
+        <p className="text-xs text-muted-foreground">
+          {t("field_quiz_pack_hint")}
+        </p>
+        {initial?.pack_path && (
+          <p className="text-xs text-muted-foreground">
+            {t("current_file")}: {initial.pack_path}
+          </p>
+        )}
+      </div>
+
+      {error && (
+        <p className="whitespace-pre-wrap text-sm text-red-600">{error}</p>
+      )}
 
       <Button type="submit" disabled={isPending}>
         {isPending ? t("submit_saving") : t(submitLabelKey)}

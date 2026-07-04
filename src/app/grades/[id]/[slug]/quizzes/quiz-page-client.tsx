@@ -5,6 +5,8 @@ import { ClipboardListIcon } from "lucide-react";
 import { useT } from "@/lib/i18n/context";
 import type { Lang } from "@/lib/i18n/strings";
 import { IframeWithLoader } from "@/components/iframe-with-loader";
+import { PackConsoleClient } from "@/app/play/[quizId]/host/pack-console-client";
+import type { Localized } from "@/lib/quiz/pack";
 import { cn } from "@/lib/utils";
 import { LessonHeader } from "../lesson-header";
 
@@ -14,6 +16,8 @@ export type Quiz = {
   title_ru: string | null;
   // Same-origin proxy URL for the teacher console, or null if no file / not ready.
   signed_url: string | null;
+  // Engine quiz (pack) — rendered as a native console instead of an iframe.
+  pack: { title: Localized; questionCount: number } | null;
 };
 
 type Topic = {
@@ -46,7 +50,9 @@ export function QuizPageClient({
 }) {
   const { t, lang } = useT();
   const localizedName = topicName(topic, lang);
-  const usable = quizzes.filter((quiz) => Boolean(quiz.signed_url));
+  const usable = quizzes.filter((quiz) =>
+    Boolean(quiz.signed_url || quiz.pack),
+  );
 
   const [active, setActive] = useState(0);
   // Quiz consoles are mounted lazily on first visit and kept alive afterwards
@@ -120,8 +126,26 @@ export function QuizPageClient({
             )}
 
             <div className="relative">
-              {usable.map((quiz, index) =>
-                mounted.has(index) ? (
+              {usable.map((quiz, index) => {
+                if (!mounted.has(index)) return null;
+                if (quiz.pack) {
+                  // Native engine console — kept mounted across tab switches
+                  // (like the iframes) so a running session survives.
+                  return (
+                    <div
+                      key={`quiz:${quiz.id}`}
+                      className={cn(index !== activeIndex && "hidden")}
+                    >
+                      <PackConsoleClient
+                        quizId={quiz.id}
+                        title={quiz.pack.title}
+                        questionCount={quiz.pack.questionCount}
+                        embedded
+                      />
+                    </div>
+                  );
+                }
+                return (
                   <IframeWithLoader
                     key={`quiz:${quiz.id}:${lang}`}
                     src={appendLang(quiz.signed_url, lang) ?? undefined}
@@ -132,8 +156,8 @@ export function QuizPageClient({
                       index !== activeIndex && "hidden",
                     )}
                   />
-                ) : null,
-              )}
+                );
+              })}
             </div>
           </section>
         )}

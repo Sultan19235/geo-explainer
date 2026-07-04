@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validatePack } from "@/lib/quiz/pack";
+import { packPath } from "@/lib/quiz/pack-server";
 
 // Teacher consoles live in the PRIVATE bucket (embedded via signed URL on the
 // gated lesson page). Student files live in a PUBLIC bucket (opened directly by
@@ -11,6 +13,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 const TEACHER_BUCKET = "lessons";
 const STUDENT_BUCKET = "quizzes-public";
 const HTML_CONTENT_TYPE = "text/html; charset=utf-8";
+const PACK_CONTENT_TYPE = "application/json; charset=utf-8";
 
 function teacherPath(quizId: string) {
   return `quiz/${quizId}/teacher.html`;
@@ -50,15 +53,44 @@ function getOptionalString(formData: FormData, name: string): string | null {
   return v === "" ? null : v;
 }
 
-async function uploadBlob(bucket: string, path: string, blob: Blob) {
+async function uploadBlob(
+  bucket: string,
+  path: string,
+  blob: Blob,
+  contentType = HTML_CONTENT_TYPE,
+) {
   const admin = createAdminClient();
   const { error } = await admin.storage.from(bucket).upload(path, blob, {
-    contentType: HTML_CONTENT_TYPE,
+    contentType,
     upsert: true,
   });
   if (error) {
     throw new Error(`Файлды жүктеу қатесі: ${error.message}`);
   }
+}
+
+// Validates and uploads a quiz pack (the engine's JSON format). Invalid packs
+// are rejected with the validator's messages so the author can fix the file.
+async function uploadPackFile(quizId: string, file: File): Promise<void> {
+  const text = await file.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw new Error(
+      `pack.json is not valid JSON: ${e instanceof Error ? e.message : "parse error"}`,
+    );
+  }
+  const { errors } = validatePack(parsed);
+  if (errors.length > 0) {
+    throw new Error(`pack.json:\n• ${errors.join("\n• ")}`);
+  }
+  await uploadBlob(
+    STUDENT_BUCKET,
+    packPath(quizId),
+    new Blob([text], { type: PACK_CONTENT_TYPE }),
+    PACK_CONTENT_TYPE,
+  );
 }
 
 // Optionally rewrites `const BACKEND = '...'` to QUIZ_BACKEND_URL. Lets the
@@ -116,8 +148,10 @@ export async function createQuizAction(formData: FormData) {
 
   const teacherFile = formData.get("teacher_file");
   const studentFile = formData.get("student_file");
+  const packFile = formData.get("pack_file");
   const hasTeacher = teacherFile instanceof File && teacherFile.size > 0;
   const hasStudent = studentFile instanceof File && studentFile.size > 0;
+  const hasPack = packFile instanceof File && packFile.size > 0;
 
   const { data: inserted, error: insertError } = await admin
     .from("quizzes")
@@ -132,6 +166,7 @@ export async function createQuizAction(formData: FormData) {
   const update: {
     teacher_html_path?: string;
     student_html_path?: string;
+    pack_path?: string;
     is_ready?: boolean;
   } = {};
   // Upload the student file first so its public URL exists before the teacher
@@ -145,6 +180,12 @@ export async function createQuizAction(formData: FormData) {
     update.teacher_html_path = teacherPath(inserted.id);
     // Only mark ready once the teacher file is actually uploaded — a failed
     // upload must not leave a "ready" quiz with no file behind it.
+    update.is_ready = true;
+  }
+  // Engine quiz: one pack replaces both HTML files.
+  if (hasPack) {
+    await uploadPackFile(inserted.id, packFile as File);
+    update.pack_path = packPath(inserted.id);
     update.is_ready = true;
   }
 
@@ -178,8 +219,10 @@ export async function updateQuizAction(id: string, formData: FormData) {
 
   const teacherFile = formData.get("teacher_file");
   const studentFile = formData.get("student_file");
+  const packFile = formData.get("pack_file");
   const hasTeacher = teacherFile instanceof File && teacherFile.size > 0;
   const hasStudent = studentFile instanceof File && studentFile.size > 0;
+  const hasPack = packFile instanceof File && packFile.size > 0;
 
   const update: {
     topic_id: string;
@@ -189,6 +232,7 @@ export async function updateQuizAction(id: string, formData: FormData) {
     is_ready: boolean;
     teacher_html_path?: string;
     student_html_path?: string;
+    pack_path?: string;
   } = { topic_id, title_kz, title_ru, display_order, is_ready };
 
   // Student first, so the teacher file's STUDENT_URL is rewritten to point at
@@ -200,6 +244,11 @@ export async function updateQuizAction(id: string, formData: FormData) {
   if (hasTeacher) {
     await uploadTeacherFile(id, teacherFile as File);
     update.teacher_html_path = teacherPath(id);
+    update.is_ready = true;
+  }
+  if (hasPack) {
+    await uploadPackFile(id, packFile as File);
+    update.pack_path = packPath(id);
     update.is_ready = true;
   }
 
@@ -216,9 +265,11 @@ export async function deleteQuizAction(id: string) {
   await requireAdmin();
   const admin = createAdminClient();
 
-  // Remove both files (ignore missing — remove is idempotent enough here).
+  // Remove all files (ignore missing — remove is idempotent enough here).
   await admin.storage.from(TEACHER_BUCKET).remove([teacherPath(id)]);
-  await admin.storage.from(STUDENT_BUCKET).remove([studentPath(id)]);
+  await admin.storage
+    .from(STUDENT_BUCKET)
+    .remove([studentPath(id), packPath(id)]);
 
   const { error } = await admin.from("quizzes").delete().eq("id", id);
   if (error) {

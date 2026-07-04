@@ -47,7 +47,18 @@ export function QuizClient() {
     return parsed.length ? parsed : [...SECTION_IDS];
   }, [searchParams]);
 
-  const session = useLiveSession(urlCode, urlSections);
+  const session = useLiveSession(urlCode, {
+    // Same key + top-level `sections` field as the old uploaded page, so a
+    // student mid-session keeps their score across the old→new page swap.
+    storagePrefix: "ms_graph_",
+    defaultExtra: { sections: urlSections },
+    sanitizeExtra: (raw) => {
+      const sections = Array.isArray(raw.sections)
+        ? raw.sections.filter(isSectionId)
+        : [];
+      return sections.length ? { sections } : null;
+    },
+  });
 
   return (
     <main className="quiz-grid-paper min-h-dvh text-foreground">
@@ -70,7 +81,7 @@ export function QuizClient() {
       )}
       {session.phase === "active" && (
         <QuizScreen
-          sections={session.sections}
+          sections={session.extra.sections}
           stats={session.stats}
           timeLeft={session.timeLeft}
           onAnswer={session.recordAnswer}

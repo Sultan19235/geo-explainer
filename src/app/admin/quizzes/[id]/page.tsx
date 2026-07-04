@@ -14,6 +14,18 @@ type RawTopic = {
   grade_id: number | null;
 };
 
+type QuizRow = {
+  id: string;
+  topic_id: string;
+  title_kz: string | null;
+  title_ru: string | null;
+  display_order: number | null;
+  is_ready: boolean | null;
+  teacher_html_path: string | null;
+  student_html_path: string | null;
+  pack_path: string | null;
+};
+
 export default async function EditQuizPage({
   params,
 }: {
@@ -23,11 +35,11 @@ export default async function EditQuizPage({
   const { id } = await params;
   const admin = createAdminClient();
 
-  const [{ data: quiz }, { data: rawTopics }] = await Promise.all([
+  const [quizResult, { data: rawTopics }] = await Promise.all([
     admin
       .from("quizzes")
       .select(
-        "id, topic_id, title_kz, title_ru, display_order, is_ready, teacher_html_path, student_html_path",
+        "id, topic_id, title_kz, title_ru, display_order, is_ready, teacher_html_path, student_html_path, pack_path",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -37,6 +49,21 @@ export default async function EditQuizPage({
       .order("display_order", { ascending: true })
       .returns<RawTopic[]>(),
   ]);
+
+  // Tolerate the pack_path column not existing yet (migration not applied):
+  // retry without it so editing existing HTML quizzes keeps working. Pack
+  // upload itself still needs the column, which is the point of the migration.
+  let quiz = quizResult.data as QuizRow | null;
+  if (quizResult.error) {
+    const { data: legacyQuiz } = await admin
+      .from("quizzes")
+      .select(
+        "id, topic_id, title_kz, title_ru, display_order, is_ready, teacher_html_path, student_html_path",
+      )
+      .eq("id", id)
+      .maybeSingle<Omit<QuizRow, "pack_path">>();
+    quiz = legacyQuiz ? { ...legacyQuiz, pack_path: null } : null;
+  }
 
   if (!quiz) {
     notFound();
@@ -57,6 +84,7 @@ export default async function EditQuizPage({
     is_ready: !!quiz.is_ready,
     teacher_html_path: quiz.teacher_html_path ?? null,
     student_html_path: quiz.student_html_path ?? null,
+    pack_path: quiz.pack_path ?? null,
   };
 
   async function update(formData: FormData) {
@@ -76,7 +104,19 @@ export default async function EditQuizPage({
       </div>
       <div className="mb-6 flex items-center justify-between">
         <EditQuizHeading />
-        <DeleteQuizButton action={remove} />
+        <div className="flex items-center gap-3">
+          {quiz.pack_path && (
+            <a
+              href={`/play/${quiz.id}?preview=1`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm font-medium text-primary underline underline-offset-4"
+            >
+              Preview
+            </a>
+          )}
+          <DeleteQuizButton action={remove} />
+        </div>
       </div>
       <QuizForm
         action={update}

@@ -2,17 +2,18 @@
 
 // Student-side session state machine for the live quiz.
 //
-// Mirrors the behavior of the uploaded HTML student page exactly:
+// Mirrors the behavior of the uploaded HTML student pages exactly:
 //   join → waiting (poll /status every 2s) → active (heartbeat /submit every
 //   15s; answers and focus changes submit immediately) → ended.
-// Reconnection uses the same localStorage key and schema as the old page, so
-// a student mid-session keeps their score across the old→new page swap.
+//
+// Quiz-agnostic: each quiz passes a storage prefix plus its own "extra" state
+// (e.g. picked sections, current question index) which is persisted alongside
+// the base fields — spread at the TOP level of the saved JSON, so the old
+// uploaded pages' localStorage schema (sections at top level) stays readable.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchStatus, submitScore } from "./live-client";
-import { isSectionId, SECTION_IDS, type SectionId } from "./quadratic";
 
-const STORAGE_KEY_PREFIX = "ms_graph_";
 const STATE_TTL = 3 * 60 * 60 * 1000; // saved progress expires after 3h
 const HEARTBEAT_MS = 15_000;
 const LOBBY_POLL_MS = 2_000;
@@ -21,7 +22,7 @@ export type QuizPhase = "checking" | "join" | "waiting" | "active" | "ended";
 
 export type QuizStats = { correct: number; wrong: number; streak: number };
 
-type SavedState = {
+type SavedBase = {
   studentId: string;
   name: string;
   correct: number;
@@ -29,13 +30,28 @@ type SavedState = {
   streak: number;
   tabSwitches: number;
   awaySeconds: number;
-  sections: SectionId[];
   ts: number;
 };
 
 export type JoinError = "name" | "code" | "not_found" | "ended" | "network";
 
-export function useLiveSession(urlCode: string, urlSections: SectionId[]) {
+export type LiveSessionOptions<TExtra extends Record<string, unknown>> = {
+  storagePrefix: string;
+  // extra state for a fresh join
+  defaultExtra: TExtra;
+  // restore extra from a parsed saved object (the WHOLE top-level JSON);
+  // return null to fall back to defaultExtra
+  sanitizeExtra: (raw: Record<string, unknown>) => TExtra | null;
+};
+
+export function useLiveSession<TExtra extends Record<string, unknown>>(
+  urlCode: string,
+  options: LiveSessionOptions<TExtra>,
+) {
+  // Options are read once on mount; passing a fresh object literal per render
+  // is fine.
+  const opts = useRef(options).current;
+
   const [phase, setPhase] = useState<QuizPhase>(
     urlCode ? "checking" : "join",
   );
@@ -48,6 +64,7 @@ export function useLiveSession(urlCode: string, urlSections: SectionId[]) {
   });
   const [studentName, setStudentName] = useState("");
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [extra, setExtraState] = useState<TExtra>(opts.defaultExtra);
 
   // Mutable session identity + focus trackers. Refs, not state: sendScore is
   // called from timers and window listeners and must never see a stale value.
@@ -55,7 +72,7 @@ export function useLiveSession(urlCode: string, urlSections: SectionId[]) {
     code: "",
     studentId: "",
     name: "",
-    sections: urlSections,
+    extra: opts.defaultExtra,
     stats: { correct: 0, wrong: 0, streak: 0 },
     focused: true,
     tabSwitches: 0,
@@ -70,32 +87,44 @@ export function useLiveSession(urlCode: string, urlSections: SectionId[]) {
     let away = s.awaySeconds;
     if (s.awayStart) away += Math.round((Date.now() - s.awayStart) / 1000);
     try {
+      const base: SavedBase = {
+        studentId: s.studentId,
+        name: s.name,
+        correct: s.stats.correct,
+        wrong: s.stats.wrong,
+        streak: s.stats.streak,
+        tabSwitches: s.tabSwitches,
+        awaySeconds: away,
+        ts: Date.now(),
+      };
       localStorage.setItem(
-        STORAGE_KEY_PREFIX + s.code,
-        JSON.stringify({
-          studentId: s.studentId,
-          name: s.name,
-          correct: s.stats.correct,
-          wrong: s.stats.wrong,
-          streak: s.stats.streak,
-          tabSwitches: s.tabSwitches,
-          awaySeconds: away,
-          sections: s.sections,
-          ts: Date.now(),
-        } satisfies SavedState),
+        opts.storagePrefix + s.code,
+        JSON.stringify({ ...s.extra, ...base }),
       );
     } catch {
       // storage full/blocked — reconnection just won't survive a reload
     }
-  }, []);
+  }, [opts]);
+
+  // Merge-update the quiz-specific state and persist it immediately (called
+  // on every answer / question move, so a reload resumes mid-quiz).
+  const updateExtra = useCallback(
+    (patch: Partial<TExtra>) => {
+      const s = session.current;
+      s.extra = { ...s.extra, ...patch };
+      setExtraState(s.extra);
+      saveState();
+    },
+    [saveState],
+  );
 
   const clearSaved = useCallback(() => {
     const code = session.current.code;
     if (!code) return;
     try {
-      localStorage.removeItem(STORAGE_KEY_PREFIX + code);
+      localStorage.removeItem(opts.storagePrefix + code);
     } catch {}
-  }, []);
+  }, [opts]);
 
   const endQuiz = useCallback(() => {
     if (session.current.phase === "ended") return;
@@ -145,13 +174,13 @@ export function useLiveSession(urlCode: string, urlSections: SectionId[]) {
     reconnectTried.current = true;
     if (!urlCode) return;
 
-    let saved: SavedState | null = null;
+    let saved: (SavedBase & Record<string, unknown>) | null = null;
     try {
-      const raw = localStorage.getItem(STORAGE_KEY_PREFIX + urlCode);
+      const raw = localStorage.getItem(opts.storagePrefix + urlCode);
       if (raw) {
-        const data = JSON.parse(raw) as SavedState;
+        const data = JSON.parse(raw) as SavedBase & Record<string, unknown>;
         if (Date.now() - data.ts <= STATE_TTL) saved = data;
-        else localStorage.removeItem(STORAGE_KEY_PREFIX + urlCode);
+        else localStorage.removeItem(opts.storagePrefix + urlCode);
       }
     } catch {}
 
@@ -159,32 +188,31 @@ export function useLiveSession(urlCode: string, urlSections: SectionId[]) {
       setPhase("join");
       return;
     }
+    const restored = saved;
 
     (async () => {
       try {
         const res = await fetchStatus(urlCode);
         if (res.status === "not_found" || res.status === "ended") {
           try {
-            localStorage.removeItem(STORAGE_KEY_PREFIX + urlCode);
+            localStorage.removeItem(opts.storagePrefix + urlCode);
           } catch {}
           setPhase("join");
           return;
         }
         const s = session.current;
         s.code = urlCode;
-        s.studentId = saved.studentId;
-        s.name = saved.name;
+        s.studentId = restored.studentId;
+        s.name = restored.name;
         s.stats = {
-          correct: saved.correct || 0,
-          wrong: saved.wrong || 0,
-          streak: saved.streak || 0,
+          correct: restored.correct || 0,
+          wrong: restored.wrong || 0,
+          streak: restored.streak || 0,
         };
-        s.tabSwitches = saved.tabSwitches || 0;
-        s.awaySeconds = saved.awaySeconds || 0;
-        if (saved.sections?.length) {
-          s.sections = saved.sections.filter(isSectionId);
-          if (!s.sections.length) s.sections = [...SECTION_IDS];
-        }
+        s.tabSwitches = restored.tabSwitches || 0;
+        s.awaySeconds = restored.awaySeconds || 0;
+        s.extra = opts.sanitizeExtra(restored) ?? opts.defaultExtra;
+        setExtraState(s.extra);
         setStats(s.stats);
         setStudentName(s.name);
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
@@ -197,7 +225,7 @@ export function useLiveSession(urlCode: string, urlSections: SectionId[]) {
         setPhase("join"); // server unreachable — fresh join screen
       }
     })();
-  }, [urlCode, startQuiz]);
+  }, [urlCode, startQuiz, opts]);
 
   // ── Join ─────────────────────────────────────────────────────────────────
   const join = useCallback(
@@ -337,6 +365,13 @@ export function useLiveSession(urlCode: string, urlSections: SectionId[]) {
     [saveState, sendScore],
   );
 
+  // Reports the "finished" flag (student answered everything) — the teacher
+  // console shows the card as done.
+  const markFinished = useCallback(() => {
+    saveState();
+    void sendScore(true);
+  }, [saveState, sendScore]);
+
   return {
     phase,
     join,
@@ -346,7 +381,9 @@ export function useLiveSession(urlCode: string, urlSections: SectionId[]) {
     stats,
     timeLeft,
     recordAnswer,
-    sections: session.current.sections,
+    markFinished,
+    extra,
+    updateExtra,
     needsCodeInput: !urlCode,
   };
 }

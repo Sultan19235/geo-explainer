@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { logActivity } from "@/lib/analytics/track";
+import { downloadPack } from "@/lib/quiz/pack-server";
 import {
   createLessonHtmlFrameUrl,
   createSignedUrl,
@@ -14,6 +15,7 @@ type QuizRow = {
   display_order: number;
   is_ready: boolean;
   teacher_html_path: string | null;
+  pack_path: string | null;
 };
 
 export default async function QuizzesPage({
@@ -26,17 +28,35 @@ export default async function QuizzesPage({
 
   const { supabase, topic, user } = await loadAccessibleTopic(gradeId, slug);
 
-  // Only ready quizzes with a teacher file are fetched; each is signed and
-  // proxied like theory/problems. A missing quizzes table (migration not yet
-  // run) is tolerated — we just render an empty state rather than crashing.
-  const { data: quizRows } = await supabase
+  // Only ready quizzes with a teacher file OR a pack are fetched. If the
+  // pack_path migration hasn't run yet, fall back to the legacy query so
+  // existing HTML quizzes keep rendering.
+  let quizRows: QuizRow[] | null = null;
+  const withPack = await supabase
     .from("quizzes")
-    .select("id, title_kz, title_ru, display_order, is_ready, teacher_html_path")
+    .select(
+      "id, title_kz, title_ru, display_order, is_ready, teacher_html_path, pack_path",
+    )
     .eq("topic_id", topic.id)
     .eq("is_ready", true)
-    .not("teacher_html_path", "is", null)
+    .or("teacher_html_path.not.is.null,pack_path.not.is.null")
     .order("display_order", { ascending: true })
     .returns<QuizRow[]>();
+  if (withPack.error) {
+    const { data: legacyRows } = await supabase
+      .from("quizzes")
+      .select(
+        "id, title_kz, title_ru, display_order, is_ready, teacher_html_path",
+      )
+      .eq("topic_id", topic.id)
+      .eq("is_ready", true)
+      .not("teacher_html_path", "is", null)
+      .order("display_order", { ascending: true })
+      .returns<Omit<QuizRow, "pack_path">[]>();
+    quizRows = (legacyRows ?? []).map((row) => ({ ...row, pack_path: null }));
+  } else {
+    quizRows = withPack.data;
+  }
 
   // Each rendered quiz iframe is a "used" quiz — log one open_quiz per quiz the
   // teacher is shown. Runs after the response, so it adds no render latency.
@@ -58,6 +78,20 @@ export default async function QuizzesPage({
 
   const quizzes = await Promise.all(
     (quizRows ?? []).map(async (quiz): Promise<Quiz> => {
+      // Engine quiz: the native console needs only the pack title + size.
+      if (quiz.pack_path) {
+        const pack = await downloadPack(quiz.pack_path);
+        return {
+          id: quiz.id,
+          title_kz: quiz.title_kz,
+          title_ru: quiz.title_ru,
+          signed_url: null,
+          pack: pack
+            ? { title: pack.title, questionCount: pack.questions.length }
+            : null,
+        };
+      }
+
       const signedUrl = quiz.teacher_html_path
         ? await createSignedUrl(quiz.teacher_html_path)
         : null;
@@ -67,6 +101,7 @@ export default async function QuizzesPage({
         title_kz: quiz.title_kz,
         title_ru: quiz.title_ru,
         signed_url: createLessonHtmlFrameUrl(signedUrl),
+        pack: null,
       };
     }),
   );

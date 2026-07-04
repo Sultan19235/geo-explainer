@@ -308,6 +308,9 @@ export const STRINGS = {
     back_to_quizzes: "← Тесттер",
     field_quiz_teacher_file: "Мұғалім HTML файлы",
     field_quiz_student_file: "Оқушы HTML файлы (қажет болса)",
+    field_quiz_pack_file: "Тест пакеті (pack.json)",
+    field_quiz_pack_hint:
+      "Жаңа движок: бір JSON файл екі HTML файлдың орнын басады. Формат: docs/QUIZ_PACK_FORMAT.md",
     delete_quiz_confirm:
       "Осы тестті жою керек пе? Бұл әрекетті қайтару мүмкін емес.",
 
@@ -624,6 +627,9 @@ export const STRINGS = {
     back_to_quizzes: "← Тесты",
     field_quiz_teacher_file: "HTML файл учителя",
     field_quiz_student_file: "HTML файл ученика (если нужен)",
+    field_quiz_pack_file: "Пакет теста (pack.json)",
+    field_quiz_pack_hint:
+      "Новый движок: один JSON-файл заменяет оба HTML-файла. Формат: docs/QUIZ_PACK_FORMAT.md",
     delete_quiz_confirm:
       "Удалить этот тест? Это действие необратимо.",
 
