@@ -84,9 +84,14 @@ export type LiveEvent =
 
 // Opens a room. Fetches the site's short-lived auth token first (same-origin;
 // returns token:null while the gate is dormant) and passes it to /session.
+// The server returns a per-session hostSecret that proves this browser owns the
+// room; it must be sent with /start, /end and /live. Older servers omit it, so
+// it's optional here (null → the server's host-secret gate is dormant anyway).
 export async function createSession(
   title: string,
-): Promise<{ code: string } | { error: "unauthorized" | "network" }> {
+): Promise<
+  { code: string; hostSecret: string | null } | { error: "unauthorized" | "network" }
+> {
   let token: string | null = null;
   try {
     const res = await fetch("/api/quiz-token");
@@ -101,26 +106,40 @@ export async function createSession(
       body: JSON.stringify({ title, token }),
     });
     if (res.status === 401) return { error: "unauthorized" };
-    const data = (await res.json()) as { code?: string };
+    const data = (await res.json()) as { code?: string; hostSecret?: string };
     if (!data.code) return { error: "network" };
-    return { code: data.code };
+    return { code: data.code, hostSecret: data.hostSecret ?? null };
   } catch {
     return { error: "network" };
   }
 }
 
-export async function startSession(code: string): Promise<void> {
+// The teacher SSE stream URL, carrying the hostSecret in the query string
+// because EventSource can't set request headers.
+export function liveStreamUrl(code: string, hostSecret: string | null): string {
+  const params = new URLSearchParams({ code });
+  if (hostSecret) params.set("hostSecret", hostSecret);
+  return `${BACKEND}/live?${params.toString()}`;
+}
+
+export async function startSession(
+  code: string,
+  hostSecret: string | null = null,
+): Promise<void> {
   await fetch(`${BACKEND}/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, hostSecret }),
   });
 }
 
-export async function endSession(code: string): Promise<void> {
+export async function endSession(
+  code: string,
+  hostSecret: string | null = null,
+): Promise<void> {
   await fetch(`${BACKEND}/end`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, hostSecret }),
   });
 }

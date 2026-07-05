@@ -20,8 +20,18 @@
  * limits.
  *
  * Config (env or a .env file next to this script; real env vars win):
- *   PORT                default 3000 (prod runs 3001 behind nginx)
- *   QUIZ_TOKEN_SECRET   enables the /session auth gate. Unset → open.
+ *   PORT                     default 3000 (prod runs 3001 behind nginx)
+ *   QUIZ_TOKEN_SECRET        enables the /session auth gate. Unset → open.
+ *   LIVE_ALLOWED_ORIGINS     comma-separated origin allowlist for CORS. Unset →
+ *                            reflect any origin (v3 behavior). Set to the
+ *                            website origin(s) to lock the API to your site.
+ *   LIVE_HOST_SECRET_ENFORCED  when set, /start, /end and /live require the
+ *                            per-session hostSecret returned by /session, so
+ *                            only the teacher who opened a room can control or
+ *                            watch it. Unset → dormant (secret still issued).
+ *   LIVE_RATE_LIMIT_PER_MIN  per-IP request ceiling per minute (default 2000;
+ *                            0 disables). Generous for a NAT'd classroom.
+ *   LIVE_MAX_SSE_PER_IP      max concurrent /live streams per IP (default 50).
  */
 
 const fs = require('fs');
@@ -46,12 +56,77 @@ const cors = require('cors');
 const app = express();
 
 app.use(express.json());
-app.use(cors());
 
 const SESSION_DURATION = 45 * 60 * 1000; // 45 minutes in ms
 
 const QUIZ_TOKEN_SECRET = process.env.QUIZ_TOKEN_SECRET || '';
 const AUTH_ENFORCED = Boolean(QUIZ_TOKEN_SECRET);
+
+// Only the teacher who created a room may control (/start, /end) or watch
+// (/live) it. /session hands the creator a per-session hostSecret; the
+// student-facing code is NOT enough. Dormant until the env is set, so already
+// deployed consoles keep working until they've adopted the secret.
+const HOST_SECRET_ENFORCED = Boolean(process.env.LIVE_HOST_SECRET_ENFORCED);
+
+// ─── CORS allowlist ─────────────────────────────────────────────────────────
+// The website's student pages and teacher consoles call this backend
+// cross-origin. Locking CORS to the site origin(s) stops arbitrary websites
+// from scripting the API in a visitor's browser. Unset → reflect any origin
+// (v3 behavior) so deploying this build changes nothing until the operator
+// sets the list.
+const ALLOWED_ORIGINS = (process.env.LIVE_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const CORS_LOCKED = ALLOWED_ORIGINS.length > 0;
+
+app.use(
+  cors({
+    origin(origin, cb) {
+      // No Origin header = same-origin or a non-browser client (curl, the
+      // student HTML's own fetch on some engines) — always allowed. When the
+      // allowlist is unset we stay permissive; otherwise only listed origins
+      // get CORS headers, so other sites' browsers can't read responses.
+      if (!origin || !CORS_LOCKED || ALLOWED_ORIGINS.includes(origin)) {
+        return cb(null, true);
+      }
+      return cb(null, false);
+    },
+  }),
+);
+
+// ─── Per-IP rate limiting (in-memory, best-effort) ──────────────────────────
+// Blunts request floods and SSE-connection exhaustion on the single-core box.
+// The default ceiling is deliberately high so a whole classroom behind one
+// school NAT stays well under it while a single-host flood is still cut off.
+const RATE_LIMIT_PER_MIN = Number(process.env.LIVE_RATE_LIMIT_PER_MIN ?? 2000);
+const MAX_SSE_PER_IP = Number(process.env.LIVE_MAX_SSE_PER_IP ?? 50);
+const rlHits = new Map(); // ip -> timestamps within the trailing minute
+const sseByIp = new Map(); // ip -> open /live connection count
+
+function clientIpOf(req) {
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.length) return xff.split(',')[0].trim();
+  return (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+
+function rateLimited(ip) {
+  if (!RATE_LIMIT_PER_MIN) return false; // 0 disables the limiter
+  const windowStart = Date.now() - 60_000;
+  const arr = (rlHits.get(ip) || []).filter((t) => t > windowStart);
+  arr.push(Date.now());
+  rlHits.set(ip, arr);
+  return arr.length > RATE_LIMIT_PER_MIN;
+}
+
+app.use((req, res, next) => {
+  const ip = clientIpOf(req);
+  req.clientIp = ip;
+  if (rateLimited(ip)) {
+    return res.status(429).json({ error: 'Too many requests' });
+  }
+  next();
+});
 
 // Safety valves — generous vs. the real classroom shape (30 students/room).
 const MAX_SESSIONS = 20000;
@@ -61,14 +136,34 @@ const MAX_NAME_LENGTH = 40;
 // ─── In-memory session store ───────────────────────────────────────────────
 const sessions = new Map();
 
+const CODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
 function generateCode() {
-  // Collision-checked: v1 could overwrite an in-progress room (~1 in 2.2B per
-  // create, but at 20k sessions/day it would eventually clobber a live class).
+  // Collision-checked AND unpredictable: crypto.randomBytes (not Math.random)
+  // so a live room's code can't be guessed from an observed one — guessing is
+  // the only way an outsider could reach /live or /submit for a class.
   for (let i = 0; i < 20; i++) {
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    if (code.length === 6 && !sessions.has(code)) return code;
+    const bytes = crypto.randomBytes(6);
+    let code = '';
+    for (let j = 0; j < 6; j++) code += CODE_ALPHABET[bytes[j] % CODE_ALPHABET.length];
+    if (!sessions.has(code)) return code;
   }
   return null; // astronomically unlikely unless the store is packed
+}
+
+// Per-session teacher credential. Returned once to the room creator; required
+// to control or watch the room when LIVE_HOST_SECRET_ENFORCED is set.
+function generateHostSecret() {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+function verifyHostSecret(session, provided) {
+  if (!HOST_SECRET_ENFORCED) return true; // dormant gate
+  if (!session.hostSecret) return true; // legacy session predating the secret
+  if (typeof provided !== 'string' || provided.length === 0) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(session.hostSecret);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 function broadcast(session, payload) {
@@ -135,6 +230,16 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000);
 
+// Evict stale rate-limit buckets so the map doesn't grow with unique IPs.
+setInterval(() => {
+  const windowStart = Date.now() - 60_000;
+  for (const [ip, hits] of rlHits.entries()) {
+    const recent = hits.filter((t) => t > windowStart);
+    if (recent.length === 0) rlHits.delete(ip);
+    else rlHits.set(ip, recent);
+  }
+}, 5 * 60 * 1000);
+
 // ─── Routes ───────────────────────────────────────────────────────────────
 
 // Teacher creates a session → gets a code (status: waiting).
@@ -152,8 +257,10 @@ app.post('/session', (req, res) => {
   const code = generateCode();
   if (!code) return res.status(503).json({ error: 'Server full' });
 
+  const hostSecret = generateHostSecret();
   sessions.set(code, {
     code,
+    hostSecret,
     createdAt: Date.now(),
     title: String(req.body.title || 'Math Quiz').slice(0, 200),
     status: 'waiting',
@@ -161,7 +268,8 @@ app.post('/session', (req, res) => {
     students: new Map(),
     teachers: new Set()
   });
-  res.json({ code });
+  // hostSecret goes ONLY to the creator here; students never receive it.
+  res.json({ code, hostSecret });
 });
 
 // Teacher starts the quiz (waiting → active)
@@ -171,6 +279,9 @@ app.post('/start', (req, res) => {
 
   const session = sessions.get(code);
   if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!verifyHostSecret(session, req.body.hostSecret)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
 
   session.status = 'active';
   session.startedAt = Date.now();
@@ -188,6 +299,9 @@ app.post('/end', (req, res) => {
 
   const session = sessions.get(code);
   if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!verifyHostSecret(session, req.body.hostSecret)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
 
   session.status = 'ended';
 
@@ -272,6 +386,19 @@ app.get('/live', (req, res) => {
   const { code } = req.query;
   const session = sessions.get(code);
   if (!session) return res.status(404).json({ error: 'Session not found' });
+  // The live stream carries every student's name, score and anti-cheat
+  // telemetry — teacher-only. hostSecret rides the query string because
+  // EventSource can't set headers.
+  if (!verifyHostSecret(session, req.query.hostSecret)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const ip = req.clientIp || clientIpOf(req);
+  const openForIp = sseByIp.get(ip) || 0;
+  if (openForIp >= MAX_SSE_PER_IP) {
+    return res.status(429).json({ error: 'Too many live streams' });
+  }
+  sseByIp.set(ip, openForIp + 1);
 
   checkAutoEnd(session);
 
@@ -306,6 +433,9 @@ app.get('/live', (req, res) => {
   req.on('close', () => {
     session.teachers.delete(res);
     clearInterval(ping);
+    const n = (sseByIp.get(ip) || 1) - 1;
+    if (n <= 0) sseByIp.delete(ip);
+    else sseByIp.set(ip, n);
   });
 });
 
@@ -316,7 +446,9 @@ app.get('/health', (req, res) => {
     version: 3,
     sessions: sessions.size,
     students: Array.from(sessions.values()).reduce((n, s) => n + s.students.size, 0),
-    authGate: AUTH_ENFORCED
+    authGate: AUTH_ENFORCED,
+    hostSecretGate: HOST_SECRET_ENFORCED,
+    corsLocked: CORS_LOCKED
   });
 });
 
@@ -325,4 +457,7 @@ app.listen(PORT, () => {
   console.log(`✅ MathSabaq server v3 running on port ${PORT}`);
   console.log(`   class history: never saved (by design)`);
   console.log(`   /session auth gate: ${AUTH_ENFORCED ? 'ENFORCED' : 'OPEN — set QUIZ_TOKEN_SECRET to enforce'}`);
+  console.log(`   host-secret gate:   ${HOST_SECRET_ENFORCED ? 'ENFORCED' : 'DORMANT — set LIVE_HOST_SECRET_ENFORCED to enforce'}`);
+  console.log(`   CORS:               ${CORS_LOCKED ? `locked to ${ALLOWED_ORIGINS.join(', ')}` : 'OPEN — set LIVE_ALLOWED_ORIGINS to lock'}`);
+  console.log(`   rate limit:         ${RATE_LIMIT_PER_MIN ? `${RATE_LIMIT_PER_MIN}/min per IP, ${MAX_SSE_PER_IP} live streams/IP` : 'disabled'}`);
 });
