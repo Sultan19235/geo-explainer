@@ -1,11 +1,11 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { validatePack } from "@/lib/quiz/pack";
-import { packPath } from "@/lib/quiz/pack-server";
+import { packCacheTag, packPath } from "@/lib/quiz/pack-server";
 
 // Teacher consoles live in the PRIVATE bucket (embedded via signed URL on the
 // gated lesson page). Student files live in a PUBLIC bucket (opened directly by
@@ -91,6 +91,8 @@ async function uploadPackFile(quizId: string, file: File): Promise<void> {
     new Blob([text], { type: PACK_CONTENT_TYPE }),
     PACK_CONTENT_TYPE,
   );
+  // Serve the new pack immediately — lesson pages cache pack downloads.
+  revalidateTag(packCacheTag(packPath(quizId)));
 }
 
 // Optionally rewrites `const BACKEND = '...'` to QUIZ_BACKEND_URL. Lets the
@@ -270,6 +272,7 @@ export async function deleteQuizAction(id: string) {
   await admin.storage
     .from(STUDENT_BUCKET)
     .remove([studentPath(id), packPath(id)]);
+  revalidateTag(packCacheTag(packPath(id)));
 
   const { error } = await admin.from("quizzes").delete().eq("id", id);
   if (error) {

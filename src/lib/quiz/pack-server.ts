@@ -2,6 +2,7 @@
 
 import { promises as fs } from "fs";
 import path from "path";
+import { unstable_cache } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { validatePack, type QuizPack } from "./pack";
 
@@ -41,9 +42,15 @@ async function loadDevPreview(): Promise<QuizWithPack | null> {
   }
 }
 
-// Light path for pages that already hold the quiz row: just fetch + validate
-// the pack file.
-export async function downloadPack(storagePath: string): Promise<QuizPack | null> {
+// Cache tag for one pack file; admin upload/delete revalidates it so a new
+// pack is served immediately despite the cache below.
+export function packCacheTag(storagePath: string) {
+  return `quiz-pack:${storagePath}`;
+}
+
+async function downloadPackFresh(
+  storagePath: string,
+): Promise<QuizPack | null> {
   const admin = createAdminClient();
   const { data: file, error } = await admin.storage
     .from(PACK_BUCKET)
@@ -59,6 +66,19 @@ export async function downloadPack(storagePath: string): Promise<QuizPack | null
   } catch {
     return null;
   }
+}
+
+// Light path for pages that already hold the quiz row: just fetch + validate
+// the pack file. Cached — the pack is the largest payload on the lesson
+// quizzes page and only ever changes via admin re-upload.
+export async function downloadPack(
+  storagePath: string,
+): Promise<QuizPack | null> {
+  return unstable_cache(
+    () => downloadPackFresh(storagePath),
+    ["quiz-pack", storagePath],
+    { revalidate: 300, tags: [packCacheTag(storagePath)] },
+  )();
 }
 
 export async function loadQuizWithPack(
