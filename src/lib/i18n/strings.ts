@@ -118,6 +118,24 @@ export const STRINGS = {
     profile_status_active: "Белсенді",
     profile_status_expired: "Мерзімі бітті",
 
+    // Profile — saved quizzes
+    profile_my_quizzes: "Менің тесттерім",
+    my_quizzes_empty: "Сақталған тесттер әлі жоқ.",
+    my_quizzes_empty_hint:
+      "Тест консолінде сұрақтарды таңдап, «Тестті сақтау» батырмасын басыңыз — тест осы жерде пайда болады.",
+    my_quizzes_questions: (n: number) => `${n} сұрақ`,
+    my_quizzes_open: "Ашу",
+    my_quizzes_rename: "Атын өзгерту",
+    my_quizzes_duplicate: "Көшірмесін жасау",
+    my_quizzes_delete: "Өшіру",
+    my_quizzes_delete_confirm: (name: string) =>
+      `«${name}» тестін өшіру керек пе?`,
+    my_quizzes_copy_suffix: "көшірме",
+    my_quizzes_shuffle_badge: "Кездейсоқ рет",
+    my_quizzes_save: "Сақтау",
+    my_quizzes_cancel: "Болдырмау",
+    my_quizzes_error: "Қате шықты. Қайталап көріңіз.",
+
     // Grades catalog
     grades_title: "Сабақтар каталогы",
     grades_subtitle: "Сыныпты таңдаңыз және жарияланған тақырыптарды қараңыз.",
@@ -436,6 +454,23 @@ export const STRINGS = {
     profile_access_expired: (date: string) => `Срок истёк: ${date}`,
     profile_status_active: "Активен",
     profile_status_expired: "Срок истёк",
+
+    // Profile — saved quizzes
+    profile_my_quizzes: "Мои тесты",
+    my_quizzes_empty: "Сохранённых тестов пока нет.",
+    my_quizzes_empty_hint:
+      "Выберите вопросы в консоли теста и нажмите «Сохранить тест» — тест появится здесь.",
+    my_quizzes_questions: (n: number) => `${n} вопр.`,
+    my_quizzes_open: "Открыть",
+    my_quizzes_rename: "Переименовать",
+    my_quizzes_duplicate: "Дублировать",
+    my_quizzes_delete: "Удалить",
+    my_quizzes_delete_confirm: (name: string) => `Удалить тест «${name}»?`,
+    my_quizzes_copy_suffix: "копия",
+    my_quizzes_shuffle_badge: "Случайный порядок",
+    my_quizzes_save: "Сохранить",
+    my_quizzes_cancel: "Отмена",
+    my_quizzes_error: "Произошла ошибка. Попробуйте ещё раз.",
 
     // Grades catalog
     grades_title: "Каталог уроков",

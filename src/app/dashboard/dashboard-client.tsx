@@ -1,11 +1,21 @@
 "use client";
 
 import Link from "next/link";
+import { useRef, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
+import { Copy, Pencil, Shuffle, Trash2 } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { useT } from "@/lib/i18n/context";
+import type { SavedQuizSummary } from "@/lib/quiz/saved-quiz";
+import {
+  deleteSavedQuizAction,
+  duplicateSavedQuizAction,
+  renameSavedQuizAction,
+} from "@/lib/quiz/saved-quiz-actions";
+import { SAVED_QUIZ_NAME_MAX } from "@/lib/quiz/saved-quiz";
 
 export type PurchasedGrade = {
   gradeId: number;
@@ -36,6 +46,7 @@ export function DashboardClient({
   createdAt,
   isAdmin,
   purchasedGrades,
+  savedQuizzes,
   accessExpiresAt,
   accessActive,
   logoutAction,
@@ -46,6 +57,7 @@ export function DashboardClient({
   createdAt: string | null;
   isAdmin: boolean;
   purchasedGrades: PurchasedGrade[];
+  savedQuizzes: SavedQuizSummary[];
   accessExpiresAt: string | null;
   accessActive: boolean;
   logoutAction: () => Promise<void>;
@@ -218,7 +230,205 @@ export function DashboardClient({
             )}
           </section>
         </div>
+
+        {/* Saved quizzes */}
+        <section className="mt-10">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("profile_my_quizzes")}
+          </h2>
+          {savedQuizzes.length === 0 ? (
+            <Card className="border-dashed border-border">
+              <CardContent className="px-6 py-8 text-center">
+                <p className="font-medium">{t("my_quizzes_empty")}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t("my_quizzes_empty_hint")}
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-border/80">
+              <CardContent className="divide-y divide-border/70 p-0">
+                {savedQuizzes.map((quiz) => (
+                  <SavedQuizRow
+                    key={quiz.id}
+                    quiz={quiz}
+                    dateLabel={formatDate(quiz.updatedAt)}
+                  />
+                ))}
+              </CardContent>
+            </Card>
+          )}
+        </section>
       </main>
     </div>
+  );
+}
+
+function SavedQuizRow({
+  quiz,
+  dateLabel,
+}: {
+  quiz: SavedQuizSummary;
+  dateLabel: string;
+}) {
+  const { t, lang } = useT();
+  const [pending, startTransition] = useTransition();
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(quiz.name);
+  // Escape must beat the input's blur handler, which otherwise submits the
+  // rename the user just cancelled.
+  const cancelRenameRef = useRef(false);
+
+  const quizTitle =
+    lang === "ru" ? quiz.quizTitleRu ?? quiz.quizTitleKz : quiz.quizTitleKz;
+
+  // revalidatePath("/dashboard") inside each action refreshes the list, so
+  // rows never track local copies of server state beyond the rename input.
+  const run = (fn: () => Promise<{ ok: boolean }>) =>
+    startTransition(async () => {
+      const res = await fn();
+      if (!res.ok) window.alert(t("my_quizzes_error"));
+    });
+
+  const submitRename = () => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === quiz.name) {
+      setName(quiz.name);
+      setRenaming(false);
+      return;
+    }
+    setRenaming(false);
+    run(() => renameSavedQuizAction({ id: quiz.id, name: trimmed }));
+  };
+
+  const duplicate = () =>
+    run(() =>
+      duplicateSavedQuizAction({
+        id: quiz.id,
+        name: `${quiz.name} — ${t("my_quizzes_copy_suffix")}`.slice(
+          0,
+          SAVED_QUIZ_NAME_MAX,
+        ),
+      }),
+    );
+
+  const remove = () => {
+    if (!window.confirm(t("my_quizzes_delete_confirm")(quiz.name))) return;
+    run(() => deleteSavedQuizAction({ id: quiz.id }));
+  };
+
+  return (
+    <div
+      className={
+        "flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5" +
+        (pending ? " opacity-50" : "")
+      }
+    >
+      <div className="min-w-0 flex-1 basis-56">
+        {renaming ? (
+          <Input
+            autoFocus
+            value={name}
+            maxLength={SAVED_QUIZ_NAME_MAX}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                cancelRenameRef.current = true;
+                e.currentTarget.blur();
+              }
+            }}
+            onBlur={() => {
+              if (cancelRenameRef.current) {
+                cancelRenameRef.current = false;
+                setName(quiz.name);
+                setRenaming(false);
+                return;
+              }
+              submitRename();
+            }}
+            className="h-8 max-w-sm text-sm font-semibold"
+          />
+        ) : (
+          <p className="truncate text-sm font-semibold">{quiz.name}</p>
+        )}
+        <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 truncate text-xs text-muted-foreground">
+          <span className="truncate">{quizTitle}</span>
+          <span aria-hidden>·</span>
+          <span className="shrink-0">
+            {t("my_quizzes_questions")(quiz.questionCount)}
+          </span>
+          {quiz.orderMode === "shuffle" && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-background px-1.5 py-px text-[10px] font-semibold">
+              <Shuffle className="size-2.5" aria-hidden />
+              {t("my_quizzes_shuffle_badge")}
+            </span>
+          )}
+          <span aria-hidden>·</span>
+          <span className="shrink-0">{dateLabel}</span>
+        </p>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1">
+        <Link
+          href={`/play/${quiz.quizId}/host?saved=${quiz.id}`}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          {t("my_quizzes_open")}
+        </Link>
+        <RowIconButton
+          label={t("my_quizzes_rename")}
+          disabled={pending}
+          onClick={() => setRenaming(true)}
+        >
+          <Pencil className="size-3.5" aria-hidden />
+        </RowIconButton>
+        <RowIconButton
+          label={t("my_quizzes_duplicate")}
+          disabled={pending}
+          onClick={duplicate}
+        >
+          <Copy className="size-3.5" aria-hidden />
+        </RowIconButton>
+        <RowIconButton
+          label={t("my_quizzes_delete")}
+          disabled={pending}
+          destructive
+          onClick={remove}
+        >
+          <Trash2 className="size-3.5" aria-hidden />
+        </RowIconButton>
+      </div>
+    </div>
+  );
+}
+
+function RowIconButton({
+  label,
+  disabled,
+  destructive = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled: boolean;
+  destructive?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={
+        "grid size-8 place-items-center rounded-md border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-background disabled:opacity-40 " +
+        (destructive ? "hover:text-destructive" : "hover:text-foreground")
+      }
+    >
+      {children}
+    </button>
   );
 }

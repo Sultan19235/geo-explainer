@@ -8,6 +8,8 @@ import { Fragment, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  Bookmark,
+  BookmarkPlus,
   Check,
   Copy,
   EyeOff,
@@ -26,6 +28,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Confetti } from "@/components/quiz/confetti";
 import { MathText } from "@/components/quiz/math-text";
 import { QrCode } from "@/components/quiz/qr-code";
@@ -42,6 +45,11 @@ import {
   type PackTagGroup,
 } from "@/lib/quiz/pack";
 import { engineT } from "@/lib/quiz/engine-strings";
+import type { SavedQuizRef } from "@/lib/quiz/saved-quiz";
+import {
+  createSavedQuizAction,
+  updateSavedQuizAction,
+} from "@/lib/quiz/saved-quiz-actions";
 import {
   useTeacherSession,
   type LiveStudent,
@@ -87,18 +95,36 @@ function sortStudents(students: Map<string, LiveStudent>) {
   });
 }
 
+// The saved quiz currently being edited in the console. `snapshot` is the
+// composition at last save; comparing against the live selection detects
+// unsaved changes.
+type SavedState = { id: string; name: string; snapshot: string };
+
+function selectionSnapshot(ids: string[], mode: "custom" | "shuffle") {
+  return `${ids.join(",")}|${mode}`;
+}
+
 export function PackConsoleClient({
   quizId,
   title,
   questions,
   tagGroups,
   embedded = false,
+  canSave = true,
+  savedQuiz = null,
+  initialSelectedIds,
+  initialOrderMode,
 }: {
   quizId: string;
   title: Localized;
   questions: PackQuestion[];
   tagGroups?: PackTagGroup[];
   embedded?: boolean;
+  // false for dev-preview, where there is no signed-in user to own a save.
+  canSave?: boolean;
+  savedQuiz?: SavedQuizRef | null;
+  initialSelectedIds?: string[];
+  initialOrderMode?: "custom" | "shuffle";
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -106,14 +132,34 @@ export function PackConsoleClient({
   const [qrOpen, setQrOpen] = useState(false);
   // Which questions the teacher includes in this room — an ordered list; in
   // "custom" mode students get exactly this sequence. Defaults to the whole
-  // pack in pack order. Frozen once the room opens (the picker is only shown
-  // in the setup phase).
-  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
-    questions.map((q) => q.id),
+  // pack in pack order (or the saved quiz being edited). Frozen once the room
+  // opens (the picker is only shown in the setup phase).
+  const [selectedIds, setSelectedIds] = useState<string[]>(
+    () => initialSelectedIds ?? questions.map((q) => q.id),
   );
   // "custom" → students follow selectedIds; "shuffle" → each student's device
   // deals its own question/option order (anti-cheating for neighbors).
-  const [orderMode, setOrderMode] = useState<"custom" | "shuffle">("custom");
+  const [orderMode, setOrderMode] = useState<"custom" | "shuffle">(
+    initialOrderMode ?? "custom",
+  );
+  // When some saved ids no longer exist in the pack, the loaded selection
+  // already differs from the row — an unmatchable snapshot keeps "save
+  // changes" enabled so the teacher can persist the cleanup.
+  const [saved, setSaved] = useState<SavedState | null>(() =>
+    savedQuiz
+      ? {
+          id: savedQuiz.id,
+          name: savedQuiz.name,
+          snapshot:
+            savedQuiz.missing > 0
+              ? "stale"
+              : selectionSnapshot(
+                  initialSelectedIds ?? questions.map((q) => q.id),
+                  initialOrderMode ?? "custom",
+                ),
+        }
+      : null,
+  );
   const rootRef = useRef<HTMLDivElement>(null);
 
   const quizTitle = loc(title, lang);
@@ -154,6 +200,7 @@ export function PackConsoleClient({
     >
       {session.phase === "setup" && (
         <SetupScreen
+          quizId={quizId}
           quizTitle={quizTitle}
           questions={questions}
           tagGroups={tagGroups}
@@ -162,6 +209,10 @@ export function PackConsoleClient({
           setSelectedIds={setSelectedIds}
           orderMode={orderMode}
           setOrderMode={setOrderMode}
+          canSave={canSave}
+          saved={saved}
+          setSaved={setSaved}
+          savedMissing={savedQuiz?.missing ?? 0}
           creating={session.creating}
           createError={session.createError}
           onCreate={() => void session.createRoom(quizTitle)}
@@ -219,6 +270,7 @@ const TAG_BADGE_COLORS: Record<PackTagColor, string> = {
 };
 
 function SetupScreen({
+  quizId,
   quizTitle,
   questions,
   tagGroups,
@@ -227,10 +279,15 @@ function SetupScreen({
   setSelectedIds,
   orderMode,
   setOrderMode,
+  canSave,
+  saved,
+  setSaved,
+  savedMissing,
   creating,
   createError,
   onCreate,
 }: {
+  quizId: string;
   quizTitle: string;
   questions: PackQuestion[];
   tagGroups?: PackTagGroup[];
@@ -239,6 +296,10 @@ function SetupScreen({
   setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
   orderMode: "custom" | "shuffle";
   setOrderMode: (mode: "custom" | "shuffle") => void;
+  canSave: boolean;
+  saved: SavedState | null;
+  setSaved: (s: SavedState) => void;
+  savedMissing: number;
   creating: boolean;
   createError: "unauthorized" | "network" | null;
   onCreate: () => void;
@@ -362,6 +423,22 @@ function SetupScreen({
           />
         </div>
 
+        {canSave && (
+          <SaveQuizControls
+            quizId={quizId}
+            selectedIds={selectedIds}
+            orderMode={orderMode}
+            saved={saved}
+            setSaved={setSaved}
+            embedded={embedded}
+          />
+        )}
+
+        {savedMissing > 0 && (
+          <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-sm font-medium text-amber-800">
+            {t("c_saved_missing").replace("{n}", String(savedMissing))}
+          </p>
+        )}
         {createError && (
           <p
             role="alert"
@@ -508,6 +585,213 @@ function ModeButton({
         {desc}
       </span>
     </button>
+  );
+}
+
+// ═══ SAVE QUIZ (name + reuse from the dashboard) ═════════════════════════
+
+function SaveQuizControls({
+  quizId,
+  selectedIds,
+  orderMode,
+  saved,
+  setSaved,
+  embedded,
+}: {
+  quizId: string;
+  selectedIds: string[];
+  orderMode: "custom" | "shuffle";
+  saved: SavedState | null;
+  setSaved: (s: SavedState) => void;
+  embedded: boolean;
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  // naming = the name input is open (first save, or "save as new" of an
+  // already-saved quiz — both create a new row).
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const snapshot = selectionSnapshot(selectedIds, orderMode);
+  const dirty = saved !== null && snapshot !== saved.snapshot;
+  const empty = selectedIds.length === 0;
+
+  const errorText = (code: string) =>
+    code === "unauthorized"
+      ? t("c_err_unauthorized")
+      : code === "limit"
+        ? t("c_save_err_limit")
+        : t("c_save_err");
+
+  const flashSaved = () => {
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 2000);
+  };
+
+  const createNew = async () => {
+    const trimmed = name.trim();
+    if (!trimmed || busy || empty) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await createSavedQuizAction({
+        quizId,
+        name: trimmed,
+        questionIds: selectedIds,
+        orderMode,
+      });
+      if (res.ok) {
+        setSaved({ id: res.id, name: trimmed, snapshot });
+        setNaming(false);
+        setName("");
+        flashSaved();
+        // Keep the address reopenable: a refresh of the standalone console
+        // returns to this saved quiz. The embedded console shares the lesson
+        // page's URL, so it is left alone.
+        if (!embedded) {
+          const url = new URL(window.location.href);
+          url.searchParams.set("saved", res.id);
+          window.history.replaceState(null, "", url);
+        }
+      } else {
+        setError(errorText(res.error));
+      }
+    } catch {
+      setError(errorText("network"));
+    }
+    setBusy(false);
+  };
+
+  const saveChanges = async () => {
+    if (!saved || busy || empty) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await updateSavedQuizAction({
+        id: saved.id,
+        questionIds: selectedIds,
+        orderMode,
+      });
+      if (res.ok) {
+        setSaved({ ...saved, snapshot });
+        flashSaved();
+      } else {
+        setError(errorText(res.error));
+      }
+    } catch {
+      setError(errorText("network"));
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="mt-3">
+      {naming ? (
+        <div className="rounded-xl border-[1.5px] border-primary/40 bg-background p-3">
+          <div className="flex items-center gap-2">
+            <Input
+              autoFocus
+              value={name}
+              maxLength={120}
+              placeholder={t("c_save_name_placeholder")}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void createNew();
+                if (e.key === "Escape") {
+                  setNaming(false);
+                  setName("");
+                }
+              }}
+              className="h-9 flex-1"
+            />
+            <Button
+              size="sm"
+              disabled={busy || !name.trim() || empty}
+              onClick={() => void createNew()}
+              className="h-9 font-semibold"
+            >
+              {busy ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <Check className="size-4" aria-hidden />
+              )}
+              {t("c_save_confirm")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                setNaming(false);
+                setName("");
+              }}
+              className="h-9"
+            >
+              {t("c_save_cancel")}
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {t("c_saved_hint")}
+          </p>
+        </div>
+      ) : saved ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border-[1.5px] border-border bg-background px-3 py-2">
+          <Bookmark className="size-4 shrink-0 text-primary" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+            {saved.name}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || empty || !dirty}
+            onClick={() => void saveChanges()}
+            className="h-8 font-semibold"
+          >
+            {busy ? (
+              <Loader2 className="size-3.5 animate-spin" aria-hidden />
+            ) : justSaved && !dirty ? (
+              <>
+                <Check className="size-3.5" aria-hidden />
+                {t("c_saved_ok")}
+              </>
+            ) : (
+              t("c_save_changes")
+            )}
+          </Button>
+          <button
+            type="button"
+            title={t("c_save_as_new")}
+            aria-label={t("c_save_as_new")}
+            disabled={busy}
+            onClick={() => setNaming(true)}
+            className="grid size-8 shrink-0 place-items-center rounded-md border border-border text-muted-foreground hover:bg-background hover:text-foreground"
+          >
+            <BookmarkPlus className="size-4" aria-hidden />
+          </button>
+        </div>
+      ) : (
+        <Button
+          variant="outline"
+          disabled={empty}
+          onClick={() => setNaming(true)}
+          className="h-10 w-full font-semibold"
+        >
+          <BookmarkPlus className="size-4" aria-hidden />
+          {t("c_save_quiz")}
+        </Button>
+      )}
+      {error && (
+        <p
+          role="alert"
+          className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive"
+        >
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

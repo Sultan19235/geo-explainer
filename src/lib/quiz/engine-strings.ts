@@ -71,6 +71,18 @@ export const ENGINE_STRINGS = {
     c_remove_question: "Алып тастау",
     // console — tag filters
     c_filter_all: "Барлығы",
+    // console — saved quizzes
+    c_save_quiz: "Тестті сақтау",
+    c_save_changes: "Өзгерістерді сақтау",
+    c_save_as_new: "Жаңа тест ретінде сақтау",
+    c_save_name_placeholder: "Мысалы: 8Б — бақылау жұмысы",
+    c_save_confirm: "Сақтау",
+    c_save_cancel: "Болдырмау",
+    c_saved_ok: "Сақталды",
+    c_saved_hint: "Сақталған тесттер профиліңізде тұрады",
+    c_save_err: "Сақтау мүмкін болмады. Қайталап көріңіз.",
+    c_save_err_limit: "Сақталған тесттер шегіне жеттіңіз. Профильде ескілерін өшіріңіз.",
+    c_saved_missing: "{n} сұрақ жинақта енді жоқ — тізімнен алынды. Сақтасаңыз, тест осы күйде жаңарады.",
     // console — lobby
     c_room_code: "Бөлме коды",
     c_scan_hint: "Оқушылар QR-кодты сканерлейді немесе кодты енгізеді",
@@ -167,6 +179,18 @@ export const ENGINE_STRINGS = {
     c_remove_question: "Убрать",
     // console — tag filters
     c_filter_all: "Все",
+    // console — saved quizzes
+    c_save_quiz: "Сохранить тест",
+    c_save_changes: "Сохранить изменения",
+    c_save_as_new: "Сохранить как новый",
+    c_save_name_placeholder: "Например: 8Б — контрольная",
+    c_save_confirm: "Сохранить",
+    c_save_cancel: "Отмена",
+    c_saved_ok: "Сохранено",
+    c_saved_hint: "Сохранённые тесты лежат в вашем профиле",
+    c_save_err: "Не удалось сохранить. Попробуйте ещё раз.",
+    c_save_err_limit: "Достигнут лимит сохранённых тестов. Удалите старые в профиле.",
+    c_saved_missing: "{n} вопрос(а/ов) больше нет в наборе — они убраны из списка. При сохранении тест обновится.",
     // console — lobby
     c_room_code: "Код комнаты",
     c_scan_hint: "Ученики сканируют QR-код или вводят код",

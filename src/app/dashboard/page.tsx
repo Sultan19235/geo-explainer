@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { teacherHasGradeAccess } from "@/lib/teacher-access";
 import { endLoginSession } from "@/lib/analytics/track";
+import type { SavedQuizSummary } from "@/lib/quiz/saved-quiz";
 import { DashboardClient, type PurchasedGrade } from "./dashboard-client";
 
 async function logout() {
@@ -22,6 +23,16 @@ type TeacherProfileRow = {
   access_expires_at: string | null;
   is_admin: boolean;
   created_at: string;
+};
+
+type SavedQuizRow = {
+  id: string;
+  name: string;
+  quiz_id: string;
+  question_ids: string[];
+  order_mode: string;
+  updated_at: string;
+  quizzes: { title_kz: string; title_ru: string | null } | null;
 };
 
 export default async function DashboardPage() {
@@ -78,6 +89,27 @@ export default async function DashboardPage() {
     topicCount: topicCounts[gradeId] ?? 0,
   }));
 
+  // The teacher's saved quizzes, newest-edited first. RLS scopes the select
+  // to this user; the quizzes join resolves the source pack's title.
+  const { data: savedRows } = await supabase
+    .from("saved_quizzes")
+    .select(
+      "id, name, quiz_id, question_ids, order_mode, updated_at, quizzes(title_kz, title_ru)",
+    )
+    .order("updated_at", { ascending: false })
+    .returns<SavedQuizRow[]>();
+
+  const savedQuizzes: SavedQuizSummary[] = (savedRows ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    quizId: row.quiz_id,
+    quizTitleKz: row.quizzes?.title_kz ?? "",
+    quizTitleRu: row.quizzes?.title_ru ?? null,
+    questionCount: row.question_ids?.length ?? 0,
+    orderMode: row.order_mode === "shuffle" ? "shuffle" : "custom",
+    updatedAt: row.updated_at,
+  }));
+
   return (
     <DashboardClient
       email={teacher?.email ?? user.email ?? ""}
@@ -86,6 +118,7 @@ export default async function DashboardPage() {
       createdAt={teacher?.created_at ?? null}
       isAdmin={!!teacher?.is_admin}
       purchasedGrades={purchasedGrades}
+      savedQuizzes={savedQuizzes}
       accessExpiresAt={teacher?.access_expires_at ?? null}
       accessActive={accessActive}
       logoutAction={logout}
