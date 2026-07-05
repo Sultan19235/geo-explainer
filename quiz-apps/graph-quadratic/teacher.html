@@ -322,6 +322,7 @@ const SEC_NAMES = {};
 SECTIONS.forEach(s => SEC_NAMES[s.id] = s.formula);
 
 let sessionCode = null;
+let sessionHostSecret = null; // per-session teacher credential from /session
 let sseSource = null;
 let selectedSecs = new Set();
 const students = new Map();
@@ -391,6 +392,7 @@ async function createRoom() {
     const data = await res.json();
     if (!data.code) throw new Error('no code');
     sessionCode = data.code;
+    sessionHostSecret = data.hostSecret || null;
     btn.disabled = false; btn.textContent = '🚀 Бөлме құру';
     showLobby();
   } catch (e) {
@@ -401,7 +403,7 @@ async function createRoom() {
 
 function backToSetup() {
   if (sseSource) sseSource.close();
-  students.clear(); sessionCode = null;
+  students.clear(); sessionCode = null; sessionHostSecret = null;
   show('s-setup');
 }
 
@@ -427,7 +429,7 @@ function showLobby() {
 async function startQuiz() {
   if (!students.size) { toast('Оқушылар жоқ!', 'er'); return; }
   try {
-    await fetch(`${BACKEND}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: sessionCode }) });
+    await fetch(`${BACKEND}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: sessionCode, hostSecret: sessionHostSecret }) });
     timeLeftSec = 45 * 60;
     startTimer();
     show('s-live');
@@ -442,7 +444,7 @@ async function startQuiz() {
 async function endQuiz() {
   if (!confirm('Сабақты аяқтайсыз ба?')) return;
   try {
-    await fetch(`${BACKEND}/end`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: sessionCode }) });
+    await fetch(`${BACKEND}/end`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: sessionCode, hostSecret: sessionHostSecret }) });
   } catch (_) {}
   showResults();
 }
@@ -475,7 +477,7 @@ function updateTimerDisplay() {
 // ══════════════════════════════════════════════════════════
 function connectSSE() {
   if (sseSource) sseSource.close();
-  sseSource = new EventSource(`${BACKEND}/live?code=${sessionCode}`);
+  sseSource = new EventSource(`${BACKEND}/live?code=${sessionCode}${sessionHostSecret ? '&hostSecret=' + encodeURIComponent(sessionHostSecret) : ''}`);
 
   sseSource.onmessage = (e) => {
     const data = JSON.parse(e.data);
@@ -623,7 +625,7 @@ function showResults() {
 }
 
 function newSession() {
-  sessionCode = null; quizEnded = false;
+  sessionCode = null; sessionHostSecret = null; quizEnded = false;
   students.clear(); selectedSecs.clear();
   document.querySelectorAll('.sec-btn').forEach(b => b.classList.remove('sel'));
   show('s-setup');

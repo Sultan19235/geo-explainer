@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createSession,
   endSession,
-  QUIZ_BACKEND,
+  liveStreamUrl,
   startSession,
   type LiveEvent,
   type StudentRecord,
@@ -37,6 +37,9 @@ export function useTeacherSession() {
   const [timeLeft, setTimeLeft] = useState(SESSION_SECONDS);
 
   const phaseRef = useRef<TeacherPhase>("setup");
+  // Per-session teacher credential from /session; required by /start, /end and
+  // the /live stream once the server's host-secret gate is enforced.
+  const hostSecretRef = useRef<string | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -137,7 +140,7 @@ export function useTeacherSession() {
     (roomCode: string) => {
       closeStream();
       const source = new EventSource(
-        `${QUIZ_BACKEND}/live?code=${encodeURIComponent(roomCode)}`,
+        liveStreamUrl(roomCode, hostSecretRef.current),
       );
       sourceRef.current = source;
       source.onmessage = (e) => {
@@ -171,6 +174,7 @@ export function useTeacherSession() {
         setCreateError(res.error);
         return;
       }
+      hostSecretRef.current = res.hostSecret;
       setCode(res.code);
       setStudents(new Map());
       setTimeLeft(SESSION_SECONDS);
@@ -182,7 +186,7 @@ export function useTeacherSession() {
 
   const start = useCallback(async () => {
     if (!code) return;
-    await startSession(code);
+    await startSession(code, hostSecretRef.current);
     setTimeLeft(SESSION_SECONDS);
     setPhaseBoth("live");
   }, [code]);
@@ -190,7 +194,7 @@ export function useTeacherSession() {
   const end = useCallback(async () => {
     if (code) {
       try {
-        await endSession(code);
+        await endSession(code, hostSecretRef.current);
       } catch {
         // results still shown locally; the room times out server-side
       }
@@ -204,6 +208,7 @@ export function useTeacherSession() {
     flashTimers.current.clear();
     setStudents(new Map());
     setCode(null);
+    hostSecretRef.current = null;
     setCreateError(null);
     setTimeLeft(SESSION_SECONDS);
     setPhaseBoth("setup");
