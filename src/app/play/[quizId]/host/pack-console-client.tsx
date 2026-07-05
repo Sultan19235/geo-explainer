@@ -529,21 +529,35 @@ function LiveScreen({
   const { lang } = useLanguage();
   const t = engineT(lang);
   const sorted = sortStudents(students);
+  const away = sorted.filter((s) => !s.focused).length;
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-4">
-      <header className="mb-4 flex flex-wrap items-center gap-2">
-        <h1 className="mr-1 truncate text-sm font-bold sm:text-base">
-          <MathText text={quizTitle} />
-        </h1>
-        <span className="rounded-full border border-border bg-card px-2.5 py-1 font-mono text-xs font-bold tracking-widest">
-          {code}
-        </span>
-        <span className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-bold tabular-nums">
-          <Users className="size-3.5 text-primary" aria-hidden />
-          {sorted.length}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
+    <div className="w-full px-3 py-3 sm:px-4">
+      <header className="mb-3 flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <h1 className="min-w-0 truncate text-sm font-bold sm:text-base">
+            <MathText text={quizTitle} />
+          </h1>
+          <span className="shrink-0 rounded-full border border-border bg-card px-2.5 py-1 font-mono text-xs font-bold tracking-widest">
+            {code}
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-bold tabular-nums">
+            <Users className="size-3.5 text-primary" aria-hidden />
+            {sorted.length}
+          </span>
+          <span
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold tabular-nums",
+              away > 0
+                ? "animate-pulse border-red-200 bg-red-50 text-red-700"
+                : "border-border bg-card text-muted-foreground",
+            )}
+          >
+            <EyeOff className="size-3.5" aria-hidden />
+            {away} {t("c_out_count")}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
           <TimerPill seconds={timeLeft} />
           <button
             type="button"
@@ -557,7 +571,7 @@ function LiveScreen({
             type="button"
             onClick={onFullscreen}
             title={t("c_fullscreen")}
-            className="grid size-8 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground"
+            className="hidden size-8 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground sm:grid"
           >
             <Expand className="size-4" aria-hidden />
           </button>
@@ -578,62 +592,158 @@ function LiveScreen({
           {t("c_no_students")}
         </p>
       ) : (
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
-          {sorted.map((s, rank) => {
-            const pct = pctOf(s);
-            return (
-              <div
-                key={s.studentId}
-                className={cn(
-                  "rounded-xl border-[1.5px] border-border bg-card p-3 transition-shadow",
-                  s.flash === "ok" && "border-emerald-400 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]",
-                  s.flash === "err" && "border-red-400 shadow-[0_0_0_3px_rgba(239,68,68,0.2)]",
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className="grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white"
-                    style={{ background: avatarColor(s.name) }}
-                  >
-                    {rank < 3 ? MEDALS[rank] : s.name.slice(0, 1).toUpperCase()}
-                  </span>
-                  <span className="truncate text-sm font-bold">{s.name}</span>
-                </div>
-                <div className="mt-2 flex items-baseline justify-between">
-                  <span className="text-lg font-bold tabular-nums">
-                    {s.score}
-                    <span className="text-xs font-semibold text-muted-foreground">
-                      /{s.total}
-                    </span>
-                  </span>
-                  <span
-                    className={cn("text-sm font-bold tabular-nums", pctColor(pct))}
-                  >
-                    {pct}%
-                  </span>
-                </div>
-                <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
-                  {s.finished && (
-                    <span className="flex items-center gap-1 text-emerald-600">
-                      <Flag className="size-3" aria-hidden />
-                      {t("c_finished_tag")}
-                    </span>
-                  )}
-                  {!s.focused && (
-                    <span className="flex items-center gap-1 text-red-500">
-                      <EyeOff className="size-3" aria-hidden />
-                      {t("c_away_tag")}
-                    </span>
-                  )}
-                  {s.tabSwitches > 0 && (
-                    <span title="tab switches">↷ {s.tabSwitches}</span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2.5">
+          {sorted.map((s, i) => (
+            <StudentCard key={s.studentId} student={s} rank={i + 1} />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// Total time spent off-screen, compact: "55с" / "2м 5с".
+function fmtAway(seconds: number) {
+  const sec = Math.max(0, Math.round(seconds));
+  if (sec < 60) return `${sec}с`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s > 0 ? `${m}м ${s}с` : `${m}м`;
+}
+
+function StudentCard({
+  student: s,
+  rank,
+}: {
+  student: LiveStudent;
+  rank: number;
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const pct = pctOf(s);
+  const wrong = s.total - s.score;
+  const barColor =
+    pct >= 70 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-red-500";
+
+  return (
+    <div
+      className={cn(
+        "rounded-xl border-[1.5px] bg-card p-3 transition-shadow",
+        rank === 1
+          ? "border-amber-300 bg-gradient-to-br from-amber-50 to-card"
+          : rank === 2
+            ? "border-slate-300 bg-gradient-to-br from-slate-50 to-card"
+            : rank === 3
+              ? "border-orange-300 bg-gradient-to-br from-orange-50 to-card"
+              : "border-border",
+        s.flash === "ok" &&
+          "border-emerald-400 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]",
+        s.flash === "err" &&
+          "border-red-400 shadow-[0_0_0_3px_rgba(239,68,68,0.2)]",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <span className="w-5 shrink-0 text-center font-mono text-sm font-bold">
+          {MEDALS[rank - 1] ?? rank}
+        </span>
+        <span
+          className="grid size-8 shrink-0 place-items-center rounded-full text-xs font-bold text-white"
+          style={{ background: avatarColor(s.name) }}
+        >
+          {s.name.slice(0, 1).toUpperCase()}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm font-bold">
+          {s.name}
+        </span>
+        <span
+          className={cn(
+            "font-mono text-base font-bold tabular-nums",
+            pctColor(pct),
+          )}
+        >
+          {pct}%
+        </span>
+      </div>
+
+      <div className="mt-2.5 grid grid-cols-3 gap-1">
+        <MiniStat
+          value={s.score}
+          label={t("c_stat_correct")}
+          className="text-emerald-600"
+        />
+        <MiniStat
+          value={wrong}
+          label={t("c_stat_wrong")}
+          className="text-red-600"
+        />
+        <MiniStat
+          value={s.total}
+          label={t("c_stat_total")}
+          className="text-amber-600"
+        />
+      </div>
+
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-secondary">
+        <div
+          className={cn(
+            "h-full rounded-full transition-all duration-500",
+            barColor,
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span
+          className={cn(
+            "flex items-center gap-1.5 text-xs font-bold",
+            s.focused ? "text-emerald-700" : "text-red-600",
+          )}
+        >
+          <span
+            className={cn(
+              "size-2 animate-pulse rounded-full",
+              s.focused ? "bg-emerald-500" : "bg-red-500",
+            )}
+            aria-hidden
+          />
+          {s.focused ? t("c_on_screen") : t("c_off_screen")}
+        </span>
+        {s.finished && (
+          <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
+            <Flag className="size-3" aria-hidden />
+            {t("c_finished_tag")}
+          </span>
+        )}
+      </div>
+
+      {s.tabSwitches > 0 && (
+        <div className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-sm font-bold text-red-700">
+          <EyeOff className="size-4" aria-hidden />
+          {s.tabSwitches}× · {fmtAway(s.awaySeconds)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniStat({
+  value,
+  label,
+  className,
+}: {
+  value: number;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <div className="rounded-lg bg-background/70 px-1 py-1.5 text-center">
+      <div className={cn("font-mono text-base font-bold tabular-nums", className)}>
+        {value}
+      </div>
+      <div className="truncate text-[0.6rem] font-bold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
     </div>
   );
 }
