@@ -920,7 +920,7 @@ function SelectionTray({
                 setOverIndex(null);
               }}
               className={cn(
-                "flex items-center gap-1.5 rounded-lg px-2 py-1.5",
+                "flex items-start gap-1.5 rounded-lg px-2 py-1.5",
                 dragIndex === i && "opacity-40",
                 overIndex === i &&
                   dragIndex !== null &&
@@ -930,14 +930,14 @@ function SelectionTray({
             >
               {reorderable && (
                 <GripVertical
-                  className="size-4 shrink-0 cursor-grab text-muted-foreground/50"
+                  className="mt-1.5 size-4 shrink-0 cursor-grab text-muted-foreground/50"
                   aria-hidden
                 />
               )}
-              <span className="w-6 shrink-0 text-right font-mono text-xs font-bold tabular-nums text-primary">
+              <span className="w-6 shrink-0 pt-1 text-right font-mono text-xs font-bold tabular-nums text-primary">
                 {i + 1}.
               </span>
-              <span className="min-w-0 flex-1 truncate text-[13px]">
+              <span className="min-w-0 flex-1 pt-1 text-[13px] leading-snug">
                 <MathText text={loc(entry.question.text, lang)} />
               </span>
               {reorderable && (
@@ -1020,22 +1020,36 @@ function QuestionPreviewRow({
 }) {
   return (
     <div
+      role="checkbox"
+      aria-checked={selected}
+      tabIndex={0}
+      onClick={() => {
+        // let teachers drag-select/copy question text without toggling
+        const sel = window.getSelection();
+        if (sel && sel.type === "Range") return;
+        onToggle();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
       className={cn(
-        "rounded-xl border-[1.5px] bg-card p-3.5 transition-colors",
-        selected ? "border-primary/40" : "border-border opacity-60",
+        "group cursor-pointer rounded-xl border-[1.5px] bg-card p-3.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        selected
+          ? "border-primary/40"
+          : "border-border opacity-60 hover:border-primary/40 hover:opacity-80",
       )}
     >
       <div className="flex items-start gap-3">
-        <button
-          type="button"
-          role="checkbox"
-          aria-checked={selected}
-          onClick={onToggle}
+        <span
+          aria-hidden
           className={cn(
             "mt-0.5 grid size-5 shrink-0 place-items-center rounded-[6px] border-[1.5px] transition-colors",
             selected
               ? "border-primary bg-primary text-white"
-              : "border-border bg-background text-transparent hover:border-primary/50",
+              : "border-border bg-background text-transparent group-hover:border-primary/50",
           )}
         >
           {selected && orderPos !== null ? (
@@ -1045,7 +1059,7 @@ function QuestionPreviewRow({
           ) : (
             <Check className="size-3.5" aria-hidden />
           )}
-        </button>
+        </span>
 
         <div className="min-w-0 flex-1">
           <div className="flex gap-2 text-[15px] font-medium leading-snug">
