@@ -27,7 +27,7 @@ import { TimerPill } from "@/components/quiz/timer-pill";
 import { LanguageToggle } from "@/components/language-toggle";
 import { useLanguage } from "@/lib/i18n/context";
 import { cn } from "@/lib/utils";
-import { loc, type Localized } from "@/lib/quiz/pack";
+import { loc, type Localized, type PackQuestion } from "@/lib/quiz/pack";
 import { engineT } from "@/lib/quiz/engine-strings";
 import {
   useTeacherSession,
@@ -46,6 +46,7 @@ const AVATAR_COLORS = [
 ];
 
 const MEDALS = ["🥇", "🥈", "🥉"];
+const OPTION_LABELS = ["A", "B", "C", "D", "E", "F"];
 
 function avatarColor(name: string) {
   let hash = 0;
@@ -76,26 +77,44 @@ function sortStudents(students: Map<string, LiveStudent>) {
 export function PackConsoleClient({
   quizId,
   title,
-  questionCount,
+  questions,
   embedded = false,
 }: {
   quizId: string;
   title: Localized;
-  questionCount: number;
+  questions: PackQuestion[];
   embedded?: boolean;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
   const session = useTeacherSession();
   const [qrOpen, setQrOpen] = useState(false);
+  // Which questions the teacher includes in this room. Defaults to all; the
+  // picker on the setup screen narrows it. Frozen once the room opens (the
+  // picker is only shown in the setup phase).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(questions.map((q) => q.id)),
+  );
   const rootRef = useRef<HTMLDivElement>(null);
 
   const quizTitle = loc(title, lang);
+
+  // Only pass a subset in the student link; when every question is selected the
+  // link stays clean (and the student page defaults to the whole pack).
+  const selectedParam =
+    selectedIds.size > 0 && selectedIds.size < questions.length
+      ? questions
+          .filter((q) => selectedIds.has(q.id))
+          .map((q) => q.id)
+          .join(",")
+      : null;
   // session.code is null during SSR, so window is only touched in the browser.
   const studentUrl =
     session.code === null
       ? ""
-      : `${window.location.origin}/play/${quizId}?code=${session.code}`;
+      : `${window.location.origin}/play/${quizId}?code=${session.code}${
+          selectedParam ? `&q=${encodeURIComponent(selectedParam)}` : ""
+        }`;
 
   const toggleFullscreen = () => {
     const el = rootRef.current;
@@ -113,48 +132,16 @@ export function PackConsoleClient({
       )}
     >
       {session.phase === "setup" && (
-        <div className="flex min-h-[inherit] flex-col items-center justify-center p-6">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-7 text-center shadow-lg shadow-blue-950/5">
-            <div className="mb-3 flex justify-end">
-              <LanguageToggle />
-            </div>
-            <div className="mx-auto mb-3 grid size-12 place-items-center rounded-xl bg-accent text-2xl">
-              🧮
-            </div>
-            <h1 className="text-xl font-bold tracking-tight">{quizTitle}</h1>
-            <p className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
-              <ListChecks className="size-4" aria-hidden />
-              {questionCount} {t("c_questions")}
-            </p>
-            {session.createError && (
-              <p
-                role="alert"
-                className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-sm font-medium text-destructive"
-              >
-                {session.createError === "unauthorized"
-                  ? t("c_err_unauthorized")
-                  : t("c_err_network")}
-              </p>
-            )}
-            <Button
-              onClick={() => void session.createRoom(quizTitle)}
-              disabled={session.creating}
-              className="mt-5 h-12 w-full text-base font-semibold"
-            >
-              {session.creating ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" aria-hidden />
-                  {t("c_creating")}
-                </>
-              ) : (
-                <>
-                  <Play className="size-4" aria-hidden />
-                  {t("c_open_room")}
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
+        <SetupScreen
+          quizTitle={quizTitle}
+          questions={questions}
+          embedded={embedded}
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
+          creating={session.creating}
+          createError={session.createError}
+          onCreate={() => void session.createRoom(quizTitle)}
+        />
       )}
 
       {session.phase === "lobby" && session.code && (
@@ -192,6 +179,228 @@ export function PackConsoleClient({
           onClose={() => setQrOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+// ═══ SETUP (title + question picker) ════════════════════════════════════
+
+function SetupScreen({
+  quizTitle,
+  questions,
+  embedded,
+  selectedIds,
+  setSelectedIds,
+  creating,
+  createError,
+  onCreate,
+}: {
+  quizTitle: string;
+  questions: PackQuestion[];
+  embedded: boolean;
+  selectedIds: Set<string>;
+  setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>;
+  creating: boolean;
+  createError: "unauthorized" | "network" | null;
+  onCreate: () => void;
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const total = questions.length;
+  const selectedCount = selectedIds.size;
+  const allSelected = selectedCount === total;
+
+  const toggle = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const toggleAll = () =>
+    setSelectedIds(allSelected ? new Set() : new Set(questions.map((q) => q.id)));
+
+  return (
+    <div className="mx-auto w-full max-w-3xl px-4 py-6">
+      {/* header card */}
+      <div className="rounded-2xl border border-border bg-card p-5 shadow-lg shadow-blue-950/5">
+        {!embedded && (
+          <div className="mb-3 flex justify-end">
+            <LanguageToggle />
+          </div>
+        )}
+        <div className="flex items-start gap-3">
+          <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-accent text-2xl">
+            🧮
+          </div>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-bold leading-tight tracking-tight">
+              {quizTitle}
+            </h1>
+            <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+              <ListChecks className="size-4" aria-hidden />
+              <span className="tabular-nums">
+                {selectedCount} / {total}
+              </span>{" "}
+              {t("c_selected")}
+            </p>
+          </div>
+        </div>
+
+        {createError && (
+          <p
+            role="alert"
+            className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-sm font-medium text-destructive"
+          >
+            {createError === "unauthorized"
+              ? t("c_err_unauthorized")
+              : t("c_err_network")}
+          </p>
+        )}
+        {selectedCount === 0 && !createError && (
+          <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-sm font-medium text-amber-800">
+            {t("c_none_selected")}
+          </p>
+        )}
+
+        <Button
+          onClick={onCreate}
+          disabled={creating || selectedCount === 0}
+          className="mt-4 h-12 w-full text-base font-semibold"
+        >
+          {creating ? (
+            <>
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              {t("c_creating")}
+            </>
+          ) : (
+            <>
+              <Play className="size-4" aria-hidden />
+              {t("c_open_room")}
+            </>
+          )}
+        </Button>
+      </div>
+
+      {/* picker toolbar */}
+      <div className="mb-2 mt-5 flex items-center justify-between gap-3 px-1">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {t("c_select_hint")}
+        </p>
+        <button
+          type="button"
+          onClick={toggleAll}
+          className="shrink-0 text-xs font-semibold text-primary hover:underline"
+        >
+          {allSelected ? t("c_deselect_all") : t("c_select_all")}
+        </button>
+      </div>
+
+      {/* question list */}
+      <div className="space-y-2">
+        {questions.map((question, i) => (
+          <QuestionPreviewRow
+            key={question.id}
+            index={i + 1}
+            question={question}
+            lang={lang}
+            selected={selectedIds.has(question.id)}
+            onToggle={() => toggle(question.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QuestionPreviewRow({
+  index,
+  question,
+  lang,
+  selected,
+  onToggle,
+}: {
+  index: number;
+  question: PackQuestion;
+  lang: "kz" | "ru";
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl border-[1.5px] bg-card p-3.5 transition-colors",
+        selected ? "border-primary/40" : "border-border opacity-60",
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={selected}
+          onClick={onToggle}
+          className={cn(
+            "mt-0.5 grid size-5 shrink-0 place-items-center rounded-[6px] border-[1.5px] transition-colors",
+            selected
+              ? "border-primary bg-primary text-white"
+              : "border-border bg-background text-transparent hover:border-primary/50",
+          )}
+        >
+          <Check className="size-3.5" aria-hidden />
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex gap-2 text-[15px] font-medium leading-snug">
+            <span className="shrink-0 tabular-nums text-muted-foreground">
+              {index}.
+            </span>
+            <MathText text={loc(question.text, lang)} />
+          </div>
+
+          {question.type === "mcq" && question.options && (
+            <div className="mt-2.5 grid gap-1.5 sm:grid-cols-2">
+              {question.options.map((opt, oi) => {
+                const correct = oi === question.correct;
+                return (
+                  <div
+                    key={oi}
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[13px]",
+                      correct
+                        ? "border-emerald-500 bg-emerald-50 font-semibold text-emerald-800"
+                        : "border-border bg-background text-foreground",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "grid size-4 shrink-0 place-items-center rounded border text-[10px] font-bold",
+                        correct
+                          ? "border-emerald-500 bg-emerald-500 text-white"
+                          : "border-border text-muted-foreground",
+                      )}
+                    >
+                      {correct ? (
+                        <Check className="size-3" aria-hidden />
+                      ) : (
+                        OPTION_LABELS[oi]
+                      )}
+                    </span>
+                    <MathText text={loc(opt, lang)} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {question.type === "input" && (
+            <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-emerald-500 bg-emerald-50 px-2.5 py-1.5 text-[13px] font-semibold text-emerald-800">
+              <Check className="size-3.5" aria-hidden />
+              <MathText text={question.answer ?? ""} />
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

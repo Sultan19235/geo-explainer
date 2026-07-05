@@ -52,6 +52,12 @@ export const ENGINE_STRINGS = {
     c_creating: "Ашылуда...",
     c_err_unauthorized: "Бөлме ашу үшін жүйеге кіру қажет.",
     c_err_network: "Серверге қосылу мүмкін болмады. Қайталап көріңіз.",
+    // console — question picker
+    c_select_hint: "Тестке кіретін сұрақтарды таңдаңыз",
+    c_select_all: "Барлығын таңдау",
+    c_deselect_all: "Таңдауды алу",
+    c_selected: "таңдалды",
+    c_none_selected: "Кемінде бір сұрақ таңдаңыз.",
     // console — lobby
     c_room_code: "Бөлме коды",
     c_scan_hint: "Оқушылар QR-кодты сканерлейді немесе кодты енгізеді",
@@ -123,6 +129,12 @@ export const ENGINE_STRINGS = {
     c_creating: "Открываем...",
     c_err_unauthorized: "Чтобы открыть комнату, войдите в систему.",
     c_err_network: "Не удалось связаться с сервером. Попробуйте ещё раз.",
+    // console — question picker
+    c_select_hint: "Выберите вопросы, которые войдут в тест",
+    c_select_all: "Выбрать все",
+    c_deselect_all: "Снять все",
+    c_selected: "выбрано",
+    c_none_selected: "Выберите хотя бы один вопрос.",
     // console — lobby
     c_room_code: "Код комнаты",
     c_scan_hint: "Ученики сканируют QR-код или вводят код",

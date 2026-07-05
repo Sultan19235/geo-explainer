@@ -36,7 +36,7 @@ export default async function PackHostPage({
       <PackConsoleClient
         quizId={data.id}
         title={data.pack.title}
-        questionCount={data.pack.questions.length}
+        questions={data.pack.questions}
       />
     </main>
   );

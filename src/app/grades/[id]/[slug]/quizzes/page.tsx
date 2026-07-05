@@ -87,7 +87,7 @@ export default async function QuizzesPage({
           title_ru: quiz.title_ru,
           signed_url: null,
           pack: pack
-            ? { title: pack.title, questionCount: pack.questions.length }
+            ? { title: pack.title, questions: pack.questions }
             : null,
         };
       }

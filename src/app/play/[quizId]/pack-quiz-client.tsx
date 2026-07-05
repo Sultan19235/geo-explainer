@@ -72,11 +72,27 @@ export function PackQuizClient({
 
 // ═══ LIVE (the real classroom flow) ══════════════════════════════════════
 
-function LiveMode({ quizId, pack }: { quizId: string; pack: QuizPack }) {
+function LiveMode({
+  quizId,
+  pack: fullPack,
+}: {
+  quizId: string;
+  pack: QuizPack;
+}) {
   const { lang } = useLanguage();
   const t = engineT(lang);
   const searchParams = useSearchParams();
   const urlCode = (searchParams.get("code") ?? "").toUpperCase();
+
+  // The teacher may open a room with only a subset of questions; those ids
+  // ride along on the join link as `?q=id1,id2,...`. Absent → the whole pack.
+  const qParam = searchParams.get("q");
+  const pack = useMemo<QuizPack>(() => {
+    if (!qParam) return fullPack;
+    const wanted = new Set(qParam.split(",").map((s) => s.trim()).filter(Boolean));
+    const questions = fullPack.questions.filter((q) => wanted.has(q.id));
+    return questions.length > 0 ? { ...fullPack, questions } : fullPack;
+  }, [fullPack, qParam]);
 
   const questionCount = pack.questions.length;
   const defaultExtra = useMemo<PackExtra>(
