@@ -93,19 +93,19 @@ export function QuizPageClient({
             </p>
           </div>
         ) : (
-          <section className="overflow-hidden rounded-xl border-[1.5px] border-[#d8dde5] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+          <>
             {usable.length > 1 && (
-              <div className="flex gap-1 overflow-x-auto border-b-[1.5px] border-[#d8dde5] bg-[#f8f9fb] px-2 py-2">
+              <div className="mb-3 flex gap-1 overflow-x-auto rounded-xl border-[1.5px] border-[#d8dde5] bg-white p-1.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
                 {usable.map((quiz, index) => (
                   <button
                     key={quiz.id}
                     type="button"
                     onClick={() => openTab(index)}
                     className={cn(
-                      "flex shrink-0 items-center gap-1.5 rounded-md border-[1.5px] border-transparent px-3.5 py-1.5 text-[13px] font-semibold text-[#6b7280] transition-colors hover:text-[#1a1a2e]",
+                      "flex shrink-0 items-center gap-1.5 rounded-md px-3.5 py-1.5 text-[13px] font-semibold transition-colors",
                       index === activeIndex
-                        ? "border-[#d8dde5] bg-white text-[#1a1a2e] shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
-                        : "hover:bg-white/60",
+                        ? "bg-[#eff6ff] text-[#1d4ed8]"
+                        : "text-[#6b7280] hover:bg-[#f1f3f7] hover:text-[#1a1a2e]",
                     )}
                     aria-pressed={index === activeIndex}
                   >
@@ -118,53 +118,58 @@ export function QuizPageClient({
               </div>
             )}
 
-            {usable.length === 1 && (
-              <div className="flex min-h-12 items-center gap-3 border-b-[1.5px] border-[#d8dde5] px-[18px] py-[11px]">
-                <span className="inline-flex items-center rounded bg-[#eff6ff] px-[9px] py-[3px] text-[10.5px] font-bold uppercase tracking-[0.05em] text-[#2563eb]">
-                  {t("quiz_badge")}
-                </span>
-                <h2 className="truncate text-sm font-semibold text-[#1a1a2e]">
-                  {quizTitle(usable[0], lang)}
-                </h2>
-              </div>
-            )}
-
-            <div className="relative">
-              {usable.map((quiz, index) => {
-                if (!mounted.has(index)) return null;
-                if (quiz.pack) {
-                  // Native engine console — kept mounted across tab switches
-                  // (like the iframes) so a running session survives.
-                  return (
-                    <div
-                      key={`quiz:${quiz.id}`}
-                      className={cn(index !== activeIndex && "hidden")}
-                    >
-                      <PackConsoleClient
-                        quizId={quiz.id}
-                        title={quiz.pack.title}
-                        questions={quiz.pack.questions}
-                        tagGroups={quiz.pack.tagGroups}
-                        embedded
-                      />
-                    </div>
-                  );
-                }
+            {usable.map((quiz, index) => {
+              if (!mounted.has(index)) return null;
+              if (quiz.pack) {
+                // Native engine console — rendered bare so its setup phase
+                // reads as part of the lesson page (it frames itself once a
+                // room opens). Kept mounted across tab switches (like the
+                // iframes) so a running session survives.
                 return (
+                  <div
+                    key={`quiz:${quiz.id}`}
+                    className={cn(index !== activeIndex && "hidden")}
+                  >
+                    <PackConsoleClient
+                      quizId={quiz.id}
+                      title={quiz.pack.title}
+                      questions={quiz.pack.questions}
+                      tagGroups={quiz.pack.tagGroups}
+                      embedded
+                    />
+                  </div>
+                );
+              }
+              // Legacy HTML quiz — keeps the framed card the iframe needs.
+              return (
+                <section
+                  key={`quiz:${quiz.id}`}
+                  className={cn(
+                    "overflow-hidden rounded-xl border-[1.5px] border-[#d8dde5] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
+                    index !== activeIndex && "hidden",
+                  )}
+                >
+                  {usable.length === 1 && (
+                    <div className="flex min-h-12 items-center gap-3 border-b-[1.5px] border-[#d8dde5] px-[18px] py-[11px]">
+                      <span className="inline-flex items-center rounded bg-[#eff6ff] px-[9px] py-[3px] text-[10.5px] font-bold uppercase tracking-[0.05em] text-[#2563eb]">
+                        {t("quiz_badge")}
+                      </span>
+                      <h2 className="truncate text-sm font-semibold text-[#1a1a2e]">
+                        {quizTitle(quiz, lang)}
+                      </h2>
+                    </div>
+                  )}
                   <IframeWithLoader
-                    key={`quiz:${quiz.id}:${lang}`}
+                    key={`iframe:${lang}`}
                     src={appendLang(quiz.signed_url, lang) ?? undefined}
                     title={quizTitle(quiz, lang)}
                     sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-modals"
-                    className={cn(
-                      "block h-[640px] w-full border-0 bg-white md:h-[760px]",
-                      index !== activeIndex && "hidden",
-                    )}
+                    className="block h-[640px] w-full border-0 bg-white md:h-[760px]"
                   />
-                );
-              })}
-            </div>
-          </section>
+                </section>
+              );
+            })}
+          </>
         )}
       </main>
     </div>

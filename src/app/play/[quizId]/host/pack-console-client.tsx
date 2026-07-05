@@ -190,12 +190,21 @@ export function PackConsoleClient({
     else void el.requestFullscreen().catch(() => {});
   };
 
+  // Embedded setup blends into the lesson page (plain background, site-style
+  // cards); once a room opens, the console becomes its own framed graph-paper
+  // surface — the visual cue that "quiz mode" started.
+  const plainSetup = embedded && session.phase === "setup";
+
   return (
     <div
       ref={rootRef}
       className={cn(
-        "quiz-grid-paper text-foreground",
-        embedded ? "min-h-[640px] rounded-b-xl md:min-h-[760px]" : "min-h-dvh",
+        "text-foreground",
+        !plainSetup && "quiz-grid-paper",
+        embedded &&
+          !plainSetup &&
+          "min-h-[640px] overflow-hidden rounded-xl border-[1.5px] border-border shadow-[0_1px_2px_rgba(15,23,42,0.04)] md:min-h-[760px]",
+        !embedded && "min-h-dvh",
       )}
     >
       {session.phase === "setup" && (
@@ -374,10 +383,22 @@ function SetupScreen({
       return next;
     });
 
+  // Embedded: the lesson page's main already pads horizontally, and site
+  // cards are flatter (thin border + hairline shadow) than the standalone
+  // console's floating cards on graph paper.
+  const cardClass = embedded
+    ? "rounded-xl border-[1.5px] border-border bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+    : "rounded-2xl border border-border bg-card shadow-lg shadow-blue-950/5";
+
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-6">
+    <div
+      className={cn(
+        "mx-auto w-full max-w-3xl",
+        embedded ? "py-2" : "px-4 py-6",
+      )}
+    >
       {/* header card */}
-      <div className="rounded-2xl border border-border bg-card p-5 shadow-lg shadow-blue-950/5">
+      <div className={cn(cardClass, "p-5")}>
         {!embedded && (
           <div className="mb-3 flex justify-end">
             <LanguageToggle />
@@ -482,6 +503,7 @@ function SetupScreen({
           byId={byId}
           lang={lang}
           reorderable={orderMode === "custom"}
+          cardClass={cardClass}
         />
       )}
 
@@ -829,12 +851,14 @@ function SelectionTray({
   byId,
   lang,
   reorderable,
+  cardClass,
 }: {
   selectedIds: string[];
   setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
   byId: Map<string, { question: PackQuestion; number: number }>;
   lang: "kz" | "ru";
   reorderable: boolean;
+  cardClass: string;
 }) {
   const t = engineT(lang);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -853,7 +877,7 @@ function SelectionTray({
     setSelectedIds((prev) => prev.filter((x) => x !== id));
 
   return (
-    <div className="mt-4 rounded-2xl border border-border bg-card shadow-lg shadow-blue-950/5">
+    <div className={cn("mt-4", cardClass)}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-4 py-2.5">
         <ListOrdered className="size-4 text-primary" aria-hidden />
         <p className="text-sm font-bold">{t("c_tray_title")}</p>
