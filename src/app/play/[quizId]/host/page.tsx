@@ -37,6 +37,7 @@ export default async function PackHostPage({
         quizId={data.id}
         title={data.pack.title}
         questions={data.pack.questions}
+        tagGroups={data.pack.tagGroups}
       />
     </main>
   );

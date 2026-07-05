@@ -6,7 +6,7 @@ import { useT } from "@/lib/i18n/context";
 import type { Lang } from "@/lib/i18n/strings";
 import { IframeWithLoader } from "@/components/iframe-with-loader";
 import { PackConsoleClient } from "@/app/play/[quizId]/host/pack-console-client";
-import type { Localized, PackQuestion } from "@/lib/quiz/pack";
+import type { Localized, PackQuestion, PackTagGroup } from "@/lib/quiz/pack";
 import { cn } from "@/lib/utils";
 import { LessonHeader } from "../lesson-header";
 
@@ -17,7 +17,11 @@ export type Quiz = {
   // Same-origin proxy URL for the teacher console, or null if no file / not ready.
   signed_url: string | null;
   // Engine quiz (pack) — rendered as a native console instead of an iframe.
-  pack: { title: Localized; questions: PackQuestion[] } | null;
+  pack: {
+    title: Localized;
+    questions: PackQuestion[];
+    tagGroups?: PackTagGroup[];
+  } | null;
 };
 
 type Topic = {
@@ -140,6 +144,7 @@ export function QuizPageClient({
                         quizId={quiz.id}
                         title={quiz.pack.title}
                         questions={quiz.pack.questions}
+                        tagGroups={quiz.pack.tagGroups}
                         embedded
                       />
                     </div>

@@ -78,7 +78,8 @@ export default async function QuizzesPage({
 
   const quizzes = await Promise.all(
     (quizRows ?? []).map(async (quiz): Promise<Quiz> => {
-      // Engine quiz: the native console needs only the pack title + size.
+      // Engine quiz: the native console needs the pack title, questions and
+      // tag groups (picker filters) — not the whole pack.
       if (quiz.pack_path) {
         const pack = await downloadPack(quiz.pack_path);
         return {
@@ -87,7 +88,11 @@ export default async function QuizzesPage({
           title_ru: quiz.title_ru,
           signed_url: null,
           pack: pack
-            ? { title: pack.title, questions: pack.questions }
+            ? {
+                title: pack.title,
+                questions: pack.questions,
+                tagGroups: pack.tagGroups,
+              }
             : null,
         };
       }

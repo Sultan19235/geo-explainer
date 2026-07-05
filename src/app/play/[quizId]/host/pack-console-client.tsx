@@ -4,20 +4,26 @@
 // student cards stream in over SSE → leaderboard. Rendered standalone at
 // /play/<id>/host and embedded in the lesson page's quizzes tab.
 
-import { useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   Check,
   Copy,
   EyeOff,
   Flag,
   Expand,
+  GripVertical,
   ListChecks,
+  ListOrdered,
   Loader2,
   Play,
   QrCode as QrCodeIcon,
+  Shuffle,
   Square,
   Trophy,
   Users,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Confetti } from "@/components/quiz/confetti";
@@ -27,7 +33,14 @@ import { TimerPill } from "@/components/quiz/timer-pill";
 import { LanguageToggle } from "@/components/language-toggle";
 import { useLanguage } from "@/lib/i18n/context";
 import { cn } from "@/lib/utils";
-import { loc, type Localized, type PackQuestion } from "@/lib/quiz/pack";
+import {
+  loc,
+  type Localized,
+  type PackQuestion,
+  type PackTag,
+  type PackTagColor,
+  type PackTagGroup,
+} from "@/lib/quiz/pack";
 import { engineT } from "@/lib/quiz/engine-strings";
 import {
   useTeacherSession,
@@ -78,43 +91,51 @@ export function PackConsoleClient({
   quizId,
   title,
   questions,
+  tagGroups,
   embedded = false,
 }: {
   quizId: string;
   title: Localized;
   questions: PackQuestion[];
+  tagGroups?: PackTagGroup[];
   embedded?: boolean;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
   const session = useTeacherSession();
   const [qrOpen, setQrOpen] = useState(false);
-  // Which questions the teacher includes in this room. Defaults to all; the
-  // picker on the setup screen narrows it. Frozen once the room opens (the
-  // picker is only shown in the setup phase).
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(questions.map((q) => q.id)),
+  // Which questions the teacher includes in this room — an ordered list; in
+  // "custom" mode students get exactly this sequence. Defaults to the whole
+  // pack in pack order. Frozen once the room opens (the picker is only shown
+  // in the setup phase).
+  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
+    questions.map((q) => q.id),
   );
+  // "custom" → students follow selectedIds; "shuffle" → each student's device
+  // deals its own question/option order (anti-cheating for neighbors).
+  const [orderMode, setOrderMode] = useState<"custom" | "shuffle">("custom");
   const rootRef = useRef<HTMLDivElement>(null);
 
   const quizTitle = loc(title, lang);
 
-  // Only pass a subset in the student link; when every question is selected the
-  // link stays clean (and the student page defaults to the whole pack).
-  const selectedParam =
-    selectedIds.size > 0 && selectedIds.size < questions.length
-      ? questions
-          .filter((q) => selectedIds.has(q.id))
-          .map((q) => q.id)
-          .join(",")
+  // Keep the join link (and QR) clean when `q` adds nothing: the whole pack in
+  // pack order, or the whole pack under shuffle where order is irrelevant.
+  // selectedIds only ever holds distinct ids from this pack, so length
+  // equality means "same set".
+  const wholePack = selectedIds.length === questions.length;
+  const packOrder = questions.map((q) => q.id).join(",");
+  const qParam =
+    selectedIds.length > 0 &&
+    !(wholePack && (orderMode === "shuffle" || selectedIds.join(",") === packOrder))
+      ? selectedIds.join(",")
       : null;
   // session.code is null during SSR, so window is only touched in the browser.
   const studentUrl =
     session.code === null
       ? ""
       : `${window.location.origin}/play/${quizId}?code=${session.code}${
-          selectedParam ? `&q=${encodeURIComponent(selectedParam)}` : ""
-        }`;
+          qParam ? `&q=${encodeURIComponent(qParam)}` : ""
+        }${orderMode === "shuffle" ? "&shuffle=1" : ""}`;
 
   const toggleFullscreen = () => {
     const el = rootRef.current;
@@ -135,9 +156,12 @@ export function PackConsoleClient({
         <SetupScreen
           quizTitle={quizTitle}
           questions={questions}
+          tagGroups={tagGroups}
           embedded={embedded}
           selectedIds={selectedIds}
           setSelectedIds={setSelectedIds}
+          orderMode={orderMode}
+          setOrderMode={setOrderMode}
           creating={session.creating}
           createError={session.createError}
           onCreate={() => void session.createRoom(quizTitle)}
@@ -183,23 +207,38 @@ export function PackConsoleClient({
   );
 }
 
-// ═══ SETUP (title + question picker) ════════════════════════════════════
+// ═══ SETUP (title + order mode + question picker) ═══════════════════════
+
+const TAG_BADGE_COLORS: Record<PackTagColor, string> = {
+  blue: "border-blue-200 bg-blue-50 text-blue-700",
+  emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  amber: "border-amber-200 bg-amber-50 text-amber-700",
+  red: "border-red-200 bg-red-50 text-red-700",
+  violet: "border-violet-200 bg-violet-50 text-violet-700",
+  slate: "border-border bg-background text-muted-foreground",
+};
 
 function SetupScreen({
   quizTitle,
   questions,
+  tagGroups,
   embedded,
   selectedIds,
   setSelectedIds,
+  orderMode,
+  setOrderMode,
   creating,
   createError,
   onCreate,
 }: {
   quizTitle: string;
   questions: PackQuestion[];
+  tagGroups?: PackTagGroup[];
   embedded: boolean;
-  selectedIds: Set<string>;
-  setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>;
+  selectedIds: string[];
+  setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
+  orderMode: "custom" | "shuffle";
+  setOrderMode: (mode: "custom" | "shuffle") => void;
   creating: boolean;
   createError: "unauthorized" | "network" | null;
   onCreate: () => void;
@@ -207,19 +246,72 @@ function SetupScreen({
   const { lang } = useLanguage();
   const t = engineT(lang);
   const total = questions.length;
-  const selectedCount = selectedIds.size;
-  const allSelected = selectedCount === total;
+  const selectedCount = selectedIds.length;
+
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  // id → question + its stable "№ in the pack" (shown even when filters hide
+  // neighbors, so numbering never shifts under the teacher).
+  const byId = useMemo(
+    () =>
+      new Map(
+        questions.map((q, i) => [q.id, { question: q, number: i + 1 }] as const),
+      ),
+    [questions],
+  );
+  const tagDefs = useMemo(() => {
+    const map = new Map<string, PackTag>();
+    for (const group of tagGroups ?? [])
+      for (const tag of group.tags) map.set(tag.id, tag);
+    return map;
+  }, [tagGroups]);
+
+  // Tag filter: chips from different groups AND together, chips inside one
+  // group OR together (e.g. "cube" + "easy" = easy cube questions).
+  const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
+  const visible = useMemo(() => {
+    if (activeTags.size === 0 || !tagGroups) return questions;
+    return questions.filter((q) => {
+      for (const group of tagGroups) {
+        const active = group.tags.filter((tag) => activeTags.has(tag.id));
+        if (active.length === 0) continue;
+        if (!active.some((tag) => q.tags?.includes(tag.id))) return false;
+      }
+      return true;
+    });
+  }, [questions, tagGroups, activeTags]);
+
+  const tagCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const q of questions)
+      for (const tid of q.tags ?? []) counts.set(tid, (counts.get(tid) ?? 0) + 1);
+    return counts;
+  }, [questions]);
 
   const toggle = (id: string) =>
-    setSelectedIds((prev) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+
+  // "Select all" acts on the filtered view: appends the visible unselected
+  // (in pack order) or clears the visible ones, leaving the rest untouched.
+  const allVisibleSelected =
+    visible.length > 0 && visible.every((q) => selectedSet.has(q.id));
+  const toggleAllVisible = () => {
+    const visibleIds = new Set(visible.map((q) => q.id));
+    setSelectedIds((prev) =>
+      allVisibleSelected
+        ? prev.filter((id) => !visibleIds.has(id))
+        : [...prev, ...visible.filter((q) => !selectedSet.has(q.id)).map((q) => q.id)],
+    );
+  };
+
+  const toggleTag = (id: string) =>
+    setActiveTags((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-
-  const toggleAll = () =>
-    setSelectedIds(allSelected ? new Set() : new Set(questions.map((q) => q.id)));
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6">
@@ -246,6 +338,28 @@ function SetupScreen({
               {t("c_selected")}
             </p>
           </div>
+        </div>
+
+        {/* order mode */}
+        <div
+          role="radiogroup"
+          aria-label={`${t("c_mode_custom")} / ${t("c_mode_shuffle")}`}
+          className="mt-4 grid gap-2 sm:grid-cols-2"
+        >
+          <ModeButton
+            active={orderMode === "custom"}
+            icon={ListOrdered}
+            label={t("c_mode_custom")}
+            desc={t("c_mode_custom_desc")}
+            onClick={() => setOrderMode("custom")}
+          />
+          <ModeButton
+            active={orderMode === "shuffle"}
+            icon={Shuffle}
+            label={t("c_mode_shuffle")}
+            desc={t("c_mode_shuffle_desc")}
+            onClick={() => setOrderMode("shuffle")}
+          />
         </div>
 
         {createError && (
@@ -283,29 +397,70 @@ function SetupScreen({
         </Button>
       </div>
 
+      {/* selection tray */}
+      {selectedCount > 0 && (
+        <SelectionTray
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
+          byId={byId}
+          lang={lang}
+          reorderable={orderMode === "custom"}
+        />
+      )}
+
+      {/* tag filter chips */}
+      {tagGroups && tagGroups.length > 0 && (
+        <div className="mt-5 flex flex-wrap items-center gap-1.5 px-1">
+          <FilterChip
+            active={activeTags.size === 0}
+            label={`${t("c_filter_all")} · ${total}`}
+            onClick={() => setActiveTags(new Set())}
+          />
+          {tagGroups.map((group) => (
+            <Fragment key={group.id}>
+              <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden />
+              {group.tags.map((tag) => (
+                <FilterChip
+                  key={tag.id}
+                  active={activeTags.has(tag.id)}
+                  label={`${loc(tag.label, lang)} · ${tagCounts.get(tag.id) ?? 0}`}
+                  onClick={() => toggleTag(tag.id)}
+                />
+              ))}
+            </Fragment>
+          ))}
+        </div>
+      )}
+
       {/* picker toolbar */}
-      <div className="mb-2 mt-5 flex items-center justify-between gap-3 px-1">
+      <div className="mb-2 mt-4 flex items-center justify-between gap-3 px-1">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {t("c_select_hint")}
         </p>
         <button
           type="button"
-          onClick={toggleAll}
+          onClick={toggleAllVisible}
           className="shrink-0 text-xs font-semibold text-primary hover:underline"
         >
-          {allSelected ? t("c_deselect_all") : t("c_select_all")}
+          {allVisibleSelected ? t("c_deselect_all") : t("c_select_all")}
         </button>
       </div>
 
-      {/* question list */}
+      {/* question list (filtered view, stable pack numbering) */}
       <div className="space-y-2">
-        {questions.map((question, i) => (
+        {visible.map((question) => (
           <QuestionPreviewRow
             key={question.id}
-            index={i + 1}
+            index={byId.get(question.id)?.number ?? 0}
             question={question}
             lang={lang}
-            selected={selectedIds.has(question.id)}
+            selected={selectedSet.has(question.id)}
+            orderPos={
+              orderMode === "custom" && selectedSet.has(question.id)
+                ? selectedIds.indexOf(question.id) + 1
+                : null
+            }
+            tagDefs={tagDefs}
             onToggle={() => toggle(question.id)}
           />
         ))}
@@ -314,17 +469,245 @@ function SetupScreen({
   );
 }
 
+function ModeButton({
+  active,
+  icon: Icon,
+  label,
+  desc,
+  onClick,
+}: {
+  active: boolean;
+  icon: typeof ListOrdered;
+  label: string;
+  desc: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onClick}
+      className={cn(
+        "rounded-xl border-[1.5px] p-3 text-left transition-colors",
+        active
+          ? "border-primary bg-accent"
+          : "border-border bg-background hover:border-primary/40",
+      )}
+    >
+      <span
+        className={cn(
+          "flex items-center gap-1.5 text-sm font-bold",
+          active ? "text-primary" : "text-foreground",
+        )}
+      >
+        <Icon className="size-4" aria-hidden />
+        {label}
+      </span>
+      <span className="mt-1 block text-xs leading-snug text-muted-foreground">
+        {desc}
+      </span>
+    </button>
+  );
+}
+
+function FilterChip({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
+        active
+          ? "border-primary bg-primary text-white"
+          : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground",
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ═══ SELECTION TRAY (the quiz being built, in order) ════════════════════
+
+function SelectionTray({
+  selectedIds,
+  setSelectedIds,
+  byId,
+  lang,
+  reorderable,
+}: {
+  selectedIds: string[];
+  setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
+  byId: Map<string, { question: PackQuestion; number: number }>;
+  lang: "kz" | "ru";
+  reorderable: boolean;
+}) {
+  const t = engineT(lang);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  const move = (from: number, to: number) =>
+    setSelectedIds((prev) => {
+      if (from === to || to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      const [id] = next.splice(from, 1);
+      next.splice(to, 0, id);
+      return next;
+    });
+
+  const remove = (id: string) =>
+    setSelectedIds((prev) => prev.filter((x) => x !== id));
+
+  return (
+    <div className="mt-4 rounded-2xl border border-border bg-card shadow-lg shadow-blue-950/5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-4 py-2.5">
+        <ListOrdered className="size-4 text-primary" aria-hidden />
+        <p className="text-sm font-bold">{t("c_tray_title")}</p>
+        <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs font-bold tabular-nums">
+          {selectedIds.length}
+        </span>
+        {!reorderable && (
+          <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <Shuffle className="size-3.5" aria-hidden />
+            {t("c_tray_shuffle_note")}
+          </span>
+        )}
+      </div>
+      <ol className="max-h-72 overflow-y-auto p-2">
+        {selectedIds.map((id, i) => {
+          const entry = byId.get(id);
+          if (!entry) return null;
+          return (
+            <li
+              key={id}
+              draggable={reorderable}
+              onDragStart={(e) => {
+                e.dataTransfer.setData("text/plain", id);
+                e.dataTransfer.effectAllowed = "move";
+                setDragIndex(i);
+              }}
+              onDragOver={(e) => {
+                if (dragIndex === null) return;
+                e.preventDefault();
+                setOverIndex(i);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragIndex !== null) move(dragIndex, i);
+                setDragIndex(null);
+                setOverIndex(null);
+              }}
+              onDragEnd={() => {
+                setDragIndex(null);
+                setOverIndex(null);
+              }}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-2 py-1.5",
+                dragIndex === i && "opacity-40",
+                overIndex === i &&
+                  dragIndex !== null &&
+                  dragIndex !== i &&
+                  "bg-accent",
+              )}
+            >
+              {reorderable && (
+                <GripVertical
+                  className="size-4 shrink-0 cursor-grab text-muted-foreground/50"
+                  aria-hidden
+                />
+              )}
+              <span className="w-6 shrink-0 text-right font-mono text-xs font-bold tabular-nums text-primary">
+                {i + 1}.
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[13px]">
+                <MathText text={loc(entry.question.text, lang)} />
+              </span>
+              {reorderable && (
+                <>
+                  <TrayButton
+                    label={t("c_move_up")}
+                    disabled={i === 0}
+                    onClick={() => move(i, i - 1)}
+                  >
+                    <ArrowUp className="size-3.5" aria-hidden />
+                  </TrayButton>
+                  <TrayButton
+                    label={t("c_move_down")}
+                    disabled={i === selectedIds.length - 1}
+                    onClick={() => move(i, i + 1)}
+                  >
+                    <ArrowDown className="size-3.5" aria-hidden />
+                  </TrayButton>
+                </>
+              )}
+              <TrayButton label={t("c_remove_question")} onClick={() => remove(id)}>
+                <X className="size-3.5" aria-hidden />
+              </TrayButton>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+function TrayButton({
+  label,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "grid size-7 shrink-0 place-items-center rounded-md border border-transparent text-muted-foreground",
+        disabled
+          ? "opacity-30"
+          : "hover:border-border hover:bg-background hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
 function QuestionPreviewRow({
   index,
   question,
   lang,
   selected,
+  orderPos,
+  tagDefs,
   onToggle,
 }: {
   index: number;
   question: PackQuestion;
   lang: "kz" | "ru";
   selected: boolean;
+  // 1-based position in the teacher's order; null hides it (shuffle mode /
+  // unselected) and the checkbox falls back to a plain check mark.
+  orderPos: number | null;
+  tagDefs: Map<string, PackTag>;
   onToggle: () => void;
 }) {
   return (
@@ -347,7 +730,13 @@ function QuestionPreviewRow({
               : "border-border bg-background text-transparent hover:border-primary/50",
           )}
         >
-          <Check className="size-3.5" aria-hidden />
+          {selected && orderPos !== null ? (
+            <span className="text-[10px] font-bold leading-none tabular-nums">
+              {orderPos}
+            </span>
+          ) : (
+            <Check className="size-3.5" aria-hidden />
+          )}
         </button>
 
         <div className="min-w-0 flex-1">
@@ -357,6 +746,26 @@ function QuestionPreviewRow({
             </span>
             <MathText text={loc(question.text, lang)} />
           </div>
+
+          {question.tags && question.tags.length > 0 && tagDefs.size > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {question.tags.map((tid) => {
+                const def = tagDefs.get(tid);
+                if (!def) return null;
+                return (
+                  <span
+                    key={tid}
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-[10px] font-bold",
+                      TAG_BADGE_COLORS[def.color ?? "slate"],
+                    )}
+                  >
+                    {loc(def.label, lang)}
+                  </span>
+                );
+              })}
+            </div>
+          )}
 
           {question.type === "mcq" && question.options && (
             <div className="mt-2.5 grid gap-1.5 sm:grid-cols-2">

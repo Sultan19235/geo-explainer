@@ -58,6 +58,19 @@ export const ENGINE_STRINGS = {
     c_deselect_all: "Таңдауды алу",
     c_selected: "таңдалды",
     c_none_selected: "Кемінде бір сұрақ таңдаңыз.",
+    // console — order mode
+    c_mode_custom: "Менің ретім",
+    c_mode_custom_desc: "Сұрақтар сіз құрған ретпен беріледі",
+    c_mode_shuffle: "Кездейсоқ рет",
+    c_mode_shuffle_desc: "Әр оқушыға сұрақтар мен нұсқалар өз ретімен араласады",
+    // console — selection tray
+    c_tray_title: "Таңдалған сұрақтар",
+    c_tray_shuffle_note: "Реті маңызды емес — әр оқушыға өз кездейсоқ реті түседі",
+    c_move_up: "Жоғары",
+    c_move_down: "Төмен",
+    c_remove_question: "Алып тастау",
+    // console — tag filters
+    c_filter_all: "Барлығы",
     // console — lobby
     c_room_code: "Бөлме коды",
     c_scan_hint: "Оқушылар QR-кодты сканерлейді немесе кодты енгізеді",
@@ -141,6 +154,19 @@ export const ENGINE_STRINGS = {
     c_deselect_all: "Снять все",
     c_selected: "выбрано",
     c_none_selected: "Выберите хотя бы один вопрос.",
+    // console — order mode
+    c_mode_custom: "Мой порядок",
+    c_mode_custom_desc: "Вопросы идут в порядке, который вы задали",
+    c_mode_shuffle: "Случайный порядок",
+    c_mode_shuffle_desc: "У каждого ученика свой порядок вопросов и вариантов",
+    // console — selection tray
+    c_tray_title: "Выбранные вопросы",
+    c_tray_shuffle_note: "Порядок не важен — у каждого ученика он свой",
+    c_move_up: "Вверх",
+    c_move_down: "Вниз",
+    c_remove_question: "Убрать",
+    // console — tag filters
+    c_filter_all: "Все",
     // console — lobby
     c_room_code: "Код комнаты",
     c_scan_hint: "Ученики сканируют QR-код или вводят код",

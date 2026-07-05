@@ -85,14 +85,35 @@ function LiveMode({
   const urlCode = (searchParams.get("code") ?? "").toUpperCase();
 
   // The teacher may open a room with only a subset of questions; those ids
-  // ride along on the join link as `?q=id1,id2,...`. Absent → the whole pack.
+  // ride along on the join link as `?q=id1,id2,...` — in the teacher's chosen
+  // order, which we preserve. Absent → the whole pack in pack order.
+  // `?shuffle=1` (room-level choice) deals every student their own question
+  // and option order on top of whatever the pack defaults say.
   const qParam = searchParams.get("q");
+  const shuffleParam = searchParams.get("shuffle") === "1";
   const pack = useMemo<QuizPack>(() => {
-    if (!qParam) return fullPack;
-    const wanted = new Set(qParam.split(",").map((s) => s.trim()).filter(Boolean));
-    const questions = fullPack.questions.filter((q) => wanted.has(q.id));
-    return questions.length > 0 ? { ...fullPack, questions } : fullPack;
-  }, [fullPack, qParam]);
+    let questions = fullPack.questions;
+    if (qParam) {
+      const byId = new Map(fullPack.questions.map((q) => [q.id, q]));
+      const seen = new Set<string>();
+      const picked = qParam
+        .split(",")
+        .map((s) => s.trim())
+        .filter((id) => {
+          if (!id || seen.has(id)) return false;
+          seen.add(id);
+          return byId.has(id);
+        })
+        .map((id) => byId.get(id)!);
+      if (picked.length > 0) questions = picked;
+    }
+    return {
+      ...fullPack,
+      questions,
+      shuffleQuestions: shuffleParam || fullPack.shuffleQuestions,
+      shuffleOptions: shuffleParam || fullPack.shuffleOptions,
+    };
+  }, [fullPack, qParam, shuffleParam]);
 
   const questionCount = pack.questions.length;
   const defaultExtra = useMemo<PackExtra>(

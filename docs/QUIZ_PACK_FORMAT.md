@@ -35,9 +35,13 @@ No HTML needed.
   "formulas": ["…"],             // optional help sheet behind the "Formulas" button
   "shuffleQuestions": false,     // optional — random question order per student
   "shuffleOptions": false,       // optional — random option order per student
+  "tagGroups": [ /* optional console filters, see below */ ],
   "questions": [ /* 1–200 questions, see below */ ]
 }
 ```
+
+Note: the teacher can also force per-student shuffling for a single room from
+the console ("Кездейсоқ рет"), regardless of the pack's `shuffle*` defaults.
 
 ### Text fields and languages
 
@@ -93,9 +97,47 @@ Display math uses `$$…$$`. Remember to double backslashes in JSON:
   "solution": [             // worked steps, revealed after answering
     "Табан ауданы: $S = a^2 = 144 \\Rightarrow a = 12$",
     "Диагональ: $d = \\sqrt{2a^2 + h^2} = 22$"
+  ],
+  "tags": ["cube", "easy"]  // ids from tagGroups (see below)
+}
+```
+
+### Tags (console filters)
+
+Tags let the teacher filter the question picker ("cube", "easy", …) when
+building a room. They are **console-only** — students never see them. Declare
+the vocabulary at the pack level, then reference tag ids on questions:
+
+```jsonc
+{
+  "tagGroups": [
+    {
+      "id": "topic",                                    // a dimension of tags
+      "label": { "kz": "Тақырып", "ru": "Тема" },       // optional
+      "tags": [
+        { "id": "cube", "label": { "kz": "Куб", "ru": "Куб" } },
+        { "id": "prism", "label": { "kz": "Призма", "ru": "Призма" } }
+      ]
+    },
+    {
+      "id": "difficulty",
+      "tags": [
+        { "id": "easy", "label": { "kz": "Жеңіл", "ru": "Лёгкий" }, "color": "emerald" },
+        { "id": "hard", "label": { "kz": "Қиын", "ru": "Сложный" }, "color": "red" }
+      ]
+    }
   ]
 }
 ```
+
+- Tag ids are **global across groups** — a question just lists ids:
+  `"tags": ["cube", "easy"]`.
+- On the console, filters from different groups combine with AND, filters
+  inside one group with OR (cube + prism + easy = easy cube-or-prism).
+- `color` is optional: `blue`, `emerald`, `amber`, `red`, `violet`, `slate`
+  (default `slate`).
+- A question may have any number of tags, including none (an untagged
+  question matches only when no filter from that group is active).
 
 ## Testing a pack locally (development)
 

@@ -23,6 +23,7 @@ export type PackQuestion = {
   text: Localized;
   image?: string;
   geogebra?: PackGeoGebra;
+  tags?: string[]; // ids from tagGroups; console-only (filtering, badges)
   // mcq
   options?: Localized[];
   correct?: number; // index into options (letters are normalized on validate)
@@ -33,6 +34,30 @@ export type PackQuestion = {
   solution?: Localized[];
 };
 
+// Badge tint on the console; "slate" (neutral) when omitted.
+export type PackTagColor =
+  | "blue"
+  | "emerald"
+  | "amber"
+  | "red"
+  | "violet"
+  | "slate";
+
+export type PackTag = {
+  id: string;
+  label: Localized;
+  color?: PackTagColor;
+};
+
+// A dimension of tags (e.g. topic, difficulty). Filtering combines groups
+// with AND and tags inside one group with OR; tag ids are global so a
+// question just lists ids. Tags never reach students — console only.
+export type PackTagGroup = {
+  id: string;
+  label?: Localized;
+  tags: PackTag[];
+};
+
 export type QuizPack = {
   version: 1;
   title: Localized;
@@ -40,6 +65,7 @@ export type QuizPack = {
   formulas?: Localized[]; // topic help sheet behind the "Formulas" button
   shuffleQuestions?: boolean;
   shuffleOptions?: boolean;
+  tagGroups?: PackTagGroup[];
   questions: PackQuestion[];
 };
 
@@ -111,6 +137,84 @@ export function validatePack(raw: unknown): {
   }
   if (data.formulas !== undefined && !isLocalizedList(data.formulas)) {
     errors.push('"formulas" must be a list of strings (or {"kz","ru"} objects).');
+  }
+
+  // Tag groups: validated first so question tags can be checked against them.
+  const TAG_COLORS: PackTagColor[] = [
+    "blue",
+    "emerald",
+    "amber",
+    "red",
+    "violet",
+    "slate",
+  ];
+  const tagGroups: PackTagGroup[] = [];
+  const knownTagIds = new Set<string>();
+  if (data.tagGroups !== undefined) {
+    if (!Array.isArray(data.tagGroups)) {
+      errors.push('"tagGroups" must be a list of groups.');
+    } else {
+      data.tagGroups.forEach((rawG, gi) => {
+        const gLabel = `tagGroups[${gi}]`;
+        if (typeof rawG !== "object" || rawG === null) {
+          errors.push(`${gLabel}: must be an object.`);
+          return;
+        }
+        const g = rawG as Record<string, unknown>;
+        if (typeof g.id !== "string" || g.id.trim().length === 0) {
+          errors.push(`${gLabel}: missing "id" string.`);
+          return;
+        }
+        if (g.label !== undefined && !isLocalized(g.label)) {
+          errors.push(`${gLabel}: "label" must be a string or {"kz","ru"}.`);
+          return;
+        }
+        if (!Array.isArray(g.tags) || g.tags.length === 0) {
+          errors.push(`${gLabel}: "tags" must be a non-empty list.`);
+          return;
+        }
+        const tags: PackTag[] = [];
+        for (const rawT of g.tags) {
+          if (typeof rawT !== "object" || rawT === null) {
+            errors.push(`${gLabel}: each tag must be an object.`);
+            return;
+          }
+          const tg = rawT as Record<string, unknown>;
+          if (typeof tg.id !== "string" || tg.id.trim().length === 0) {
+            errors.push(`${gLabel}: each tag needs an "id" string.`);
+            return;
+          }
+          if (knownTagIds.has(tg.id)) {
+            errors.push(`${gLabel}: duplicate tag id "${tg.id}" (ids are global).`);
+            return;
+          }
+          if (!isLocalized(tg.label)) {
+            errors.push(`${gLabel}: tag "${tg.id}" needs a "label".`);
+            return;
+          }
+          if (
+            tg.color !== undefined &&
+            !TAG_COLORS.includes(tg.color as PackTagColor)
+          ) {
+            errors.push(
+              `${gLabel}: tag "${tg.id}" color must be one of ${TAG_COLORS.join(", ")}.`,
+            );
+            return;
+          }
+          knownTagIds.add(tg.id);
+          tags.push({
+            id: tg.id,
+            label: tg.label as Localized,
+            color: tg.color as PackTagColor | undefined,
+          });
+        }
+        tagGroups.push({
+          id: g.id,
+          label: g.label as Localized | undefined,
+          tags,
+        });
+      });
+    }
   }
 
   const rawQuestions = data.questions;
@@ -226,6 +330,21 @@ export function validatePack(raw: unknown): {
       }
     }
 
+    if (q.tags !== undefined) {
+      if (!Array.isArray(q.tags) || !q.tags.every((t) => typeof t === "string")) {
+        errors.push(`${label}: "tags" must be a list of tag id strings.`);
+      } else {
+        const unknown = (q.tags as string[]).filter((t) => !knownTagIds.has(t));
+        if (unknown.length > 0) {
+          errors.push(
+            `${label}: unknown tag id(s) ${unknown.map((t) => `"${t}"`).join(", ")} — declare them in "tagGroups".`,
+          );
+        } else {
+          question.tags = Array.from(new Set(q.tags as string[]));
+        }
+      }
+    }
+
     questions.push(question);
   });
 
@@ -239,6 +358,7 @@ export function validatePack(raw: unknown): {
       formulas: data.formulas as Localized[] | undefined,
       shuffleQuestions: data.shuffleQuestions === true,
       shuffleOptions: data.shuffleOptions === true,
+      tagGroups: tagGroups.length > 0 ? tagGroups : undefined,
       questions,
     },
     errors: [],
