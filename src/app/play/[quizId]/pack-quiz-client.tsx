@@ -4,7 +4,7 @@
 // live-session machine. Self-paced — each student walks the question list at
 // their own speed while the teacher watches the live scoreboard.
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   ArrowRight,
@@ -25,12 +25,13 @@ import { Label } from "@/components/ui/label";
 import { Confetti } from "@/components/quiz/confetti";
 import { DragParabola } from "@/components/quiz/drag-parabola";
 import { GeoGebraFigure } from "@/components/quiz/geogebra-figure";
+import { GraphCanvas } from "@/components/quiz/graph-canvas";
 import { MathFormula } from "@/components/quiz/math-formula";
 import { MathText } from "@/components/quiz/math-text";
-import { ParabolaThumb } from "@/components/quiz/parabola-thumb";
 import { TimerPill } from "@/components/quiz/timer-pill";
 import {
   formatFunc,
+  generateGraphPackQuestion,
   gradeDrag,
   graphPropertyChoiceCount,
   graphPropertyChoices,
@@ -45,6 +46,7 @@ import {
   checkInputAnswer,
   loc,
   seededOrder,
+  type PackGenerator,
   type PackQuestion,
   type QuizPack,
 } from "@/lib/quiz/pack";
@@ -160,7 +162,7 @@ function LiveMode({
       }
       const idx =
         typeof raw.idx === "number" && Number.isInteger(raw.idx)
-          ? Math.min(Math.max(raw.idx, 0), questionCount - 1)
+          ? Math.min(Math.max(raw.idx, 0), Math.max(questionCount - 1, 0))
           : 0;
       const answered: Record<string, AnswerRecord> = {};
       if (typeof raw.answered === "object" && raw.answered !== null) {
@@ -206,7 +208,11 @@ function LiveMode({
         <WaitScreen name={session.studentName} />
       )}
       {session.phase === "active" &&
-        (session.extra.done ? (
+        (fullPack.generator ? (
+          // Generator quiz: endless machine-made questions, no "done" — the
+          // stream runs until the teacher ends the room.
+          <GeneratedFlow generator={fullPack.generator} session={session} />
+        ) : session.extra.done ? (
           <DoneScreen stats={session.stats} timeLeft={session.timeLeft} />
         ) : (
           <QuestionFlow
@@ -489,6 +495,106 @@ function QuestionFlow({
   );
 }
 
+// ═══ GENERATED FLOW (endless machine-made questions) ═════════════════════
+
+function randomOrder(count: number): number[] {
+  const order = identityOrder(count);
+  for (let i = count - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order;
+}
+
+// Endless stream from the pack's generator settings. Each student's device
+// makes its own questions — nothing is stored, matching the old generator
+// page. Runs until the room ends (no finish button).
+function GeneratedFlow({
+  generator,
+  session,
+}: {
+  generator: PackGenerator;
+  session: Session;
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const [seq, setSeq] = useState(1);
+  const [question, setQuestion] = useState<PackQuestion>(
+    () =>
+      generateGraphPackQuestion(
+        generator.sections,
+        generator.modes,
+        1,
+      ) as PackQuestion,
+  );
+  const [optOrder, setOptOrder] = useState<number[]>(() =>
+    randomOrder(choiceCount(question)),
+  );
+  const [record, setRecord] = useState<AnswerRecord | null>(null);
+
+  const answer = (rec: AnswerRecord) => {
+    if (record) return;
+    session.recordAnswer(rec.ok);
+    setRecord(rec);
+  };
+
+  const next = () => {
+    const n = seq + 1;
+    const q = generateGraphPackQuestion(
+      generator.sections,
+      generator.modes,
+      n,
+    ) as PackQuestion;
+    setSeq(n);
+    setQuestion(q);
+    setOptOrder(randomOrder(choiceCount(q)));
+    setRecord(null);
+  };
+
+  return (
+    <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col px-4 pb-8 pt-4">
+      <header className="mb-4 flex items-center gap-2">
+        <span className="rounded-full border border-border bg-card px-3 py-1 text-xs font-bold tabular-nums">
+          {t("question_label")} {seq}
+        </span>
+        <ScorePill stats={session.stats} />
+        {session.stats.streak >= 3 && (
+          <span className="flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700">
+            <Flame className="size-3.5" aria-hidden />
+            {session.stats.streak}
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          {session.timeLeft !== null && <TimerPill seconds={session.timeLeft} />}
+        </div>
+      </header>
+
+      <QuestionCard
+        key={question.id}
+        question={question}
+        lang={lang}
+        optOrder={optOrder}
+        record={record}
+        onPick={(displayIndex) => {
+          const pick = optOrder[displayIndex];
+          answer({ ok: pick === 0, pick });
+        }}
+        onCheckDrag={(ok, given) => answer({ ok, given })}
+      />
+
+      {record && (
+        <Button
+          onClick={next}
+          className="mt-4 h-12 w-full text-base font-semibold"
+        >
+          {t("next_button")}
+          <ArrowRight className="size-4" aria-hidden />
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function ScorePill({ stats }: { stats: QuizStats }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -572,48 +678,19 @@ function QuestionCard({
             />
           </div>
           <div className="grid grid-cols-2 gap-2.5">
-            {optOrder.map((originalIndex, displayIndex) => {
-              const isCorrect = originalIndex === 0;
-              const isPicked = record?.pick === originalIndex;
-              const showCorrect = answered && isCorrect;
-              const showWrong = answered && isPicked && !isCorrect;
-              return (
-                <button
-                  key={originalIndex}
-                  type="button"
-                  disabled={answered}
-                  onClick={() => onPick?.(displayIndex)}
-                  aria-label={`${OPTION_LABELS[displayIndex]}`}
-                  className={cn(
-                    "relative aspect-square overflow-hidden rounded-xl border-2 bg-white outline-none transition-all focus-visible:ring-3 focus-visible:ring-ring/50",
-                    !answered && "cursor-pointer hover:border-primary/50",
-                    showCorrect
-                      ? "border-emerald-500 ring-4 ring-emerald-500/15"
-                      : showWrong
-                        ? "border-red-400 ring-4 ring-red-400/15"
-                        : "border-border",
-                    answered && !showCorrect && !showWrong && "opacity-55",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "absolute left-1.5 top-1.5 z-10 flex size-6 items-center justify-center rounded-md text-xs font-bold text-white",
-                      showCorrect
-                        ? "bg-emerald-500"
-                        : showWrong
-                          ? "bg-red-400"
-                          : "bg-primary",
-                    )}
-                  >
-                    {OPTION_LABELS[displayIndex]}
-                  </span>
-                  <ParabolaThumb
-                    params={graphThumbs[originalIndex]}
-                    className="size-full"
-                  />
-                </button>
-              );
-            })}
+            {optOrder.map((originalIndex, displayIndex) => (
+              <GraphOptionTile
+                key={originalIndex}
+                params={graphThumbs[originalIndex]}
+                label={OPTION_LABELS[displayIndex]}
+                answered={answered}
+                showCorrect={answered && originalIndex === 0}
+                showWrong={
+                  answered && record?.pick === originalIndex && originalIndex !== 0
+                }
+                onPick={() => onPick?.(displayIndex)}
+              />
+            ))}
           </div>
         </div>
       )}
@@ -621,12 +698,8 @@ function QuestionCard({
       {/* Modes B & C — show the graph, pick a property (B) or the formula (C). */}
       {graph && (graph.mode === "B" || graph.mode === "C") && (
         <div className="mt-4">
-          <div className="mx-auto mb-4 aspect-square w-full max-w-[260px] overflow-hidden rounded-xl border border-border bg-white">
-            <ParabolaThumb
-              params={graph.equation}
-              window={7}
-              className="size-full"
-            />
+          <div className="mx-auto mb-4 h-60 w-full max-w-sm overflow-hidden rounded-xl border border-border sm:h-72">
+            <GraphCanvas params={graph.equation} />
           </div>
           <div className="grid gap-2.5">
             {optOrder.map((originalIndex, displayIndex) => {
@@ -806,6 +879,72 @@ function QuestionCard({
   );
 }
 
+// One selectable graph option (mode A): a live GraphCanvas — crisp, pannable,
+// zoomable, with numbered axes — inside a pickable tile. A tap picks; a drag
+// pans the plot without picking (the guard below tells them apart by how far
+// the pointer moved).
+function GraphOptionTile({
+  params,
+  label,
+  answered,
+  showCorrect,
+  showWrong,
+  onPick,
+}: {
+  params: QuadParams;
+  label: string;
+  answered: boolean;
+  showCorrect: boolean;
+  showWrong: boolean;
+  onPick: () => void;
+}) {
+  const downAt = useRef<{ x: number; y: number } | null>(null);
+
+  return (
+    <div
+      role="button"
+      tabIndex={answered ? -1 : 0}
+      aria-label={label}
+      onPointerDown={(e) => {
+        downAt.current = { x: e.clientX, y: e.clientY };
+      }}
+      onPointerUp={(e) => {
+        const start = downAt.current;
+        downAt.current = null;
+        if (answered || !start) return;
+        // Moved more than a few px → it was a pan, not a pick.
+        if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < 8) onPick();
+      }}
+      onKeyDown={(e) => {
+        if (!answered && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onPick();
+        }
+      }}
+      className={cn(
+        "relative aspect-square overflow-hidden rounded-xl border-2 bg-white outline-none transition-all focus-visible:ring-3 focus-visible:ring-ring/50",
+        !answered && "cursor-pointer hover:border-primary/50",
+        showCorrect
+          ? "border-emerald-500 ring-4 ring-emerald-500/15"
+          : showWrong
+            ? "border-red-400 ring-4 ring-red-400/15"
+            : "border-border",
+        answered && !showCorrect && !showWrong && "opacity-55",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute left-1.5 top-1.5 z-10 flex size-6 items-center justify-center rounded-md text-xs font-bold text-white",
+          showCorrect ? "bg-emerald-500" : showWrong ? "bg-red-400" : "bg-primary",
+        )}
+      >
+        {label}
+      </span>
+      <GraphCanvas params={params} />
+    </div>
+  );
+}
+
 // Mode D: the student drags a parabola to match `target`, then presses Check.
 // Manages its own attempt state; reports the graded result up via onCheckDrag.
 function DragQuestion({
@@ -857,8 +996,8 @@ function DragQuestion({
         <>
           <p className="mt-2 text-center text-xs text-muted-foreground">
             {lang === "ru"
-              ? "Двигайте вершину · тяните точку вверх/вниз, меняя изгиб"
-              : "Төбені жылжытыңыз · нүктені жоғары/төмен жылжытып иілуін өзгертіңіз"}
+              ? "Двигайте точки · пустое место — перемещение · два пальца — масштаб"
+              : "Нүктелерді жылжытыңыз · бос жер — жылжыту · екі саусақ — үлкейту"}
           </p>
           <Button
             className="mt-3 h-12 w-full text-base font-semibold"
@@ -984,6 +1123,78 @@ function ScoreSummary({ stats }: { stats: QuizStats }) {
 // ═══ PREVIEW (admin) ══════════════════════════════════════════════════════
 
 function PreviewMode({ pack }: { pack: QuizPack }) {
+  if (pack.generator && pack.questions.length === 0) {
+    return <GeneratedPreview generator={pack.generator} pack={pack} />;
+  }
+  return <ListPreview pack={pack} />;
+}
+
+// Preview of a generator quiz: sample questions made on the spot. Generated
+// after mount (not during server render) so the server and browser never
+// disagree about the random question.
+function GeneratedPreview({
+  generator,
+  pack,
+}: {
+  generator: PackGenerator;
+  pack: QuizPack;
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const [seq, setSeq] = useState(0);
+  const [question, setQuestion] = useState<PackQuestion | null>(null);
+
+  useEffect(() => {
+    setQuestion(
+      generateGraphPackQuestion(
+        generator.sections,
+        generator.modes,
+        seq + 1,
+      ) as PackQuestion,
+    );
+  }, [generator, seq]);
+
+  return (
+    <main className="quiz-grid-paper min-h-dvh text-foreground">
+      <div className="mx-auto w-full max-w-2xl px-4 pb-10 pt-4">
+        <header className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="rounded bg-amber-100 px-2.5 py-1 text-[11px] font-bold tracking-wide text-amber-800">
+            {t("preview_badge")}
+          </span>
+          <h1 className="text-sm font-bold">{loc(pack.title, lang)}</h1>
+          <div className="ml-auto">
+            <LanguageToggle />
+          </div>
+        </header>
+
+        {question ? (
+          <QuestionCard
+            key={question.id}
+            question={question}
+            lang={lang}
+            optOrder={identityOrder(choiceCount(question))}
+            record={null}
+            revealed
+          />
+        ) : (
+          <div className="grid h-60 place-items-center">
+            <Loader2 className="size-6 animate-spin text-primary" aria-hidden />
+          </div>
+        )}
+
+        <Button
+          variant="outline"
+          className="mt-4 w-full"
+          onClick={() => setSeq((n) => n + 1)}
+        >
+          {lang === "ru" ? "Другой пример" : "Басқа мысал"}
+        </Button>
+      </div>
+    </main>
+  );
+}
+
+function ListPreview({ pack }: { pack: QuizPack }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
   const [index, setIndex] = useState(0);

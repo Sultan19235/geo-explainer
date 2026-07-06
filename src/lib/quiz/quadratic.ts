@@ -143,7 +143,13 @@ export function suggestDistractors(
   return wrongs;
 }
 
-function genWrong(correct: QuadParams, sec: SectionId): QuadParams[] {
+// Three wrong parabolas for a section-generated correct one: plausible
+// mistake-variants first, padded with fresh parabolas from the same section
+// when symmetry makes variants collapse (e.g. y = ax² has no m/n to flip).
+export function genWrongForSection(
+  correct: QuadParams,
+  sec: SectionId,
+): QuadParams[] {
   const wrongs = suggestDistractors(correct, 3);
   const used = new Set([
     JSON.stringify(correct),
@@ -166,7 +172,7 @@ export type Question = { formula: string; options: QuizOption[] };
 export function generateQuestion(sections: readonly SectionId[]): Question {
   const sec = randomChoice(sections);
   const correct = genForSection(sec);
-  const wrongs = genWrong(correct, sec);
+  const wrongs = genWrongForSection(correct, sec);
   const options = shuffle<QuizOption>([
     { params: correct, isCorrect: true },
     ...wrongs.map((w) => ({ params: w, isCorrect: false })),
@@ -340,6 +346,95 @@ export function gradeDrag(
     Math.abs(attempt.m - t.m) < tol &&
     Math.abs(attempt.n - t.n) < tol
   );
+}
+
+// ─── Endless question generator (generator quizzes) ─────────────────────────
+// A generator quiz stores only a settings card: which of the six sections and
+// which of the four interaction modes are in play. Every student's device
+// then generates its own endless stream of questions from those settings.
+
+export type GraphQuizMode = "A" | "B" | "C" | "D";
+export const GRAPH_MODES: GraphQuizMode[] = ["A", "B", "C", "D"];
+
+export function isGraphMode(value: unknown): value is GraphQuizMode {
+  return (
+    typeof value === "string" && (GRAPH_MODES as string[]).includes(value)
+  );
+}
+
+// The default bilingual prompt each mode shows above its question. Mode B's
+// prompt names the asked property.
+export function graphModePrompt(
+  mode: GraphQuizMode,
+  ask?: GraphAsk,
+): { kz: string; ru: string } {
+  if (mode === "B" && ask) {
+    return {
+      kz: graphPropertyPrompt(ask, "kz"),
+      ru: graphPropertyPrompt(ask, "ru"),
+    };
+  }
+  const P: Record<Exclude<GraphQuizMode, "B">, { kz: string; ru: string }> = {
+    A: { kz: "Функцияның графигін таңдаңыз", ru: "Выберите график функции" },
+    C: {
+      kz: "Графикке сәйкес формуланы таңдаңыз",
+      ru: "Выберите формулу, соответствующую графику",
+    },
+    D: {
+      kz: "Параболаны берілген теңдеуге сәйкес салыңыз",
+      ru: "Постройте параболу по заданному уравнению",
+    },
+  };
+  return P[mode === "B" ? "A" : mode];
+}
+
+// One freshly generated question, shaped like a pack "graph-quadratic"
+// question (same graph payload the player already renders and grades). All
+// genForSection output is drag-buildable — integer vertex, half-step a — so
+// every section works under every mode, including D.
+export type GeneratedGraphQuestion = {
+  id: string;
+  type: "graph-quadratic";
+  text: { kz: string; ru: string };
+  graph:
+    | { mode: "A" | "C"; equation: QuadParams; distractors: QuadParams[] }
+    | { mode: "B"; equation: QuadParams; ask: GraphAsk }
+    | { mode: "D"; equation: QuadParams };
+};
+
+export function generateGraphPackQuestion(
+  sections: readonly SectionId[],
+  modes: readonly GraphQuizMode[],
+  seq: number,
+): GeneratedGraphQuestion {
+  const mode = randomChoice(modes);
+  const sec = randomChoice(sections);
+  const equation = genForSection(sec);
+  const id = `gen-${seq}`;
+
+  if (mode === "B") {
+    const ask = randomChoice(GRAPH_ASKS);
+    return {
+      id,
+      type: "graph-quadratic",
+      text: graphModePrompt("B", ask),
+      graph: { mode: "B", equation, ask },
+    };
+  }
+  if (mode === "D") {
+    return {
+      id,
+      type: "graph-quadratic",
+      text: graphModePrompt("D"),
+      graph: { mode: "D", equation },
+    };
+  }
+  return {
+    id,
+    type: "graph-quadratic",
+    text: graphModePrompt(mode),
+    graph: { mode, equation, distractors: genWrongForSection(equation, sec) },
+  };
 }
 
 // Correct label first, then up to `count` distinct distractor labels drawn in

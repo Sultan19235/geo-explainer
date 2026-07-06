@@ -114,6 +114,7 @@ export function PackConsoleClient({
   savedQuiz = null,
   initialSelectedIds,
   initialOrderMode,
+  generator = false,
 }: {
   quizId: string;
   title: Localized;
@@ -125,6 +126,9 @@ export function PackConsoleClient({
   savedQuiz?: SavedQuizRef | null;
   initialSelectedIds?: string[];
   initialOrderMode?: "custom" | "shuffle";
+  // Generator quiz: questions are machine-made endlessly on each student's
+  // device, so there is no question picker and the room always can start.
+  generator?: boolean;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -218,13 +222,14 @@ export function PackConsoleClient({
           setSelectedIds={setSelectedIds}
           orderMode={orderMode}
           setOrderMode={setOrderMode}
-          canSave={canSave}
+          canSave={canSave && !generator}
           saved={saved}
           setSaved={setSaved}
           savedMissing={savedQuiz?.missing ?? 0}
           creating={session.creating}
           createError={session.createError}
           onCreate={() => void session.createRoom(quizTitle)}
+          generator={generator}
         />
       )}
 
@@ -295,6 +300,7 @@ function SetupScreen({
   creating,
   createError,
   onCreate,
+  generator,
 }: {
   quizId: string;
   quizTitle: string;
@@ -312,6 +318,7 @@ function SetupScreen({
   creating: boolean;
   createError: "unauthorized" | "network" | null;
   onCreate: () => void;
+  generator: boolean;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -414,35 +421,47 @@ function SetupScreen({
             </h1>
             <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
               <ListChecks className="size-4" aria-hidden />
-              <span className="tabular-nums">
-                {selectedCount} / {total}
-              </span>{" "}
-              {t("c_selected")}
+              {generator ? (
+                lang === "ru" ? (
+                  "Бесконечные вопросы — создаются автоматически"
+                ) : (
+                  "Шексіз сұрақтар — автоматты құрылады"
+                )
+              ) : (
+                <>
+                  <span className="tabular-nums">
+                    {selectedCount} / {total}
+                  </span>{" "}
+                  {t("c_selected")}
+                </>
+              )}
             </p>
           </div>
         </div>
 
-        {/* order mode */}
-        <div
-          role="radiogroup"
-          aria-label={`${t("c_mode_custom")} / ${t("c_mode_shuffle")}`}
-          className="mt-4 grid gap-2 sm:grid-cols-2"
-        >
-          <ModeButton
-            active={orderMode === "custom"}
-            icon={ListOrdered}
-            label={t("c_mode_custom")}
-            desc={t("c_mode_custom_desc")}
-            onClick={() => setOrderMode("custom")}
-          />
-          <ModeButton
-            active={orderMode === "shuffle"}
-            icon={Shuffle}
-            label={t("c_mode_shuffle")}
-            desc={t("c_mode_shuffle_desc")}
-            onClick={() => setOrderMode("shuffle")}
-          />
-        </div>
+        {/* order mode (list quizzes only — a generator deals its own order) */}
+        {!generator && (
+          <div
+            role="radiogroup"
+            aria-label={`${t("c_mode_custom")} / ${t("c_mode_shuffle")}`}
+            className="mt-4 grid gap-2 sm:grid-cols-2"
+          >
+            <ModeButton
+              active={orderMode === "custom"}
+              icon={ListOrdered}
+              label={t("c_mode_custom")}
+              desc={t("c_mode_custom_desc")}
+              onClick={() => setOrderMode("custom")}
+            />
+            <ModeButton
+              active={orderMode === "shuffle"}
+              icon={Shuffle}
+              label={t("c_mode_shuffle")}
+              desc={t("c_mode_shuffle_desc")}
+              onClick={() => setOrderMode("shuffle")}
+            />
+          </div>
+        )}
 
         {canSave && (
           <SaveQuizControls
@@ -470,7 +489,7 @@ function SetupScreen({
               : t("c_err_network")}
           </p>
         )}
-        {selectedCount === 0 && !createError && (
+        {!generator && selectedCount === 0 && !createError && (
           <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-sm font-medium text-amber-800">
             {t("c_none_selected")}
           </p>
@@ -478,7 +497,7 @@ function SetupScreen({
 
         <Button
           onClick={onCreate}
-          disabled={creating || selectedCount === 0}
+          disabled={creating || (!generator && selectedCount === 0)}
           className="mt-4 h-12 w-full text-base font-semibold"
         >
           {creating ? (
@@ -507,8 +526,8 @@ function SetupScreen({
         />
       )}
 
-      {/* tag filter chips */}
-      {tagGroups && tagGroups.length > 0 && (
+      {/* tag filter chips (list quizzes only) */}
+      {!generator && tagGroups && tagGroups.length > 0 && (
         <div className="mt-5 flex flex-wrap items-center gap-1.5 px-1">
           <FilterChip
             active={activeTags.size === 0}
@@ -531,39 +550,42 @@ function SetupScreen({
         </div>
       )}
 
-      {/* picker toolbar */}
-      <div className="mb-2 mt-4 flex items-center justify-between gap-3 px-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {t("c_select_hint")}
-        </p>
-        <button
-          type="button"
-          onClick={toggleAllVisible}
-          className="shrink-0 text-xs font-semibold text-primary hover:underline"
-        >
-          {allVisibleSelected ? t("c_deselect_all") : t("c_select_all")}
-        </button>
-      </div>
+      {/* picker toolbar + question list (list quizzes only) */}
+      {!generator && (
+        <>
+          <div className="mb-2 mt-4 flex items-center justify-between gap-3 px-1">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("c_select_hint")}
+            </p>
+            <button
+              type="button"
+              onClick={toggleAllVisible}
+              className="shrink-0 text-xs font-semibold text-primary hover:underline"
+            >
+              {allVisibleSelected ? t("c_deselect_all") : t("c_select_all")}
+            </button>
+          </div>
 
-      {/* question list (filtered view, stable pack numbering) */}
-      <div className="space-y-2">
-        {visible.map((question) => (
-          <QuestionPreviewRow
-            key={question.id}
-            index={byId.get(question.id)?.number ?? 0}
-            question={question}
-            lang={lang}
-            selected={selectedSet.has(question.id)}
-            orderPos={
-              orderMode === "custom" && selectedSet.has(question.id)
-                ? selectedIds.indexOf(question.id) + 1
-                : null
-            }
-            tagDefs={tagDefs}
-            onToggle={() => toggle(question.id)}
-          />
-        ))}
-      </div>
+          <div className="space-y-2">
+            {visible.map((question) => (
+              <QuestionPreviewRow
+                key={question.id}
+                index={byId.get(question.id)?.number ?? 0}
+                question={question}
+                lang={lang}
+                selected={selectedSet.has(question.id)}
+                orderPos={
+                  orderMode === "custom" && selectedSet.has(question.id)
+                    ? selectedIds.indexOf(question.id) + 1
+                    : null
+                }
+                tagDefs={tagDefs}
+                onToggle={() => toggle(question.id)}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

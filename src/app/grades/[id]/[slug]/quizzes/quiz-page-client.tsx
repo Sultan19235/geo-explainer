@@ -6,7 +6,12 @@ import { useT } from "@/lib/i18n/context";
 import type { Lang } from "@/lib/i18n/strings";
 import { IframeWithLoader } from "@/components/iframe-with-loader";
 import { PackConsoleClient } from "@/app/play/[quizId]/host/pack-console-client";
-import type { Localized, PackQuestion, PackTagGroup } from "@/lib/quiz/pack";
+import type {
+  Localized,
+  PackGenerator,
+  PackQuestion,
+  PackTagGroup,
+} from "@/lib/quiz/pack";
 import { cn } from "@/lib/utils";
 import { LessonHeader } from "../lesson-header";
 
@@ -21,6 +26,7 @@ export type Quiz = {
     title: Localized;
     questions: PackQuestion[];
     tagGroups?: PackTagGroup[];
+    generator?: PackGenerator;
   } | null;
 };
 
@@ -136,6 +142,7 @@ export function QuizPageClient({
                       questions={quiz.pack.questions}
                       tagGroups={quiz.pack.tagGroups}
                       embedded
+                      generator={Boolean(quiz.pack.generator)}
                     />
                   </div>
                 );

@@ -92,6 +92,7 @@ export default async function QuizzesPage({
                 title: pack.title,
                 questions: pack.questions,
                 tagGroups: pack.tagGroups,
+                generator: pack.generator,
               }
             : null,
         };

@@ -7,10 +7,17 @@
 
 import {
   GRAPH_ASKS,
+  GRAPH_MODES,
+  graphModePrompt,
   graphPropertyPrompt,
   isGraphAsk,
+  isGraphMode,
+  isSectionId,
+  SECTION_IDS,
   type GraphAsk,
+  type GraphQuizMode,
   type QuadParams,
+  type SectionId,
 } from "./quadratic";
 
 export type PackLang = "kz" | "ru";
@@ -80,6 +87,15 @@ export type PackTagGroup = {
   tags: PackTag[];
 };
 
+// A generator quiz's settings card: which of the six quadratic sections and
+// which of the four interaction modes are in play. A pack carrying this needs
+// no question list — every student's device generates its own endless stream.
+export type PackGenerator = {
+  type: "graph-quadratic";
+  sections: SectionId[];
+  modes: GraphQuizMode[];
+};
+
 export type QuizPack = {
   version: 1;
   title: Localized;
@@ -88,6 +104,7 @@ export type QuizPack = {
   shuffleQuestions?: boolean;
   shuffleOptions?: boolean;
   tagGroups?: PackTagGroup[];
+  generator?: PackGenerator;
   questions: PackQuestion[];
 };
 
@@ -95,20 +112,9 @@ const MAX_QUESTIONS = 200;
 const MAX_OPTIONS = 6;
 
 // Graph-quadratic questions carry the graph/equation as their own stem, so a
-// text prompt is optional; these mode-specific defaults are used when the
-// author gives none. (Mode B derives its prompt from the asked property.)
-const DEFAULT_GRAPH_PROMPT: Localized = {
-  kz: "Функцияның графигін таңдаңыз",
-  ru: "Выберите график функции",
-};
-const DEFAULT_FORMULA_PROMPT: Localized = {
-  kz: "Графикке сәйкес формуланы таңдаңыз",
-  ru: "Выберите формулу, соответствующую графику",
-};
-const DEFAULT_DRAG_PROMPT: Localized = {
-  kz: "Параболаны берілген теңдеуге сәйкес салыңыз",
-  ru: "Постройте параболу по заданному уравнению",
-};
+// text prompt is optional; when the author gives none, the mode's default
+// bilingual prompt from quadratic.ts is used. (Mode B derives its prompt from
+// the asked property.)
 
 export function loc(value: Localized | undefined, lang: PackLang): string {
   if (value === undefined) return "";
@@ -290,9 +296,52 @@ export function validatePack(raw: unknown): {
     }
   }
 
-  const rawQuestions = data.questions;
-  if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) {
-    errors.push('"questions" must be a non-empty list.');
+  // Generator settings card: which sections and interaction modes are in
+  // play. Omitted lists default to everything; provided lists must contain at
+  // least one known value. A pack with a generator needs no question list.
+  let generator: PackGenerator | undefined;
+  if (data.generator !== undefined) {
+    const g = data.generator as Record<string, unknown> | null;
+    if (typeof g !== "object" || g === null || Array.isArray(g)) {
+      errors.push('"generator" must be an object.');
+    } else if (g.type !== "graph-quadratic") {
+      errors.push(
+        `Unknown generator type "${String(g.type)}" — only "graph-quadratic" exists.`,
+      );
+    } else {
+      let sections: SectionId[] = [...SECTION_IDS];
+      if (g.sections !== undefined) {
+        sections = Array.isArray(g.sections)
+          ? g.sections.filter(isSectionId)
+          : [];
+        if (sections.length === 0) {
+          errors.push(
+            `"generator.sections" must list at least one of ${SECTION_IDS.join(", ")}.`,
+          );
+        }
+      }
+      let modes: GraphQuizMode[] = [...GRAPH_MODES];
+      if (g.modes !== undefined) {
+        modes = Array.isArray(g.modes) ? g.modes.filter(isGraphMode) : [];
+        if (modes.length === 0) {
+          errors.push(
+            `"generator.modes" must list at least one of ${GRAPH_MODES.join(", ")}.`,
+          );
+        }
+      }
+      if (sections.length > 0 && modes.length > 0) {
+        generator = { type: "graph-quadratic", sections, modes };
+      }
+    }
+  }
+
+  const rawQuestions = data.questions ?? [];
+  if (!Array.isArray(rawQuestions)) {
+    errors.push('"questions" must be a list.');
+    return { pack: null, errors };
+  }
+  if (rawQuestions.length === 0 && generator === undefined) {
+    errors.push('"questions" must be a non-empty list (or add a "generator").');
     return { pack: null, errors };
   }
   if (rawQuestions.length > MAX_QUESTIONS) {
@@ -330,7 +379,9 @@ export function validatePack(raw: unknown): {
         ? String(q.id)
         : `q${i + 1}`,
       type,
-      text: isLocalized(q.text) ? (q.text as Localized) : DEFAULT_GRAPH_PROMPT,
+      // Placeholder for graph questions without text; the graph branch below
+      // replaces it with the right per-mode default prompt.
+      text: isLocalized(q.text) ? (q.text as Localized) : graphModePrompt("A"),
     };
 
     if (q.image !== undefined) {
@@ -386,7 +437,7 @@ export function validatePack(raw: unknown): {
 
       if (gmode === "D") {
         question.graph = { mode: "D", equation };
-        if (!isLocalized(q.text)) question.text = DEFAULT_DRAG_PROMPT;
+        if (!isLocalized(q.text)) question.text = graphModePrompt("D");
       } else if (gmode === "B") {
         if (!isGraphAsk(gg.ask)) {
           errors.push(
@@ -427,8 +478,7 @@ export function validatePack(raw: unknown): {
           distractors: (gg.distractors as QuadParams[]).map(normalizeQuadParams),
         };
         if (!isLocalized(q.text)) {
-          question.text =
-            gmode === "C" ? DEFAULT_FORMULA_PROMPT : DEFAULT_GRAPH_PROMPT;
+          question.text = graphModePrompt(gmode);
         }
       }
     } else if (type === "mcq") {
@@ -505,6 +555,7 @@ export function validatePack(raw: unknown): {
       shuffleQuestions: data.shuffleQuestions === true,
       shuffleOptions: data.shuffleOptions === true,
       tagGroups: tagGroups.length > 0 ? tagGroups : undefined,
+      generator,
       questions,
     },
     errors: [],

@@ -68,11 +68,40 @@ class Plot {
     this.scale = Math.min(0.5, this.scale * 1.4);
     this.draw();
   }
+  // Mouse-wheel zoom: factor > 1 zooms out, < 1 zooms in.
+  zoomBy(factor: number) {
+    this.scale = Math.min(0.5, Math.max(0.01, this.scale * factor));
+    this.draw();
+  }
   reset() {
     this.cx = 0;
     this.cy = 0;
     this.scale = 0.05;
     this.draw();
+  }
+
+  // Two-finger pinch zoom: scale follows the ratio of the current finger
+  // distance to the distance when the pinch started.
+  private pinching = false;
+  private pinchBaseDist = 0;
+  private pinchBaseScale = 0.05;
+
+  pinchStart(dist: number) {
+    if (dist <= 0) return;
+    this.pinching = true;
+    this.pinchBaseDist = dist;
+    this.pinchBaseScale = this.scale;
+  }
+  pinchMove(dist: number) {
+    if (!this.pinching || dist <= 0) return;
+    this.scale = Math.min(
+      0.5,
+      Math.max(0.01, (this.pinchBaseScale * this.pinchBaseDist) / dist),
+    );
+    this.draw();
+  }
+  pinchEnd() {
+    this.pinching = false;
   }
 
   panStart(x: number, y: number) {
@@ -226,17 +255,39 @@ export function GraphCanvas({ params }: { params: QuadParams }) {
     };
     const onMouseMove = (e: MouseEvent) => plot.panMove(e.clientX, e.clientY);
     const onMouseUp = () => plot.panEnd();
+    const touchDist = (e: TouchEvent) =>
+      Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
     const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 1) {
+      if (e.touches.length === 2) {
+        plot.panEnd();
+        plot.pinchStart(touchDist(e));
+      } else if (e.touches.length === 1) {
         plot.panStart(e.touches[0].clientX, e.touches[0].clientY);
       }
     };
     const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 1) {
+      if (e.touches.length === 2) {
+        plot.pinchMove(touchDist(e));
+      } else if (e.touches.length === 1) {
         plot.panMove(e.touches[0].clientX, e.touches[0].clientY);
       }
     };
-    const onTouchEnd = () => plot.panEnd();
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) plot.pinchEnd();
+      if (e.touches.length === 1) {
+        // Pinch → one finger left: continue as a pan from that finger.
+        plot.panStart(e.touches[0].clientX, e.touches[0].clientY);
+      } else if (e.touches.length === 0) {
+        plot.panEnd();
+      }
+    };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      plot.zoomBy(e.deltaY > 0 ? 1.15 : 1 / 1.15);
+    };
 
     canvas.addEventListener("mousedown", onMouseDown);
     canvas.addEventListener("mousemove", onMouseMove);
@@ -245,6 +296,7 @@ export function GraphCanvas({ params }: { params: QuadParams }) {
     canvas.addEventListener("touchstart", onTouchStart, { passive: true });
     canvas.addEventListener("touchmove", onTouchMove, { passive: true });
     canvas.addEventListener("touchend", onTouchEnd);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
 
     const ro = new ResizeObserver(() => plot.resize());
     ro.observe(container);
@@ -258,6 +310,7 @@ export function GraphCanvas({ params }: { params: QuadParams }) {
       canvas.removeEventListener("touchstart", onTouchStart);
       canvas.removeEventListener("touchmove", onTouchMove);
       canvas.removeEventListener("touchend", onTouchEnd);
+      canvas.removeEventListener("wheel", onWheel);
       plotRef.current = null;
     };
   }, [params]);
