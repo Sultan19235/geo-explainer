@@ -205,6 +205,70 @@ export async function createQuizAction(formData: FormData) {
   redirect("/admin/quizzes");
 }
 
+// Creates a quiz straight from a pack the graph-quiz widget built in memory —
+// no file download/upload round-trip. The JSON is validated exactly like an
+// uploaded pack file, then the quiz row is inserted and the pack written to
+// Storage in one shot.
+export async function createGraphQuizAction(input: {
+  topic_id: string;
+  title_kz: string;
+  title_ru: string | null;
+  pack_json: string;
+}): Promise<void> {
+  await requireAdmin();
+
+  const topic_id = input.topic_id?.trim();
+  const title_kz = input.title_kz?.trim();
+  if (!topic_id || !title_kz) {
+    throw new Error("Тақырып және қазақша атау міндетті.");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.pack_json);
+  } catch {
+    throw new Error("Пакет JSON форматы бұзылған.");
+  }
+  const { errors } = validatePack(parsed);
+  if (errors.length > 0) {
+    throw new Error(`pack.json:\n• ${errors.join("\n• ")}`);
+  }
+
+  const admin = createAdminClient();
+  const { data: inserted, error: insertError } = await admin
+    .from("quizzes")
+    .insert({
+      topic_id,
+      title_kz,
+      title_ru: input.title_ru?.trim() || null,
+      display_order: 0,
+      is_ready: true,
+    })
+    .select("id")
+    .single();
+  if (insertError || !inserted) {
+    throw new Error(insertError?.message ?? "Тест құру қатесі.");
+  }
+
+  await uploadBlob(
+    STUDENT_BUCKET,
+    packPath(inserted.id),
+    new Blob([input.pack_json], { type: PACK_CONTENT_TYPE }),
+    PACK_CONTENT_TYPE,
+  );
+  const { error: updateError } = await admin
+    .from("quizzes")
+    .update({ pack_path: packPath(inserted.id) })
+    .eq("id", inserted.id);
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  revalidateTag(packCacheTag(packPath(inserted.id)));
+  revalidatePath("/admin/quizzes");
+  redirect("/admin/quizzes");
+}
+
 export async function updateQuizAction(id: string, formData: FormData) {
   await requireAdmin();
   const admin = createAdminClient();

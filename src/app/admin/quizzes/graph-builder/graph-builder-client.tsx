@@ -9,8 +9,8 @@
 //   B — show the graph, student picks a property (vertex/axis/direction/y-int)
 //   C — show the graph, student picks the equation
 
-import { useEffect, useMemo, useState } from "react";
-import { Check, Download, Copy, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { Check, Download, Copy, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +26,8 @@ import {
   type QuadParams,
 } from "@/lib/quiz/quadratic";
 import { validatePack } from "@/lib/quiz/pack";
+import { createGraphQuizAction } from "../actions";
+import { type TopicOption } from "../quiz-form";
 
 const OPTION_LABELS = ["A", "B", "C", "D", "E", "F"];
 const MAX_DISTRACTORS = 5;
@@ -60,9 +62,11 @@ function keyOf(p: QuadParams): string {
   return JSON.stringify(p);
 }
 
-export function GraphBuilderClient() {
+export function GraphBuilderClient({ topics }: { topics: TopicOption[] }) {
   const { lang } = useT();
   const [mode, setMode] = useState<GraphMode>("A");
+  const [topicId, setTopicId] = useState("");
+  const [isSaving, startSave] = useTransition();
   const [ask, setAsk] = useState<GraphAsk>("vertex");
   const [formType, setFormType] = useState<"vertex" | "standard">("vertex");
   const [fields, setFields] = useState({
@@ -211,6 +215,37 @@ export function GraphBuilderClient() {
     await navigator.clipboard.writeText(json);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  // One-click: validate, create the quiz row, upload the pack, go to the list.
+  function saveToQuiz() {
+    if (!topicId) {
+      setError("Тақырыпты таңдаңыз.");
+      return;
+    }
+    if (!titleKz.trim()) {
+      setError("Қазақша атауды жазыңыз.");
+      return;
+    }
+    const json = validatedJson();
+    if (!json) return;
+    startSave(async () => {
+      try {
+        await createGraphQuizAction({
+          topic_id: topicId,
+          title_kz: titleKz.trim(),
+          title_ru: titleRu.trim() || null,
+          pack_json: json,
+        });
+      } catch (e) {
+        if (e instanceof Error) {
+          if (e.message === "NEXT_REDIRECT") throw e;
+          setError(e.message);
+        } else {
+          setError("Белгісіз қате.");
+        }
+      }
+    });
   }
 
   return (
@@ -467,8 +502,29 @@ export function GraphBuilderClient() {
             )}
           </div>
 
-          {/* export */}
+          {/* save / export */}
           <div className="rounded-2xl border border-border bg-card p-5">
+            <div className="mb-3 space-y-1.5">
+              <Label htmlFor="topic_id">Тақырып</Label>
+              <select
+                id="topic_id"
+                value={topicId}
+                onChange={(e) => setTopicId(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+              >
+                <option value="" disabled>
+                  Тақырыпты таңдаңыз
+                </option>
+                {topics.map((topic) => (
+                  <option key={topic.id} value={topic.id}>
+                    {topic.grade}-сынып —{" "}
+                    {lang === "ru"
+                      ? topic.name_ru ?? topic.name_kz
+                      : topic.name_kz}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="title_kz">Тест атауы (қазақша)</Label>
@@ -490,9 +546,24 @@ export function GraphBuilderClient() {
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button onClick={downloadPack} disabled={questions.length === 0}>
+              <Button
+                onClick={saveToQuiz}
+                disabled={questions.length === 0 || isSaving}
+              >
+                {isSaving ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Save className="size-4" />
+                )}
+                Тестке сақтау
+              </Button>
+              <Button
+                variant="outline"
+                onClick={downloadPack}
+                disabled={questions.length === 0}
+              >
                 <Download className="size-4" />
-                pack.json жүктеу
+                pack.json
               </Button>
               <Button
                 variant="outline"
@@ -508,8 +579,8 @@ export function GraphBuilderClient() {
               </Button>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Жүктеп алған pack.json файлын «Жаңа тест» бетінде тест дестесі
-              (pack) ретінде жүктеңіз.
+              «Тестке сақтау» — жаңа тест бірден құрылады. Немесе pack.json
+              жүктеп алып, «Жаңа тест» бетінде қолмен жүктеңіз.
             </p>
             {error && (
               <p className="mt-3 whitespace-pre-wrap text-sm text-red-600">
