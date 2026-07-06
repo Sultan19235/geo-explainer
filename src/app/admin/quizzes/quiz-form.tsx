@@ -171,6 +171,30 @@ export function QuizForm({ action, topics, initial, submitLabelKey }: Props) {
         )}
       </div>
 
+      <div className="space-y-2">
+        <Label htmlFor="generator">
+          {lang === "ru" ? "Интерактивный генератор" : "Интерактив генератор"}
+        </Label>
+        <select
+          id="generator"
+          name="generator"
+          defaultValue=""
+          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+        >
+          <option value="">—</option>
+          <option value="graph-quadratic">
+            {lang === "ru"
+              ? "График квадратичной функции"
+              : "Квадраттық функция графигі"}
+          </option>
+        </select>
+        <p className="text-xs text-muted-foreground">
+          {lang === "ru"
+            ? "Файл не нужен: вопросы создаются автоматически, разделы и типы выбирает учитель при открытии комнаты. Загруженный pack.json имеет приоритет."
+            : "Файл қажет емес: сұрақтар автоматты құрылады, бөлімдер мен түрлерді мұғалім бөлме ашқанда таңдайды. Жүктелген pack.json басым."}
+        </p>
+      </div>
+
       {error && (
         <p className="whitespace-pre-wrap text-sm text-red-600">{error}</p>
       )}

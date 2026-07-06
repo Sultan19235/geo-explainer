@@ -35,6 +35,8 @@ import {
   gradeDrag,
   graphPropertyChoiceCount,
   graphPropertyChoices,
+  isGraphMode,
+  isSectionId,
   toVertexForm,
   type QuadParams,
   type VertexTriple,
@@ -142,6 +144,23 @@ function LiveMode({
     };
   }, [fullPack, qParam, shuffleParam]);
 
+  // Generator quiz: the teacher's ticks arrive on the join link as
+  // `?sec=...&modes=...` (chosen on the console at room start). A link
+  // without them — e.g. an old QR — falls back to the pack's own settings.
+  const secParam = searchParams.get("sec");
+  const modesParam = searchParams.get("modes");
+  const generator = useMemo(() => {
+    const base = fullPack.generator;
+    if (!base) return null;
+    const sections = (secParam ?? "").split(",").filter(isSectionId);
+    const modes = (modesParam ?? "").split(",").filter(isGraphMode);
+    return {
+      ...base,
+      sections: sections.length > 0 ? sections : base.sections,
+      modes: modes.length > 0 ? modes : base.modes,
+    };
+  }, [fullPack.generator, secParam, modesParam]);
+
   const questionCount = pack.questions.length;
   const defaultExtra = useMemo<PackExtra>(
     () => ({
@@ -208,10 +227,10 @@ function LiveMode({
         <WaitScreen name={session.studentName} />
       )}
       {session.phase === "active" &&
-        (fullPack.generator ? (
+        (generator ? (
           // Generator quiz: endless machine-made questions, no "done" — the
           // stream runs until the teacher ends the room.
-          <GeneratedFlow generator={fullPack.generator} session={session} />
+          <GeneratedFlow generator={generator} session={session} />
         ) : session.extra.done ? (
           <DoneScreen stats={session.stats} timeLeft={session.timeLeft} />
         ) : (
@@ -431,6 +450,7 @@ function QuestionFlow({
       </div>
 
       <QuestionCard
+        key={question.id}
         question={question}
         lang={lang}
         optOrder={optOrder}
@@ -634,6 +654,10 @@ function QuestionCard({
 }) {
   const t = engineT(lang);
   const answered = record !== null || revealed;
+  // Two-step answering: tapping an option only selects it; the Check button
+  // below confirms. Guards against misclicks on phones. Callers remount this
+  // card per question (key=question.id), which resets the selection.
+  const [selected, setSelected] = useState<number | null>(null);
   const graph = question.type === "graph-quadratic" ? question.graph : null;
   // Mode A shows graph thumbnails as options; B & C show a text list. In every
   // mode the correct choice is index 0, matching the grading in QuestionFlow.
@@ -684,11 +708,12 @@ function QuestionCard({
                 params={graphThumbs[originalIndex]}
                 label={OPTION_LABELS[displayIndex]}
                 answered={answered}
+                isSelected={!answered && selected === displayIndex}
                 showCorrect={answered && originalIndex === 0}
                 showWrong={
                   answered && record?.pick === originalIndex && originalIndex !== 0
                 }
-                onPick={() => onPick?.(displayIndex)}
+                onPick={() => setSelected(displayIndex)}
               />
             ))}
           </div>
@@ -705,15 +730,17 @@ function QuestionCard({
             {optOrder.map((originalIndex, displayIndex) => {
               const isCorrect = originalIndex === 0;
               const isPicked = record?.pick === originalIndex;
+              const isSel = !answered && selected === displayIndex;
               return (
                 <button
                   key={originalIndex}
                   type="button"
                   disabled={answered}
-                  onClick={() => onPick?.(displayIndex)}
+                  onClick={() => setSelected(displayIndex)}
                   className={cn(
                     "flex items-center gap-3 rounded-xl border-[1.5px] border-border bg-background px-4 py-3 text-left text-[15px] transition-colors",
                     !answered && "hover:border-primary/50 hover:bg-accent",
+                    isSel && "border-primary bg-accent ring-2 ring-primary/15",
                     answered && isCorrect && "border-emerald-500 bg-emerald-50",
                     answered && isPicked && !isCorrect && "border-red-400 bg-red-50",
                     answered && !isCorrect && !isPicked && "opacity-60",
@@ -722,6 +749,7 @@ function QuestionCard({
                   <span
                     className={cn(
                       "grid size-7 shrink-0 place-items-center rounded-lg border border-border bg-card text-xs font-bold",
+                      isSel && "border-primary bg-primary text-white",
                       answered && isCorrect &&
                         "border-emerald-500 bg-emerald-500 text-white",
                       answered && isPicked && !isCorrect &&
@@ -753,15 +781,17 @@ function QuestionCard({
           {optOrder.map((originalIndex, displayIndex) => {
             const isCorrect = originalIndex === question.correct;
             const isPicked = record?.pick === originalIndex;
+            const isSel = !answered && selected === displayIndex;
             return (
               <button
                 key={originalIndex}
                 type="button"
                 disabled={answered}
-                onClick={() => onPick?.(displayIndex)}
+                onClick={() => setSelected(displayIndex)}
                 className={cn(
                   "flex items-center gap-3 rounded-xl border-[1.5px] border-border bg-background px-4 py-3 text-left text-[15px] transition-colors",
                   !answered && "hover:border-primary/50 hover:bg-accent",
+                  isSel && "border-primary bg-accent ring-2 ring-primary/15",
                   answered && isCorrect && "border-emerald-500 bg-emerald-50",
                   answered &&
                     isPicked &&
@@ -773,6 +803,7 @@ function QuestionCard({
                 <span
                   className={cn(
                     "grid size-7 shrink-0 place-items-center rounded-lg border border-border bg-card text-xs font-bold",
+                    isSel && "border-primary bg-primary text-white",
                     answered && isCorrect &&
                       "border-emerald-500 bg-emerald-500 text-white",
                     answered && isPicked && !isCorrect &&
@@ -787,6 +818,24 @@ function QuestionCard({
           })}
         </div>
       )}
+
+      {/* confirm bar for choice questions (input & drag have their own) */}
+      {!answered &&
+        onPick &&
+        (Boolean(graphThumbs) ||
+          graphTextOptions.length > 0 ||
+          (question.type === "mcq" && question.options)) && (
+          <Button
+            className="mt-4 h-12 w-full text-base font-semibold"
+            disabled={selected === null}
+            onClick={() => {
+              if (selected !== null) onPick(selected);
+            }}
+          >
+            {t("check_button")}
+            <Check className="size-4" aria-hidden />
+          </Button>
+        )}
 
       {question.type === "input" && (
         <div className="mt-4">
@@ -887,6 +936,7 @@ function GraphOptionTile({
   params,
   label,
   answered,
+  isSelected,
   showCorrect,
   showWrong,
   onPick,
@@ -894,6 +944,7 @@ function GraphOptionTile({
   params: QuadParams;
   label: string;
   answered: boolean;
+  isSelected: boolean;
   showCorrect: boolean;
   showWrong: boolean;
   onPick: () => void;
@@ -905,6 +956,7 @@ function GraphOptionTile({
       role="button"
       tabIndex={answered ? -1 : 0}
       aria-label={label}
+      aria-pressed={isSelected}
       onPointerDown={(e) => {
         downAt.current = { x: e.clientX, y: e.clientY };
       }}
@@ -928,7 +980,9 @@ function GraphOptionTile({
           ? "border-emerald-500 ring-4 ring-emerald-500/15"
           : showWrong
             ? "border-red-400 ring-4 ring-red-400/15"
-            : "border-border",
+            : isSelected
+              ? "border-primary ring-4 ring-primary/15"
+              : "border-border",
         answered && !showCorrect && !showWrong && "opacity-55",
       )}
     >
@@ -1230,6 +1284,7 @@ function ListPreview({ pack }: { pack: QuizPack }) {
         </header>
 
         <QuestionCard
+          key={question.id}
           question={question}
           lang={lang}
           optOrder={identityOrder(choiceCount(question))}

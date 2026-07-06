@@ -95,6 +95,36 @@ async function uploadPackFile(quizId: string, file: File): Promise<void> {
   revalidateTag(packCacheTag(packPath(quizId)));
 }
 
+// Writes the tiny settings pack of an interactive generator quiz ("Интерактив
+// генератор" in the quiz form). No sections/modes are stored — the teacher
+// ticks them on the console at every room start; this pack only names the
+// machine. The admin picks a dropdown entry instead of uploading any file.
+async function uploadGeneratorPack(
+  quizId: string,
+  generatorType: string,
+  title_kz: string,
+  title_ru: string | null,
+): Promise<void> {
+  const pack = {
+    version: 1,
+    title: title_ru ? { kz: title_kz, ru: title_ru } : title_kz,
+    generator: { type: generatorType },
+    questions: [],
+  };
+  const json = JSON.stringify(pack, null, 2);
+  const { errors } = validatePack(pack);
+  if (errors.length > 0) {
+    throw new Error(`generator pack: ${errors.join("; ")}`);
+  }
+  await uploadBlob(
+    STUDENT_BUCKET,
+    packPath(quizId),
+    new Blob([json], { type: PACK_CONTENT_TYPE }),
+    PACK_CONTENT_TYPE,
+  );
+  revalidateTag(packCacheTag(packPath(quizId)));
+}
+
 // Optionally rewrites `const BACKEND = '...'` to QUIZ_BACKEND_URL. Lets the
 // live-quiz server move hosts (e.g. to api.mathsabaq.online) by changing one
 // env var instead of re-editing every quiz file. Unset env → file unchanged.
@@ -189,6 +219,14 @@ export async function createQuizAction(formData: FormData) {
     await uploadPackFile(inserted.id, packFile as File);
     update.pack_path = packPath(inserted.id);
     update.is_ready = true;
+  } else {
+    // Interactive generator (dropdown, no file). An uploaded pack file wins.
+    const generatorKind = getString(formData, "generator");
+    if (generatorKind === "graph-quadratic") {
+      await uploadGeneratorPack(inserted.id, generatorKind, title_kz, title_ru);
+      update.pack_path = packPath(inserted.id);
+      update.is_ready = true;
+    }
   }
 
   if (Object.keys(update).length > 0) {
@@ -316,6 +354,14 @@ export async function updateQuizAction(id: string, formData: FormData) {
     await uploadPackFile(id, packFile as File);
     update.pack_path = packPath(id);
     update.is_ready = true;
+  } else {
+    // Interactive generator (dropdown, no file). An uploaded pack file wins.
+    const generatorKind = getString(formData, "generator");
+    if (generatorKind === "graph-quadratic") {
+      await uploadGeneratorPack(id, generatorKind, title_kz, title_ru);
+      update.pack_path = packPath(id);
+      update.is_ready = true;
+    }
   }
 
   const { error } = await admin.from("quizzes").update(update).eq("id", id);

@@ -20,14 +20,11 @@ import { useT } from "@/lib/i18n/context";
 import { cn } from "@/lib/utils";
 import {
   formatFunc,
-  GRAPH_MODES,
   graphPropertyChoices,
-  SECTION_INFO,
   suggestDistractors,
   type GraphAsk,
   type GraphQuizMode,
   type QuadParams,
-  type SectionId,
 } from "@/lib/quiz/quadratic";
 import { validatePack } from "@/lib/quiz/pack";
 import { createGraphQuizAction } from "../actions";
@@ -45,8 +42,6 @@ const MODE_TABS: { mode: GraphMode; label: string }[] = [
   { mode: "D", label: "Теңдеу → сызу" },
 ];
 
-const ALL_SECTIONS: SectionId[] = SECTION_INFO.map((s) => s.id);
-const ALL_MODES: GraphMode[] = [...GRAPH_MODES];
 
 const ASK_TABS: { ask: GraphAsk; label: string }[] = [
   { ask: "vertex", label: "Төбесі" },
@@ -71,11 +66,6 @@ function keyOf(p: QuadParams): string {
 
 export function GraphBuilderClient({ topics }: { topics: TopicOption[] }) {
   const { lang } = useT();
-  // "list" = hand-authored question list; "generator" = a settings card that
-  // makes endless questions on each student's device.
-  const [kind, setKind] = useState<"generator" | "list">("generator");
-  const [genSections, setGenSections] = useState<SectionId[]>(ALL_SECTIONS);
-  const [genModes, setGenModes] = useState<GraphMode[]>(ALL_MODES);
   const [mode, setMode] = useState<GraphMode>("A");
   const [topicId, setTopicId] = useState("");
   const [isSaving, startSave] = useTransition();
@@ -175,18 +165,6 @@ export function GraphBuilderClient({ topics }: { topics: TopicOption[] }) {
   }
 
   function buildPack() {
-    if (kind === "generator") {
-      return {
-        version: 1 as const,
-        title: packTitle(),
-        generator: {
-          type: "graph-quadratic" as const,
-          sections: genSections,
-          modes: genModes,
-        },
-        questions: [],
-      };
-    }
     return {
       version: 1 as const,
       title: packTitle(),
@@ -207,24 +185,12 @@ export function GraphBuilderClient({ topics }: { topics: TopicOption[] }) {
     };
   }
 
-  const exportReady =
-    kind === "generator"
-      ? genSections.length > 0 && genModes.length > 0
-      : questions.length > 0;
+  const exportReady = questions.length > 0;
 
   // Validate through the real engine validator before handing over a file, so
   // the author never downloads a pack the upload will reject.
   function validatedJson(): string | null {
-    if (kind === "generator") {
-      if (genSections.length === 0) {
-        setError("Кемінде бір бөлімді таңдаңыз.");
-        return null;
-      }
-      if (genModes.length === 0) {
-        setError("Кемінде бір сұрақ түрін таңдаңыз.");
-        return null;
-      }
-    } else if (questions.length === 0) {
+    if (questions.length === 0) {
       setError("Кемінде бір сұрақ қосыңыз.");
       return null;
     }
@@ -289,166 +255,18 @@ export function GraphBuilderClient({ topics }: { topics: TopicOption[] }) {
     });
   }
 
-  const toggleSection = (id: SectionId) =>
-    setGenSections((cur) =>
-      cur.includes(id) ? cur.filter((s) => s !== id) : [...cur, id],
-    );
-  const toggleGenMode = (m: GraphMode) =>
-    setGenModes((cur) =>
-      cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m],
-    );
-
   return (
     <div>
       <h1 className="text-2xl font-bold tracking-tight">
         График тестін құрастыру
       </h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Генератор — бөлімдер мен сұрақ түрлерін таңдайсыз, сұрақтар шексіз
-        автоматты құрылады. Сұрақтар тізімі — әр сұрақты қолмен құрастырасыз.
+        Әр сұрақты қолмен құрастырып, тізім сақтайсыз. (Шексіз автоматты
+        сұрақтар үшін «Жаңа тест» бетіндегі «Интерактив генератор» өрісін
+        қолданыңыз — мұғалім бөлімдерді бөлме ашқанда өзі таңдайды.)
       </p>
 
-      {/* quiz kind */}
-      <div className="mt-5 grid gap-2 sm:grid-cols-2">
-        {(
-          [
-            {
-              kind: "generator" as const,
-              label: "Генератор (шексіз сұрақтар)",
-              desc: "Оқушыға сұрақтар автоматты, шексіз құрылады",
-            },
-            {
-              kind: "list" as const,
-              label: "Сұрақтар тізімі",
-              desc: "Әр сұрақты өзіңіз құрастырып, тізім сақтайсыз",
-            },
-          ]
-        ).map((opt) => (
-          <button
-            key={opt.kind}
-            type="button"
-            onClick={() => setKind(opt.kind)}
-            className={cn(
-              "rounded-xl border-[1.5px] px-4 py-3 text-left transition-colors",
-              kind === opt.kind
-                ? "border-primary bg-accent"
-                : "border-border hover:bg-accent",
-            )}
-          >
-            <span
-              className={cn(
-                "block text-sm font-bold",
-                kind === opt.kind ? "text-primary" : "text-foreground",
-              )}
-            >
-              {opt.label}
-            </span>
-            <span className="mt-0.5 block text-xs text-muted-foreground">
-              {opt.desc}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {/* ── GENERATOR SETTINGS ─────────────────────────────────────── */}
-      {kind === "generator" && (
-        <div className="mt-5 space-y-5">
-          <div className="rounded-2xl border border-border bg-card p-5">
-            <div className="mb-1 flex items-center justify-between">
-              <Label>Бөлімдер</Label>
-              <button
-                type="button"
-                onClick={() =>
-                  setGenSections(
-                    genSections.length === ALL_SECTIONS.length
-                      ? []
-                      : ALL_SECTIONS,
-                  )
-                }
-                className="text-xs font-semibold text-primary hover:underline"
-              >
-                {genSections.length === ALL_SECTIONS.length
-                  ? "Барлығын алып тастау"
-                  : "Бәрін таңдау"}
-              </button>
-            </div>
-            <p className="mb-3 text-xs text-muted-foreground">
-              Қандай функция түрлерінен сұрақ құрылады (кемінде 1).
-            </p>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {SECTION_INFO.map((sec) => {
-                const active = genSections.includes(sec.id);
-                return (
-                  <button
-                    key={sec.id}
-                    type="button"
-                    onClick={() => toggleSection(sec.id)}
-                    className={cn(
-                      "relative rounded-xl border-[1.5px] px-3 py-3 text-center transition-colors",
-                      active
-                        ? "border-primary bg-accent"
-                        : "border-border opacity-70 hover:opacity-100",
-                    )}
-                  >
-                    {active && (
-                      <span className="absolute right-1.5 top-1.5 grid size-4 place-items-center rounded bg-primary text-white">
-                        <Check className="size-3" />
-                      </span>
-                    )}
-                    <MathFormula
-                      formula={sec.formula}
-                      className="block text-[15px] font-semibold"
-                    />
-                    <span className="mt-1 block text-[11px] text-muted-foreground">
-                      {sec.example}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card p-5">
-            <Label>Сұрақ түрлері</Label>
-            <p className="mb-3 mt-1 text-xs text-muted-foreground">
-              Таңдалған түрлер кезектесіп, аралас келеді (кемінде 1).
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {MODE_TABS.map((tab) => {
-                const active = genModes.includes(tab.mode);
-                return (
-                  <button
-                    key={tab.mode}
-                    type="button"
-                    onClick={() => toggleGenMode(tab.mode)}
-                    className={cn(
-                      "relative rounded-lg border-[1.5px] px-3 py-2.5 text-sm font-semibold transition-colors",
-                      active
-                        ? "border-primary bg-accent text-primary"
-                        : "border-border text-muted-foreground opacity-80 hover:opacity-100",
-                    )}
-                  >
-                    {active && (
-                      <span className="absolute right-1.5 top-1.5 grid size-4 place-items-center rounded bg-primary text-white">
-                        <Check className="size-3" />
-                      </span>
-                    )}
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Сақталған тестті ашқанда мұғалім бөлмені бірден ашады — сұрақтар
-              әр оқушыға шексіз құрылады. Алдын ала көру: тест бетіндегі
-              ?preview=1.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* mode selector (list kind) */}
-      {kind === "list" && (
+      {/* mode selector */}
       <div className="mt-5 flex flex-wrap gap-2">
         {MODE_TABS.map((tab) => (
           <button
@@ -466,9 +284,7 @@ export function GraphBuilderClient({ topics }: { topics: TopicOption[] }) {
           </button>
         ))}
       </div>
-      )}
 
-      {kind === "list" && (
       <div className="mt-5 grid gap-6 lg:grid-cols-2">
         {/* ── EDITOR ─────────────────────────────────────────────── */}
         <div className="space-y-5">
@@ -696,9 +512,8 @@ export function GraphBuilderClient({ topics }: { topics: TopicOption[] }) {
 
         </div>
       </div>
-      )}
 
-      {/* save / export — shared by both kinds */}
+      {/* save / export */}
       <div className="mt-5 rounded-2xl border border-border bg-card p-5 lg:max-w-2xl">
             <div className="mb-3 space-y-1.5">
               <Label htmlFor="topic_id">Тақырып</Label>

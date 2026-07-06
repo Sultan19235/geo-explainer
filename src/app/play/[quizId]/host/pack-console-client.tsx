@@ -45,6 +45,13 @@ import {
   type PackTagGroup,
 } from "@/lib/quiz/pack";
 import { engineT } from "@/lib/quiz/engine-strings";
+import { MathFormula } from "@/components/quiz/math-formula";
+import {
+  GRAPH_MODES,
+  SECTION_INFO,
+  type GraphQuizMode,
+  type SectionId,
+} from "@/lib/quiz/quadratic";
 import type { SavedQuizRef } from "@/lib/quiz/saved-quiz";
 import {
   createSavedQuizAction,
@@ -164,6 +171,11 @@ export function PackConsoleClient({
         }
       : null,
   );
+  // Generator quiz: the teacher's ticks for this room. Deliberately start
+  // EMPTY — the teacher consciously chooses what fits their class; the room
+  // can't open until at least one section and one type are ticked.
+  const [genSections, setGenSections] = useState<SectionId[]>([]);
+  const [genModes, setGenModes] = useState<GraphQuizMode[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const quizTitle = loc(title, lang);
@@ -179,13 +191,18 @@ export function PackConsoleClient({
     !(wholePack && (orderMode === "shuffle" || selectedIds.join(",") === packOrder))
       ? selectedIds.join(",")
       : null;
+  // The teacher's generator ticks ride the join link so every student's
+  // device generates from exactly this room's choice.
+  const genParam = generator
+    ? `&sec=${genSections.join(",")}&modes=${genModes.join(",")}`
+    : "";
   // session.code is null during SSR, so window is only touched in the browser.
   const studentUrl =
     session.code === null
       ? ""
       : `${window.location.origin}/play/${quizId}?code=${session.code}${
           qParam ? `&q=${encodeURIComponent(qParam)}` : ""
-        }${orderMode === "shuffle" ? "&shuffle=1" : ""}`;
+        }${orderMode === "shuffle" ? "&shuffle=1" : ""}${genParam}`;
 
   const toggleFullscreen = () => {
     const el = rootRef.current;
@@ -230,6 +247,10 @@ export function PackConsoleClient({
           createError={session.createError}
           onCreate={() => void session.createRoom(quizTitle)}
           generator={generator}
+          genSections={genSections}
+          setGenSections={setGenSections}
+          genModes={genModes}
+          setGenModes={setGenModes}
         />
       )}
 
@@ -301,6 +322,10 @@ function SetupScreen({
   createError,
   onCreate,
   generator,
+  genSections,
+  setGenSections,
+  genModes,
+  setGenModes,
 }: {
   quizId: string;
   quizTitle: string;
@@ -319,6 +344,10 @@ function SetupScreen({
   createError: "unauthorized" | "network" | null;
   onCreate: () => void;
   generator: boolean;
+  genSections: SectionId[];
+  setGenSections: React.Dispatch<React.SetStateAction<SectionId[]>>;
+  genModes: GraphQuizMode[];
+  setGenModes: React.Dispatch<React.SetStateAction<GraphQuizMode[]>>;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -422,11 +451,7 @@ function SetupScreen({
             <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
               <ListChecks className="size-4" aria-hidden />
               {generator ? (
-                lang === "ru" ? (
-                  "Бесконечные вопросы — создаются автоматически"
-                ) : (
-                  "Шексіз сұрақтар — автоматты құрылады"
-                )
+                t("c_gen_endless")
               ) : (
                 <>
                   <span className="tabular-nums">
@@ -438,6 +463,110 @@ function SetupScreen({
             </p>
           </div>
         </div>
+
+        {/* generator: the teacher ticks sections + question types for this
+            room. Nothing preticked on purpose — a conscious choice each time. */}
+        {generator && (
+          <>
+            <div className="mt-4">
+              <div className="mb-2 flex items-baseline justify-between">
+                <p className="text-sm font-bold">{t("c_gen_sections")}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t("c_gen_sections_hint")}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {SECTION_INFO.map((sec) => {
+                  const active = genSections.includes(sec.id);
+                  return (
+                    <button
+                      key={sec.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() =>
+                        setGenSections((cur) =>
+                          cur.includes(sec.id)
+                            ? cur.filter((s) => s !== sec.id)
+                            : [...cur, sec.id],
+                        )
+                      }
+                      className={cn(
+                        "relative rounded-xl border-[1.5px] px-2 py-3 text-center transition-colors",
+                        active
+                          ? "border-primary bg-accent"
+                          : "border-border hover:bg-accent/50",
+                      )}
+                    >
+                      {active && (
+                        <span className="absolute right-1.5 top-1.5 grid size-4 place-items-center rounded bg-primary text-white">
+                          <Check className="size-3" aria-hidden />
+                        </span>
+                      )}
+                      <MathFormula
+                        formula={sec.formula}
+                        className={cn(
+                          "block text-[15px] font-semibold",
+                          active ? "text-primary" : "text-foreground",
+                        )}
+                      />
+                      <span className="mt-1 block text-[11px] text-muted-foreground">
+                        {sec.example}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="mb-2 flex items-baseline justify-between">
+                <p className="text-sm font-bold">{t("c_gen_modes")}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t("c_gen_modes_hint")}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {GRAPH_MODES.map((m) => {
+                  const active = genModes.includes(m);
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() =>
+                        setGenModes((cur) =>
+                          cur.includes(m)
+                            ? cur.filter((x) => x !== m)
+                            : [...cur, m],
+                        )
+                      }
+                      className={cn(
+                        "relative rounded-lg border-[1.5px] px-3 py-2.5 text-sm font-semibold transition-colors",
+                        active
+                          ? "border-primary bg-accent text-primary"
+                          : "border-border text-muted-foreground hover:bg-accent/50",
+                      )}
+                    >
+                      {active && (
+                        <span className="absolute right-1.5 top-1.5 grid size-4 place-items-center rounded bg-primary text-white">
+                          <Check className="size-3" aria-hidden />
+                        </span>
+                      )}
+                      {t(`g_mode_${m}`)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {(genSections.length === 0 || genModes.length === 0) &&
+              !createError && (
+                <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-sm font-medium text-amber-800">
+                  {t("c_gen_pick")}
+                </p>
+              )}
+          </>
+        )}
 
         {/* order mode (list quizzes only — a generator deals its own order) */}
         {!generator && (
@@ -497,7 +626,12 @@ function SetupScreen({
 
         <Button
           onClick={onCreate}
-          disabled={creating || (!generator && selectedCount === 0)}
+          disabled={
+            creating ||
+            (generator
+              ? genSections.length === 0 || genModes.length === 0
+              : selectedCount === 0)
+          }
           className="mt-4 h-12 w-full text-base font-semibold"
         >
           {creating ? (
