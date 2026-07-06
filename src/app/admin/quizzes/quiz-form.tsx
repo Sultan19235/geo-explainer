@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -154,6 +155,14 @@ export function QuizForm({ action, topics, initial, submitLabelKey }: Props) {
         />
         <p className="text-xs text-muted-foreground">
           {t("field_quiz_pack_hint")}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          <Link
+            href="/admin/quizzes/graph-builder"
+            className="font-medium text-primary underline-offset-2 hover:underline"
+          >
+            График тестін құрастыру →
+          </Link>
         </p>
         {initial?.pack_path && (
           <p className="text-xs text-muted-foreground">

@@ -5,6 +5,8 @@
 // teacher console) renders it; the admin panel validates it on upload.
 // Format reference for authors: docs/QUIZ_PACK_FORMAT.md.
 
+import type { QuadParams } from "./quadratic";
+
 export type PackLang = "kz" | "ru";
 
 // A text field is either a plain string (Kazakh) or {kz, ru}. Russian always
@@ -17,9 +19,19 @@ export type PackGeoGebra = {
   height?: number;
 };
 
+// A "pick the graph" question (interaction mode A): the equation of
+// `equation` is shown in textbook notation and the student picks its parabola
+// out of `equation` + `distractors`. The correct choice is always `equation`
+// (its formula is the stem), so no separate correct index is stored.
+export type PackGraphQuadratic = {
+  mode: "A";
+  equation: QuadParams;
+  distractors: QuadParams[];
+};
+
 export type PackQuestion = {
   id: string;
-  type: "mcq" | "input";
+  type: "mcq" | "input" | "graph-quadratic";
   text: Localized;
   image?: string;
   geogebra?: PackGeoGebra;
@@ -30,6 +42,8 @@ export type PackQuestion = {
   // input
   answer?: string;
   accept?: string[];
+  // graph-quadratic
+  graph?: PackGraphQuadratic;
   // shown after the student answers
   solution?: Localized[];
 };
@@ -72,6 +86,13 @@ export type QuizPack = {
 const MAX_QUESTIONS = 200;
 const MAX_OPTIONS = 6;
 
+// Graph-quadratic questions carry the equation as their own stem, so a text
+// prompt is optional; this is shown above the choices when none is given.
+const DEFAULT_GRAPH_PROMPT: Localized = {
+  kz: "Функцияның графигін таңдаңыз",
+  ru: "Выберите график функции",
+};
+
 export function loc(value: Localized | undefined, lang: PackLang): string {
   if (value === undefined) return "";
   if (typeof value === "string") return value;
@@ -91,6 +112,41 @@ function isLocalized(value: unknown): value is Localized {
 
 function isLocalizedList(value: unknown): value is Localized[] {
   return Array.isArray(value) && value.every(isLocalized);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+// A quadratic in vertex form {mode:"vertex",a,m,n} or standard form
+// {mode:"standard",a,b,cFull}; `a` must be non-zero (else it's not a parabola).
+function isQuadParams(value: unknown): value is QuadParams {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (v.mode === "vertex") {
+    return (
+      isFiniteNumber(v.a) &&
+      v.a !== 0 &&
+      isFiniteNumber(v.m) &&
+      isFiniteNumber(v.n)
+    );
+  }
+  if (v.mode === "standard") {
+    return (
+      isFiniteNumber(v.a) &&
+      v.a !== 0 &&
+      isFiniteNumber(v.b) &&
+      isFiniteNumber(v.cFull)
+    );
+  }
+  return false;
+}
+
+// Drops any extra keys so a validated pack holds only the QuadParams shape.
+function normalizeQuadParams(value: QuadParams): QuadParams {
+  return value.mode === "vertex"
+    ? { mode: "vertex", a: value.a, m: value.m, n: value.n }
+    : { mode: "standard", a: value.a, b: value.b, cFull: value.cFull };
 }
 
 // Accepts 0-based index, "0".."9", or a letter "A".."F" (legacy apps use
@@ -235,14 +291,18 @@ export function validatePack(raw: unknown): {
     }
     const q = rawQ as Record<string, unknown>;
 
-    if (!isLocalized(q.text)) {
+    const isGraph = q.type === "graph-quadratic" || q.graph !== undefined;
+
+    // Graph questions show the equation as their stem, so "text" is optional.
+    if (!isGraph && !isLocalized(q.text)) {
       errors.push(`${label}: missing "text".`);
       return;
     }
 
     const hasOptions = q.options !== undefined;
-    const type: PackQuestion["type"] =
-      q.type === "mcq" || q.type === "input"
+    const type: PackQuestion["type"] = isGraph
+      ? "graph-quadratic"
+      : q.type === "mcq" || q.type === "input"
         ? q.type
         : hasOptions
           ? "mcq"
@@ -253,7 +313,7 @@ export function validatePack(raw: unknown): {
         ? String(q.id)
         : `q${i + 1}`,
       type,
-      text: q.text as Localized,
+      text: isLocalized(q.text) ? (q.text as Localized) : DEFAULT_GRAPH_PROMPT,
     };
 
     if (q.image !== undefined) {
@@ -285,7 +345,49 @@ export function validatePack(raw: unknown): {
       }
     }
 
-    if (type === "mcq") {
+    if (type === "graph-quadratic") {
+      const g = q.graph;
+      if (typeof g !== "object" || g === null || Array.isArray(g)) {
+        errors.push(`${label}: "graph" must be an object.`);
+        return;
+      }
+      const gg = g as Record<string, unknown>;
+      if (gg.mode !== undefined && gg.mode !== "A") {
+        errors.push(
+          `${label}: only graph "mode" "A" (pick the graph) is supported for now.`,
+        );
+        return;
+      }
+      if (!isQuadParams(gg.equation)) {
+        errors.push(
+          `${label}: "graph.equation" must be a quadratic — {"mode":"vertex","a","m","n"} or {"mode":"standard","a","b","cFull"} with a ≠ 0.`,
+        );
+        return;
+      }
+      if (!Array.isArray(gg.distractors) || gg.distractors.length < 1) {
+        errors.push(
+          `${label}: "graph.distractors" must list at least 1 wrong parabola.`,
+        );
+        return;
+      }
+      if (gg.distractors.length > MAX_OPTIONS - 1) {
+        errors.push(
+          `${label}: at most ${MAX_OPTIONS - 1} distractors (${MAX_OPTIONS} choices total).`,
+        );
+        return;
+      }
+      if (!gg.distractors.every(isQuadParams)) {
+        errors.push(
+          `${label}: every "graph.distractors" entry must be a valid quadratic with a ≠ 0.`,
+        );
+        return;
+      }
+      question.graph = {
+        mode: "A",
+        equation: normalizeQuadParams(gg.equation),
+        distractors: (gg.distractors as QuadParams[]).map(normalizeQuadParams),
+      };
+    } else if (type === "mcq") {
       if (!isLocalizedList(q.options) || (q.options as unknown[]).length < 2) {
         errors.push(`${label}: "options" must list at least 2 choices.`);
         return;

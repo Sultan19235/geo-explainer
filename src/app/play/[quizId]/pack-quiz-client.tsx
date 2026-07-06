@@ -24,8 +24,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Confetti } from "@/components/quiz/confetti";
 import { GeoGebraFigure } from "@/components/quiz/geogebra-figure";
+import { MathFormula } from "@/components/quiz/math-formula";
 import { MathText } from "@/components/quiz/math-text";
+import { ParabolaThumb } from "@/components/quiz/parabola-thumb";
 import { TimerPill } from "@/components/quiz/timer-pill";
+import { formatFunc } from "@/lib/quiz/quadratic";
 import { LanguageToggle } from "@/components/language-toggle";
 import { useLanguage } from "@/lib/i18n/context";
 import { cn } from "@/lib/utils";
@@ -55,6 +58,15 @@ type PackExtra = {
 
 function identityOrder(count: number): number[] {
   return Array.from({ length: count }, (_, i) => i);
+}
+
+// How many selectable choices a question shows — options for mcq, or
+// equation + distractors for a graph-quadratic question.
+function choiceCount(q: PackQuestion): number {
+  if (q.type === "graph-quadratic" && q.graph) {
+    return 1 + q.graph.distractors.length;
+  }
+  return q.options?.length ?? 0;
 }
 
 export function PackQuizClient({
@@ -345,7 +357,7 @@ function QuestionFlow({
   const isLast = position >= total - 1;
 
   const optOrder = useMemo(() => {
-    const count = question.options?.length ?? 0;
+    const count = choiceCount(question);
     if (count === 0) return [];
     return pack.shuffleOptions
       ? seededOrder(count, (extra.seed ^ ((qOrder[position] + 1) * 7919)) >>> 0)
@@ -408,7 +420,10 @@ function QuestionFlow({
         onInputChange={setInputValue}
         onPick={(displayIndex) => {
           const pick = optOrder[displayIndex];
-          answer({ ok: pick === question.correct, pick });
+          // Graph choices are [equation, ...distractors], so index 0 is correct.
+          const correctIndex =
+            question.type === "graph-quadratic" ? 0 : question.correct;
+          answer({ ok: pick === correctIndex, pick });
         }}
         onCheckInput={() => {
           if (!inputValue.trim()) return;
@@ -497,6 +512,11 @@ function QuestionCard({
 }) {
   const t = engineT(lang);
   const answered = record !== null || revealed;
+  // Graph "pick the graph" choices, correct one first (index 0).
+  const graphChoices =
+    question.type === "graph-quadratic" && question.graph
+      ? [question.graph.equation, ...question.graph.distractors]
+      : null;
 
   return (
     <section className="rounded-2xl border border-border bg-card p-5 shadow-lg shadow-blue-950/5">
@@ -515,6 +535,61 @@ function QuestionCard({
 
       {question.geogebra && (
         <GeoGebraFigure figure={question.geogebra} className="mt-4" />
+      )}
+
+      {graphChoices && (
+        <div className="mt-4">
+          <div className="quiz-grid-paper mb-4 rounded-xl border border-primary/15 px-4 py-5 text-center [background-size:18px_18px]">
+            <MathFormula
+              formula={formatFunc(question.graph!.equation)}
+              className="text-2xl font-medium text-blue-950 sm:text-3xl"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2.5">
+            {optOrder.map((originalIndex, displayIndex) => {
+              const isCorrect = originalIndex === 0;
+              const isPicked = record?.pick === originalIndex;
+              const showCorrect = answered && isCorrect;
+              const showWrong = answered && isPicked && !isCorrect;
+              return (
+                <button
+                  key={originalIndex}
+                  type="button"
+                  disabled={answered}
+                  onClick={() => onPick?.(displayIndex)}
+                  aria-label={`${OPTION_LABELS[displayIndex]}`}
+                  className={cn(
+                    "relative aspect-square overflow-hidden rounded-xl border-2 bg-white outline-none transition-all focus-visible:ring-3 focus-visible:ring-ring/50",
+                    !answered && "cursor-pointer hover:border-primary/50",
+                    showCorrect
+                      ? "border-emerald-500 ring-4 ring-emerald-500/15"
+                      : showWrong
+                        ? "border-red-400 ring-4 ring-red-400/15"
+                        : "border-border",
+                    answered && !showCorrect && !showWrong && "opacity-55",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "absolute left-1.5 top-1.5 z-10 flex size-6 items-center justify-center rounded-md text-xs font-bold text-white",
+                      showCorrect
+                        ? "bg-emerald-500"
+                        : showWrong
+                          ? "bg-red-400"
+                          : "bg-primary",
+                    )}
+                  >
+                    {OPTION_LABELS[displayIndex]}
+                  </span>
+                  <ParabolaThumb
+                    params={graphChoices[originalIndex]}
+                    className="size-full"
+                  />
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {question.type === "mcq" && question.options && (
@@ -614,7 +689,7 @@ function QuestionCard({
               {record?.ok ? t("feedback_correct") : t("feedback_wrong")}
             </p>
           )}
-          {!revealed && record && !record.ok && (
+          {!revealed && record && !record.ok && question.type !== "graph-quadratic" && (
             <p className="mt-2 text-sm text-muted-foreground">
               {t("correct_answer_label")}:{" "}
               <span className="font-semibold text-foreground">
@@ -795,7 +870,7 @@ function PreviewMode({ pack }: { pack: QuizPack }) {
         <QuestionCard
           question={question}
           lang={lang}
-          optOrder={identityOrder(question.options?.length ?? 0)}
+          optOrder={identityOrder(choiceCount(question))}
           record={null}
           revealed={showAnswers}
         />

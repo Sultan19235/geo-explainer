@@ -103,7 +103,15 @@ export function genForSection(sec: SectionId): QuadParams {
   }
 }
 
-function genWrong(correct: QuadParams, sec: SectionId): QuadParams[] {
+// Plausible wrong parabolas for a given correct one: sign flips and small
+// shifts of the same coefficients — the mistakes a student actually makes.
+// Section-independent, so the quiz builder can offer distractors for a
+// hand-authored parabola (not just the live generator's sectioned ones).
+// Returns up to `count` unique variants (may be fewer for symmetric shapes).
+export function suggestDistractors(
+  correct: QuadParams,
+  count = 3,
+): QuadParams[] {
   const wrongs: QuadParams[] = [];
   const used = new Set([JSON.stringify(correct)]);
   const vars: QuadParams[] =
@@ -127,11 +135,20 @@ function genWrong(correct: QuadParams, sec: SectionId): QuadParams[] {
 
   for (const v of vars) {
     const k = JSON.stringify(v);
-    if (!used.has(k) && wrongs.length < 3) {
+    if (!used.has(k) && wrongs.length < count) {
       used.add(k);
       wrongs.push(v);
     }
   }
+  return wrongs;
+}
+
+function genWrong(correct: QuadParams, sec: SectionId): QuadParams[] {
+  const wrongs = suggestDistractors(correct, 3);
+  const used = new Set([
+    JSON.stringify(correct),
+    ...wrongs.map((w) => JSON.stringify(w)),
+  ]);
   while (wrongs.length < 3) {
     const p = genForSection(sec);
     const k = JSON.stringify(p);
