@@ -5,7 +5,13 @@
 // teacher console) renders it; the admin panel validates it on upload.
 // Format reference for authors: docs/QUIZ_PACK_FORMAT.md.
 
-import type { QuadParams } from "./quadratic";
+import {
+  GRAPH_ASKS,
+  graphPropertyPrompt,
+  isGraphAsk,
+  type GraphAsk,
+  type QuadParams,
+} from "./quadratic";
 
 export type PackLang = "kz" | "ru";
 
@@ -19,15 +25,15 @@ export type PackGeoGebra = {
   height?: number;
 };
 
-// A "pick the graph" question (interaction mode A): the equation of
-// `equation` is shown in textbook notation and the student picks its parabola
-// out of `equation` + `distractors`. The correct choice is always `equation`
-// (its formula is the stem), so no separate correct index is stored.
-export type PackGraphQuadratic = {
-  mode: "A";
-  equation: QuadParams;
-  distractors: QuadParams[];
-};
+// A graph-quadratic question. The correct choice is always index 0 (derived
+// from `equation`), so no separate correct index is stored.
+//   A — show the equation, pick its graph (distractors are wrong parabolas)
+//   C — show the graph, pick its equation (same data as A, rendered inverted)
+//   B — show the graph, pick a property; options are generated from `ask`
+export type PackGraphQuadratic =
+  | { mode: "A"; equation: QuadParams; distractors: QuadParams[] }
+  | { mode: "C"; equation: QuadParams; distractors: QuadParams[] }
+  | { mode: "B"; equation: QuadParams; ask: GraphAsk };
 
 export type PackQuestion = {
   id: string;
@@ -86,11 +92,16 @@ export type QuizPack = {
 const MAX_QUESTIONS = 200;
 const MAX_OPTIONS = 6;
 
-// Graph-quadratic questions carry the equation as their own stem, so a text
-// prompt is optional; this is shown above the choices when none is given.
+// Graph-quadratic questions carry the graph/equation as their own stem, so a
+// text prompt is optional; these mode-specific defaults are used when the
+// author gives none. (Mode B derives its prompt from the asked property.)
 const DEFAULT_GRAPH_PROMPT: Localized = {
   kz: "Функцияның графигін таңдаңыз",
   ru: "Выберите график функции",
+};
+const DEFAULT_FORMULA_PROMPT: Localized = {
+  kz: "Графикке сәйкес формуланы таңдаңыз",
+  ru: "Выберите формулу, соответствующую графику",
 };
 
 export function loc(value: Localized | undefined, lang: PackLang): string {
@@ -352,9 +363,10 @@ export function validatePack(raw: unknown): {
         return;
       }
       const gg = g as Record<string, unknown>;
-      if (gg.mode !== undefined && gg.mode !== "A") {
+      const gmode = gg.mode ?? "A";
+      if (gmode !== "A" && gmode !== "B" && gmode !== "C") {
         errors.push(
-          `${label}: only graph "mode" "A" (pick the graph) is supported for now.`,
+          `${label}: graph "mode" must be "A" (pick the graph), "B" (pick a property), or "C" (pick the formula).`,
         );
         return;
       }
@@ -364,29 +376,52 @@ export function validatePack(raw: unknown): {
         );
         return;
       }
-      if (!Array.isArray(gg.distractors) || gg.distractors.length < 1) {
-        errors.push(
-          `${label}: "graph.distractors" must list at least 1 wrong parabola.`,
-        );
-        return;
+      const equation = normalizeQuadParams(gg.equation);
+
+      if (gmode === "B") {
+        if (!isGraphAsk(gg.ask)) {
+          errors.push(
+            `${label}: "graph.ask" must be one of ${GRAPH_ASKS.join(", ")}.`,
+          );
+          return;
+        }
+        question.graph = { mode: "B", equation, ask: gg.ask };
+        if (!isLocalized(q.text)) {
+          question.text = {
+            kz: graphPropertyPrompt(gg.ask, "kz"),
+            ru: graphPropertyPrompt(gg.ask, "ru"),
+          };
+        }
+      } else {
+        // A and C both need distractor parabolas.
+        if (!Array.isArray(gg.distractors) || gg.distractors.length < 1) {
+          errors.push(
+            `${label}: "graph.distractors" must list at least 1 wrong parabola.`,
+          );
+          return;
+        }
+        if (gg.distractors.length > MAX_OPTIONS - 1) {
+          errors.push(
+            `${label}: at most ${MAX_OPTIONS - 1} distractors (${MAX_OPTIONS} choices total).`,
+          );
+          return;
+        }
+        if (!gg.distractors.every(isQuadParams)) {
+          errors.push(
+            `${label}: every "graph.distractors" entry must be a valid quadratic with a ≠ 0.`,
+          );
+          return;
+        }
+        question.graph = {
+          mode: gmode,
+          equation,
+          distractors: (gg.distractors as QuadParams[]).map(normalizeQuadParams),
+        };
+        if (!isLocalized(q.text)) {
+          question.text =
+            gmode === "C" ? DEFAULT_FORMULA_PROMPT : DEFAULT_GRAPH_PROMPT;
+        }
       }
-      if (gg.distractors.length > MAX_OPTIONS - 1) {
-        errors.push(
-          `${label}: at most ${MAX_OPTIONS - 1} distractors (${MAX_OPTIONS} choices total).`,
-        );
-        return;
-      }
-      if (!gg.distractors.every(isQuadParams)) {
-        errors.push(
-          `${label}: every "graph.distractors" entry must be a valid quadratic with a ≠ 0.`,
-        );
-        return;
-      }
-      question.graph = {
-        mode: "A",
-        equation: normalizeQuadParams(gg.equation),
-        distractors: (gg.distractors as QuadParams[]).map(normalizeQuadParams),
-      };
     } else if (type === "mcq") {
       if (!isLocalizedList(q.options) || (q.options as unknown[]).length < 2) {
         errors.push(`${label}: "options" must list at least 2 choices.`);

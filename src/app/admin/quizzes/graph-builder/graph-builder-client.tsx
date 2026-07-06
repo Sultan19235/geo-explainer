@@ -1,10 +1,13 @@
 "use client";
 
-// Graph-quiz authoring widget (interaction mode A: "pick the graph").
-// Set a parabola in vertex or standard form, pick which wrong graphs to offer,
+// Graph-quiz authoring widget. Set a parabola, choose the interaction mode,
 // stack up questions, then download a pack.json — no JSON typed by hand. The
 // file goes through the ordinary New Quiz upload, so authored graph questions
 // flow through the same engine as MCQ packs.
+//
+//   A — show the equation, student picks its graph
+//   B — show the graph, student picks a property (vertex/axis/direction/y-int)
+//   C — show the graph, student picks the equation
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, Download, Copy, Plus, Trash2 } from "lucide-react";
@@ -13,10 +16,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MathFormula } from "@/components/quiz/math-formula";
 import { ParabolaThumb } from "@/components/quiz/parabola-thumb";
+import { useT } from "@/lib/i18n/context";
 import { cn } from "@/lib/utils";
 import {
   formatFunc,
+  graphPropertyChoices,
   suggestDistractors,
+  type GraphAsk,
   type QuadParams,
 } from "@/lib/quiz/quadratic";
 import { validatePack } from "@/lib/quiz/pack";
@@ -24,7 +30,24 @@ import { validatePack } from "@/lib/quiz/pack";
 const OPTION_LABELS = ["A", "B", "C", "D", "E", "F"];
 const MAX_DISTRACTORS = 5;
 
-type BuiltQuestion = { equation: QuadParams; distractors: QuadParams[] };
+type GraphMode = "A" | "B" | "C";
+
+const MODE_TABS: { mode: GraphMode; label: string }[] = [
+  { mode: "A", label: "Формула → график" },
+  { mode: "B", label: "График → қасиет" },
+  { mode: "C", label: "График → формула" },
+];
+
+const ASK_TABS: { ask: GraphAsk; label: string }[] = [
+  { ask: "vertex", label: "Төбесі" },
+  { ask: "axis", label: "Симметрия осі" },
+  { ask: "direction", label: "Бағыты" },
+  { ask: "yIntercept", label: "Oy қиюы" },
+];
+
+type BuiltQuestion =
+  | { mode: "A" | "C"; equation: QuadParams; distractors: QuadParams[] }
+  | { mode: "B"; equation: QuadParams; ask: GraphAsk };
 
 // Parse a school-style number: accepts a decimal comma and a unicode minus.
 function num(s: string): number {
@@ -36,6 +59,9 @@ function keyOf(p: QuadParams): string {
 }
 
 export function GraphBuilderClient() {
+  const { lang } = useT();
+  const [mode, setMode] = useState<GraphMode>("A");
+  const [ask, setAsk] = useState<GraphAsk>("vertex");
   const [formType, setFormType] = useState<"vertex" | "standard">("vertex");
   const [fields, setFields] = useState({
     a: "1",
@@ -50,6 +76,8 @@ export function GraphBuilderClient() {
   const [titleRu, setTitleRu] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const usesDistractors = mode === "A" || mode === "C";
 
   const setField = (name: keyof typeof fields, value: string) =>
     setFields((f) => ({ ...f, [name]: value }));
@@ -73,7 +101,7 @@ export function GraphBuilderClient() {
 
   const equationKey = equation ? keyOf(equation) : "";
 
-  // All plausible wrong graphs for this parabola (used as toggle chips).
+  // All plausible wrong graphs for this parabola (toggle chips, modes A & C).
   const suggestions = useMemo(
     () => (equation ? suggestDistractors(equation, 6) : []),
     [equation],
@@ -102,11 +130,17 @@ export function GraphBuilderClient() {
     });
   }
 
-  const canAdd = equation !== null && distractors.length >= 1;
+  const canAdd =
+    equation !== null && (!usesDistractors || distractors.length >= 1);
 
   function addQuestion() {
-    if (!equation || distractors.length < 1) return;
-    setQuestions((qs) => [...qs, { equation, distractors }]);
+    if (!equation) return;
+    if (usesDistractors) {
+      if (distractors.length < 1) return;
+      setQuestions((qs) => [...qs, { mode, equation, distractors }]);
+    } else {
+      setQuestions((qs) => [...qs, { mode: "B", equation, ask }]);
+    }
     setError(null);
   }
 
@@ -124,11 +158,14 @@ export function GraphBuilderClient() {
       questions: questions.map((q, i) => ({
         id: `g${i + 1}`,
         type: "graph-quadratic" as const,
-        graph: {
-          mode: "A" as const,
-          equation: q.equation,
-          distractors: q.distractors,
-        },
+        graph:
+          q.mode === "B"
+            ? { mode: "B" as const, equation: q.equation, ask: q.ask }
+            : {
+                mode: q.mode,
+                equation: q.equation,
+                distractors: q.distractors,
+              },
       })),
     };
   }
@@ -170,20 +207,36 @@ export function GraphBuilderClient() {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  const previewChoices = equation ? [equation, ...distractors] : [];
-
   return (
     <div>
       <h1 className="text-2xl font-bold tracking-tight">
         График тестін құрастыру
       </h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        &quot;Графикті таңдаңыз&quot; түріндегі сұрақтар. Параболаны орнатыңыз,
-        қате нұсқаларды таңдаңыз, сұрақ қосыңыз — соңында pack.json жүктеп
-        алып, жаңа тест ретінде жүктеңіз.
+        Параболаны орнатып, сұрақ түрін таңдаңыз. Соңында pack.json жүктеп
+        алып, «Жаңа тест» бетінде тест дестесі ретінде жүктеңіз.
       </p>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+      {/* mode selector */}
+      <div className="mt-5 flex flex-wrap gap-2">
+        {MODE_TABS.map((tab) => (
+          <button
+            key={tab.mode}
+            type="button"
+            onClick={() => setMode(tab.mode)}
+            className={cn(
+              "rounded-lg border px-3.5 py-2 text-sm font-semibold transition-colors",
+              mode === tab.mode
+                ? "border-primary bg-accent text-primary"
+                : "border-border text-muted-foreground hover:bg-accent",
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-5 grid gap-6 lg:grid-cols-2">
         {/* ── EDITOR ─────────────────────────────────────────────── */}
         <div className="space-y-5">
           <div className="rounded-2xl border border-border bg-card p-5">
@@ -251,49 +304,77 @@ export function GraphBuilderClient() {
             )}
           </div>
 
-          {/* distractor picker */}
-          <div className="rounded-2xl border border-border bg-card p-5">
-            <div className="mb-1 flex items-center justify-between">
-              <Label>Қате нұсқалар</Label>
-              <span className="text-xs text-muted-foreground">
-                таңдалды: {distractors.length}/{MAX_DISTRACTORS}
-              </span>
-            </div>
-            <p className="mb-3 text-xs text-muted-foreground">
-              Оқушыға ұсынылатын қате графиктерді таңдаңыз (кемінде 1).
-            </p>
-            {suggestions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Алдымен дұрыс параболаны орнатыңыз.
-              </p>
-            ) : (
-              <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4">
-                {suggestions.map((s) => {
-                  const active = selectedKeys.has(keyOf(s));
-                  return (
-                    <button
-                      key={keyOf(s)}
-                      type="button"
-                      onClick={() => toggleDistractor(s)}
-                      className={cn(
-                        "relative aspect-square overflow-hidden rounded-lg border-2 bg-white transition-all",
-                        active
-                          ? "border-primary ring-2 ring-primary/20"
-                          : "border-border opacity-70 hover:opacity-100",
-                      )}
-                    >
-                      {active && (
-                        <span className="absolute right-1 top-1 z-10 grid size-4 place-items-center rounded bg-primary text-white">
-                          <Check className="size-3" />
-                        </span>
-                      )}
-                      <ParabolaThumb params={s} className="size-full" />
-                    </button>
-                  );
-                })}
+          {/* mode-specific controls */}
+          {usesDistractors ? (
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-1 flex items-center justify-between">
+                <Label>Қате нұсқалар</Label>
+                <span className="text-xs text-muted-foreground">
+                  таңдалды: {distractors.length}/{MAX_DISTRACTORS}
+                </span>
               </div>
-            )}
-          </div>
+              <p className="mb-3 text-xs text-muted-foreground">
+                {mode === "C"
+                  ? "Қате формулалар (графиктер) ретінде ұсынылатын нұсқалар (кемінде 1)."
+                  : "Оқушыға ұсынылатын қате графиктерді таңдаңыз (кемінде 1)."}
+              </p>
+              {suggestions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Алдымен дұрыс параболаны орнатыңыз.
+                </p>
+              ) : (
+                <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4">
+                  {suggestions.map((s) => {
+                    const active = selectedKeys.has(keyOf(s));
+                    return (
+                      <button
+                        key={keyOf(s)}
+                        type="button"
+                        onClick={() => toggleDistractor(s)}
+                        className={cn(
+                          "relative aspect-square overflow-hidden rounded-lg border-2 bg-white transition-all",
+                          active
+                            ? "border-primary ring-2 ring-primary/20"
+                            : "border-border opacity-70 hover:opacity-100",
+                        )}
+                      >
+                        {active && (
+                          <span className="absolute right-1 top-1 z-10 grid size-4 place-items-center rounded bg-primary text-white">
+                            <Check className="size-3" />
+                          </span>
+                        )}
+                        <ParabolaThumb params={s} className="size-full" />
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <Label>Қандай қасиет сұралады?</Label>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {ASK_TABS.map((tab) => (
+                  <button
+                    key={tab.ask}
+                    type="button"
+                    onClick={() => setAsk(tab.ask)}
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-sm font-semibold transition-colors",
+                      ask === tab.ask
+                        ? "border-primary bg-accent text-primary"
+                        : "border-border text-muted-foreground hover:bg-accent",
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                Дұрыс жауап пен қате нұсқалар автоматты құрылады.
+              </p>
+            </div>
+          )}
 
           <Button
             onClick={addQuestion}
@@ -313,40 +394,13 @@ export function GraphBuilderClient() {
               Оқушы көрінісі (алдын ала)
             </p>
             {equation ? (
-              <>
-                <div className="quiz-grid-paper mb-4 rounded-xl border border-primary/15 px-4 py-5 text-center [background-size:18px_18px]">
-                  <MathFormula
-                    formula={formatFunc(equation)}
-                    className="text-2xl font-medium text-blue-950"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {previewChoices.map((p, i) => (
-                    <div
-                      key={i}
-                      className={cn(
-                        "relative aspect-square overflow-hidden rounded-xl border-2 bg-white",
-                        i === 0
-                          ? "border-emerald-500 ring-4 ring-emerald-500/15"
-                          : "border-border",
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "absolute left-1.5 top-1.5 z-10 flex size-6 items-center justify-center rounded-md text-xs font-bold text-white",
-                          i === 0 ? "bg-emerald-500" : "bg-primary",
-                        )}
-                      >
-                        {OPTION_LABELS[i]}
-                      </span>
-                      <ParabolaThumb params={p} className="size-full" />
-                    </div>
-                  ))}
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Жасыл — дұрыс жауап. Оқушыда нұсқалар араласып шығады.
-                </p>
-              </>
+              <StudentPreview
+                mode={mode}
+                ask={ask}
+                equation={equation}
+                distractors={distractors}
+                lang={lang}
+              />
             ) : (
               <p className="text-sm text-muted-foreground">
                 Параболаны орнатқанда осы жерде көрінеді.
@@ -360,9 +414,7 @@ export function GraphBuilderClient() {
               Сұрақтар ({questions.length})
             </p>
             {questions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Әзірге сұрақ жоқ.
-              </p>
+              <p className="text-sm text-muted-foreground">Әзірге сұрақ жоқ.</p>
             ) : (
               <ul className="space-y-2">
                 {questions.map((q, i) => (
@@ -370,19 +422,18 @@ export function GraphBuilderClient() {
                     key={i}
                     className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2"
                   >
-                    <span className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-white">
-                      <ParabolaThumb
-                        params={q.equation}
-                        className="size-full"
-                      />
+                    <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-white">
+                      <ParabolaThumb params={q.equation} className="size-full" />
                     </span>
                     <span className="flex-1 text-sm">
-                      <span className="mr-1 font-bold tabular-nums text-muted-foreground">
-                        {i + 1}.
+                      <span className="mr-1 rounded bg-accent px-1.5 py-0.5 text-[10px] font-bold text-primary">
+                        {q.mode}
                       </span>
                       <MathFormula formula={formatFunc(q.equation)} />
                       <span className="ml-2 text-xs text-muted-foreground">
-                        +{q.distractors.length} қате
+                        {q.mode === "B"
+                          ? ASK_TABS.find((a) => a.ask === q.ask)?.label
+                          : `+${q.distractors.length} қате`}
                       </span>
                     </span>
                     <button
@@ -431,7 +482,11 @@ export function GraphBuilderClient() {
                 onClick={copyPack}
                 disabled={questions.length === 0}
               >
-                {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                {copied ? (
+                  <Check className="size-4" />
+                ) : (
+                  <Copy className="size-4" />
+                )}
                 {copied ? "Көшірілді" : "JSON көшіру"}
               </Button>
             </div>
@@ -448,6 +503,118 @@ export function GraphBuilderClient() {
         </div>
       </div>
     </div>
+  );
+}
+
+function StudentPreview({
+  mode,
+  ask,
+  equation,
+  distractors,
+  lang,
+}: {
+  mode: GraphMode;
+  ask: GraphAsk;
+  equation: QuadParams;
+  distractors: QuadParams[];
+  lang: "kz" | "ru";
+}) {
+  // Mode A: equation stem + graph options.
+  if (mode === "A") {
+    const choices = [equation, ...distractors];
+    return (
+      <>
+        <div className="quiz-grid-paper mb-4 rounded-xl border border-primary/15 px-4 py-5 text-center [background-size:18px_18px]">
+          <MathFormula
+            formula={formatFunc(equation)}
+            className="text-2xl font-medium text-blue-950"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-2.5">
+          {choices.map((p, i) => (
+            <OptionTileGraph key={i} params={p} index={i} correct={i === 0} />
+          ))}
+        </div>
+        <PreviewNote />
+      </>
+    );
+  }
+
+  // Modes B & C: graph stem + text options.
+  const textChoices =
+    mode === "C"
+      ? [equation, ...distractors].map((p) => formatFunc(p))
+      : graphPropertyChoices(equation, ask, lang);
+
+  return (
+    <>
+      <div className="mx-auto mb-4 aspect-square w-full max-w-[220px] overflow-hidden rounded-xl border border-border bg-white">
+        <ParabolaThumb params={equation} window={7} className="size-full" />
+      </div>
+      <div className="grid gap-2.5">
+        {textChoices.map((label, i) => (
+          <div
+            key={i}
+            className={cn(
+              "flex items-center gap-3 rounded-xl border-[1.5px] px-4 py-3 text-[15px]",
+              i === 0
+                ? "border-emerald-500 bg-emerald-50"
+                : "border-border bg-background",
+            )}
+          >
+            <span
+              className={cn(
+                "grid size-7 shrink-0 place-items-center rounded-lg border text-xs font-bold",
+                i === 0
+                  ? "border-emerald-500 bg-emerald-500 text-white"
+                  : "border-border bg-card",
+              )}
+            >
+              {OPTION_LABELS[i]}
+            </span>
+            {mode === "C" ? <MathFormula formula={label} /> : <span>{label}</span>}
+          </div>
+        ))}
+      </div>
+      <PreviewNote />
+    </>
+  );
+}
+
+function OptionTileGraph({
+  params,
+  index,
+  correct,
+}: {
+  params: QuadParams;
+  index: number;
+  correct: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative aspect-square overflow-hidden rounded-xl border-2 bg-white",
+        correct ? "border-emerald-500 ring-4 ring-emerald-500/15" : "border-border",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute left-1.5 top-1.5 z-10 flex size-6 items-center justify-center rounded-md text-xs font-bold text-white",
+          correct ? "bg-emerald-500" : "bg-primary",
+        )}
+      >
+        {OPTION_LABELS[index]}
+      </span>
+      <ParabolaThumb params={params} className="size-full" />
+    </div>
+  );
+}
+
+function PreviewNote() {
+  return (
+    <p className="mt-2 text-xs text-muted-foreground">
+      Жасыл — дұрыс жауап. Оқушыда нұсқалар араласып шығады.
+    </p>
   );
 }
 

@@ -4,7 +4,7 @@
 // live-session machine. Self-paced — each student walks the question list at
 // their own speed while the teacher watches the live scoreboard.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   ArrowRight,
@@ -28,7 +28,11 @@ import { MathFormula } from "@/components/quiz/math-formula";
 import { MathText } from "@/components/quiz/math-text";
 import { ParabolaThumb } from "@/components/quiz/parabola-thumb";
 import { TimerPill } from "@/components/quiz/timer-pill";
-import { formatFunc } from "@/lib/quiz/quadratic";
+import {
+  formatFunc,
+  graphPropertyChoiceCount,
+  graphPropertyChoices,
+} from "@/lib/quiz/quadratic";
 import { LanguageToggle } from "@/components/language-toggle";
 import { useLanguage } from "@/lib/i18n/context";
 import { cn } from "@/lib/utils";
@@ -60,11 +64,13 @@ function identityOrder(count: number): number[] {
   return Array.from({ length: count }, (_, i) => i);
 }
 
-// How many selectable choices a question shows — options for mcq, or
-// equation + distractors for a graph-quadratic question.
+// How many selectable choices a question shows — options for mcq, or the
+// choices for a graph-quadratic question (graphs/formulas for A & C, generated
+// property values for B).
 function choiceCount(q: PackQuestion): number {
   if (q.type === "graph-quadratic" && q.graph) {
-    return 1 + q.graph.distractors.length;
+    const g = q.graph;
+    return g.mode === "B" ? graphPropertyChoiceCount(g.ask) : 1 + g.distractors.length;
   }
   return q.options?.length ?? 0;
 }
@@ -512,11 +518,20 @@ function QuestionCard({
 }) {
   const t = engineT(lang);
   const answered = record !== null || revealed;
-  // Graph "pick the graph" choices, correct one first (index 0).
-  const graphChoices =
-    question.type === "graph-quadratic" && question.graph
-      ? [question.graph.equation, ...question.graph.distractors]
-      : null;
+  const graph = question.type === "graph-quadratic" ? question.graph : null;
+  // Mode A shows graph thumbnails as options; B & C show a text list. In every
+  // mode the correct choice is index 0, matching the grading in QuestionFlow.
+  const graphThumbs = graph?.mode === "A" ? [graph.equation, ...graph.distractors] : null;
+  let graphTextOptions: ReactNode[] = [];
+  if (graph?.mode === "C") {
+    graphTextOptions = [graph.equation, ...graph.distractors].map((p, i) => (
+      <MathFormula key={i} formula={formatFunc(p)} />
+    ));
+  } else if (graph?.mode === "B") {
+    graphTextOptions = graphPropertyChoices(graph.equation, graph.ask, lang).map(
+      (s, i) => <span key={i}>{s}</span>,
+    );
+  }
 
   return (
     <section className="rounded-2xl border border-border bg-card p-5 shadow-lg shadow-blue-950/5">
@@ -537,11 +552,12 @@ function QuestionCard({
         <GeoGebraFigure figure={question.geogebra} className="mt-4" />
       )}
 
-      {graphChoices && (
+      {/* Mode A — show the equation, pick its graph. */}
+      {graphThumbs && (
         <div className="mt-4">
           <div className="quiz-grid-paper mb-4 rounded-xl border border-primary/15 px-4 py-5 text-center [background-size:18px_18px]">
             <MathFormula
-              formula={formatFunc(question.graph!.equation)}
+              formula={formatFunc(graphThumbs[0])}
               className="text-2xl font-medium text-blue-950 sm:text-3xl"
             />
           </div>
@@ -582,9 +598,56 @@ function QuestionCard({
                     {OPTION_LABELS[displayIndex]}
                   </span>
                   <ParabolaThumb
-                    params={graphChoices[originalIndex]}
+                    params={graphThumbs[originalIndex]}
                     className="size-full"
                   />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Modes B & C — show the graph, pick a property (B) or the formula (C). */}
+      {graph && (graph.mode === "B" || graph.mode === "C") && (
+        <div className="mt-4">
+          <div className="mx-auto mb-4 aspect-square w-full max-w-[260px] overflow-hidden rounded-xl border border-border bg-white">
+            <ParabolaThumb
+              params={graph.equation}
+              window={7}
+              className="size-full"
+            />
+          </div>
+          <div className="grid gap-2.5">
+            {optOrder.map((originalIndex, displayIndex) => {
+              const isCorrect = originalIndex === 0;
+              const isPicked = record?.pick === originalIndex;
+              return (
+                <button
+                  key={originalIndex}
+                  type="button"
+                  disabled={answered}
+                  onClick={() => onPick?.(displayIndex)}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl border-[1.5px] border-border bg-background px-4 py-3 text-left text-[15px] transition-colors",
+                    !answered && "hover:border-primary/50 hover:bg-accent",
+                    answered && isCorrect && "border-emerald-500 bg-emerald-50",
+                    answered && isPicked && !isCorrect && "border-red-400 bg-red-50",
+                    answered && !isCorrect && !isPicked && "opacity-60",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "grid size-7 shrink-0 place-items-center rounded-lg border border-border bg-card text-xs font-bold",
+                      answered && isCorrect &&
+                        "border-emerald-500 bg-emerald-500 text-white",
+                      answered && isPicked && !isCorrect &&
+                        "border-red-400 bg-red-400 text-white",
+                    )}
+                  >
+                    {OPTION_LABELS[displayIndex]}
+                  </span>
+                  {graphTextOptions[originalIndex]}
                 </button>
               );
             })}

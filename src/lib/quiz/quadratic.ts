@@ -216,6 +216,124 @@ export function formatFunc(p: QuadParams): string {
 
 // 0.5 → "0,5" — decimal comma, as written on Kazakh school boards.
 function fmtNum(v: number): string {
-  const s = String(v).replace("-", "−");
+  // Guard tiny FP dust (e.g. -0 or 1.9999999997) so labels read cleanly.
+  const rounded = Math.abs(v) < 1e-9 ? 0 : Math.round(v * 1e6) / 1e6;
+  const s = String(rounded).replace("-", "−");
   return s.replace(".", ",");
+}
+
+// ─── Graph "read a property" questions (interaction mode B) ─────────────────
+// The student is shown a parabola and picks one of its properties. Answers are
+// multiple-choice: a correct value plus deterministically-derived wrong values
+// (no RNG, so the server and client agree and grading stays stable).
+
+export type GraphAsk = "vertex" | "axis" | "direction" | "yIntercept";
+export const GRAPH_ASKS: GraphAsk[] = [
+  "vertex",
+  "axis",
+  "direction",
+  "yIntercept",
+];
+
+export function isGraphAsk(value: unknown): value is GraphAsk {
+  return (
+    typeof value === "string" && (GRAPH_ASKS as string[]).includes(value)
+  );
+}
+
+type Lang = "kz" | "ru";
+
+// The question prompt shown above the graph for each property.
+export function graphPropertyPrompt(ask: GraphAsk, lang: Lang): string {
+  const P: Record<GraphAsk, { kz: string; ru: string }> = {
+    vertex: {
+      kz: "Параболаның төбесі қай нүктеде?",
+      ru: "Где находится вершина параболы?",
+    },
+    axis: {
+      kz: "Симметрия осін көрсетіңіз",
+      ru: "Укажите ось симметрии",
+    },
+    direction: {
+      kz: "Параболаның тармақтары қайда бағытталған?",
+      ru: "Куда направлены ветви параболы?",
+    },
+    yIntercept: {
+      kz: "Парабола Oy осін қай нүктеде қияды? (y мәні)",
+      ru: "В какой точке парабола пересекает ось Oy? (значение y)",
+    },
+  };
+  return lang === "ru" ? P[ask].ru : P[ask].kz;
+}
+
+// Builds the answer options for a property question, correct one first (index
+// 0). Callers shuffle for display; the correct index stays 0 for grading.
+export function graphPropertyChoices(
+  p: QuadParams,
+  ask: GraphAsk,
+  lang: Lang,
+): string[] {
+  if (ask === "direction") {
+    const up = lang === "ru" ? "вверх" : "жоғары";
+    const down = lang === "ru" ? "вниз" : "төмен";
+    return p.a > 0 ? [up, down] : [down, up];
+  }
+
+  const v = vertexOf(p);
+  if (ask === "vertex") {
+    const cands: [number, number][] = [
+      [-v.x, v.y],
+      [v.x, -v.y],
+      [-v.x, -v.y],
+      [v.x + 1, v.y],
+      [v.x, v.y + 1],
+      [v.x - 1, v.y - 1],
+      [v.x + 2, v.y],
+      [v.x, v.y - 2],
+    ];
+    return pickDistinct(
+      [v.x, v.y],
+      cands,
+      3,
+      (pt) => `(${fmtNum(pt[0])}; ${fmtNum(pt[1])})`,
+    );
+  }
+  if (ask === "axis") {
+    const c = v.x;
+    const cands = [-c, c + 1, c - 1, c + 2, c - 2, c + 3, c - 3];
+    return pickDistinct(c, cands, 3, (x) => `x = ${fmtNum(x)}`);
+  }
+  // yIntercept
+  const y0 = evaluate(p, 0);
+  const cands = [-y0, y0 + 2, y0 - 2, y0 + 4, y0 - 4, y0 + 1, y0 - 1];
+  return pickDistinct(y0, cands, 3, (y) => fmtNum(y));
+}
+
+// How many options a property question shows (used by the engine to size the
+// choice grid without knowing the language — counts don't vary by language).
+export function graphPropertyChoiceCount(ask: GraphAsk): number {
+  return ask === "direction" ? 2 : 4;
+}
+
+// Correct label first, then up to `count` distinct distractor labels drawn in
+// order from `cands` (deduped by their rendered text against the correct one
+// and each other). `cands` always supplies enough distinct values here.
+function pickDistinct<T>(
+  correct: T,
+  cands: T[],
+  count: number,
+  render: (t: T) => string,
+): string[] {
+  const correctLabel = render(correct);
+  const out = [correctLabel];
+  const used = new Set([correctLabel]);
+  for (const c of cands) {
+    if (out.length - 1 >= count) break;
+    const label = render(c);
+    if (!used.has(label)) {
+      used.add(label);
+      out.push(label);
+    }
+  }
+  return out;
 }
