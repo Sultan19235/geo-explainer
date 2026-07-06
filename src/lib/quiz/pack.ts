@@ -25,15 +25,17 @@ export type PackGeoGebra = {
   height?: number;
 };
 
-// A graph-quadratic question. The correct choice is always index 0 (derived
-// from `equation`), so no separate correct index is stored.
+// A graph-quadratic question. For choice modes the correct option is always
+// index 0 (derived from `equation`), so no separate correct index is stored.
 //   A — show the equation, pick its graph (distractors are wrong parabolas)
 //   C — show the graph, pick its equation (same data as A, rendered inverted)
 //   B — show the graph, pick a property; options are generated from `ask`
+//   D — show the equation, drag a parabola to match it (graded by tolerance)
 export type PackGraphQuadratic =
   | { mode: "A"; equation: QuadParams; distractors: QuadParams[] }
   | { mode: "C"; equation: QuadParams; distractors: QuadParams[] }
-  | { mode: "B"; equation: QuadParams; ask: GraphAsk };
+  | { mode: "B"; equation: QuadParams; ask: GraphAsk }
+  | { mode: "D"; equation: QuadParams };
 
 export type PackQuestion = {
   id: string;
@@ -102,6 +104,10 @@ const DEFAULT_GRAPH_PROMPT: Localized = {
 const DEFAULT_FORMULA_PROMPT: Localized = {
   kz: "Графикке сәйкес формуланы таңдаңыз",
   ru: "Выберите формулу, соответствующую графику",
+};
+const DEFAULT_DRAG_PROMPT: Localized = {
+  kz: "Параболаны берілген теңдеуге сәйкес салыңыз",
+  ru: "Постройте параболу по заданному уравнению",
 };
 
 export function loc(value: Localized | undefined, lang: PackLang): string {
@@ -364,9 +370,9 @@ export function validatePack(raw: unknown): {
       }
       const gg = g as Record<string, unknown>;
       const gmode = gg.mode ?? "A";
-      if (gmode !== "A" && gmode !== "B" && gmode !== "C") {
+      if (gmode !== "A" && gmode !== "B" && gmode !== "C" && gmode !== "D") {
         errors.push(
-          `${label}: graph "mode" must be "A" (pick the graph), "B" (pick a property), or "C" (pick the formula).`,
+          `${label}: graph "mode" must be "A" (pick the graph), "B" (pick a property), "C" (pick the formula), or "D" (drag to build).`,
         );
         return;
       }
@@ -378,7 +384,10 @@ export function validatePack(raw: unknown): {
       }
       const equation = normalizeQuadParams(gg.equation);
 
-      if (gmode === "B") {
+      if (gmode === "D") {
+        question.graph = { mode: "D", equation };
+        if (!isLocalized(q.text)) question.text = DEFAULT_DRAG_PROMPT;
+      } else if (gmode === "B") {
         if (!isGraphAsk(gg.ask)) {
           errors.push(
             `${label}: "graph.ask" must be one of ${GRAPH_ASKS.join(", ")}.`,

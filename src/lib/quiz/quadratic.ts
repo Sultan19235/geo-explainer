@@ -315,6 +315,33 @@ export function graphPropertyChoiceCount(ask: GraphAsk): number {
   return ask === "direction" ? 2 : 4;
 }
 
+// ─── Drag-to-build (interaction mode D) ─────────────────────────────────────
+// The student is given a target equation and drags a parabola to match it.
+// Their attempt is a vertex-form triple; grading compares it to the target's
+// canonical vertex form (leading coefficient + vertex) within a tolerance.
+
+export type VertexTriple = { a: number; m: number; n: number };
+
+// Any quadratic as {a, vertex} — the leading coefficient is invariant between
+// standard and vertex form, and the vertex comes from vertexOf().
+export function toVertexForm(p: QuadParams): VertexTriple {
+  const v = vertexOf(p);
+  return { a: p.a, m: v.x, n: v.y };
+}
+
+export function gradeDrag(
+  attempt: VertexTriple,
+  target: QuadParams,
+  tol = 1e-6,
+): boolean {
+  const t = toVertexForm(target);
+  return (
+    Math.abs(attempt.a - t.a) < tol &&
+    Math.abs(attempt.m - t.m) < tol &&
+    Math.abs(attempt.n - t.n) < tol
+  );
+}
+
 // Correct label first, then up to `count` distinct distractor labels drawn in
 // order from `cands` (deduped by their rendered text against the correct one
 // and each other). `cands` always supplies enough distinct values here.

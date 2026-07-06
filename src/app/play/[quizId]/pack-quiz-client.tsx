@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Confetti } from "@/components/quiz/confetti";
+import { DragParabola } from "@/components/quiz/drag-parabola";
 import { GeoGebraFigure } from "@/components/quiz/geogebra-figure";
 import { MathFormula } from "@/components/quiz/math-formula";
 import { MathText } from "@/components/quiz/math-text";
@@ -30,8 +31,12 @@ import { ParabolaThumb } from "@/components/quiz/parabola-thumb";
 import { TimerPill } from "@/components/quiz/timer-pill";
 import {
   formatFunc,
+  gradeDrag,
   graphPropertyChoiceCount,
   graphPropertyChoices,
+  toVertexForm,
+  type QuadParams,
+  type VertexTriple,
 } from "@/lib/quiz/quadratic";
 import { LanguageToggle } from "@/components/language-toggle";
 import { useLanguage } from "@/lib/i18n/context";
@@ -70,7 +75,9 @@ function identityOrder(count: number): number[] {
 function choiceCount(q: PackQuestion): number {
   if (q.type === "graph-quadratic" && q.graph) {
     const g = q.graph;
-    return g.mode === "B" ? graphPropertyChoiceCount(g.ask) : 1 + g.distractors.length;
+    if (g.mode === "B") return graphPropertyChoiceCount(g.ask);
+    if (g.mode === "D") return 0; // drag-to-build has no options
+    return 1 + g.distractors.length;
   }
   return q.options?.length ?? 0;
 }
@@ -438,6 +445,7 @@ function QuestionFlow({
             given: inputValue,
           });
         }}
+        onCheckDrag={(ok, given) => answer({ ok, given })}
       />
 
       {/* after-answer bar */}
@@ -505,6 +513,7 @@ function QuestionCard({
   onInputChange,
   onPick,
   onCheckInput,
+  onCheckDrag,
 }: {
   question: PackQuestion;
   lang: "kz" | "ru";
@@ -515,6 +524,7 @@ function QuestionCard({
   onInputChange?: (value: string) => void;
   onPick?: (displayIndex: number) => void;
   onCheckInput?: () => void;
+  onCheckDrag?: (ok: boolean, given: string) => void;
 }) {
   const t = engineT(lang);
   const answered = record !== null || revealed;
@@ -655,6 +665,16 @@ function QuestionCard({
         </div>
       )}
 
+      {/* Mode D — show the equation, drag a parabola to match it. */}
+      {graph?.mode === "D" && (
+        <DragQuestion
+          target={graph.equation}
+          record={record}
+          revealed={revealed}
+          onCheckDrag={onCheckDrag}
+        />
+      )}
+
       {question.type === "mcq" && question.options && (
         <div className="mt-4 grid gap-2.5">
           {optOrder.map((originalIndex, displayIndex) => {
@@ -783,6 +803,74 @@ function QuestionCard({
         </div>
       )}
     </section>
+  );
+}
+
+// Mode D: the student drags a parabola to match `target`, then presses Check.
+// Manages its own attempt state; reports the graded result up via onCheckDrag.
+function DragQuestion({
+  target,
+  record,
+  revealed,
+  onCheckDrag,
+}: {
+  target: QuadParams;
+  record: AnswerRecord | null;
+  revealed: boolean;
+  onCheckDrag?: (ok: boolean, given: string) => void;
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const [attempt, setAttempt] = useState<VertexTriple>({ a: 1, m: 0, n: 0 });
+  const answered = record !== null || revealed;
+
+  // What the plot shows: preview → the target; answered → the saved attempt;
+  // otherwise the live attempt being dragged.
+  let shown: VertexTriple = attempt;
+  if (revealed) {
+    shown = toVertexForm(target);
+  } else if (record?.given) {
+    try {
+      shown = JSON.parse(record.given) as VertexTriple;
+    } catch {
+      shown = attempt;
+    }
+  }
+  // After a wrong answer, overlay the target so the student sees the right shape.
+  const reference = record !== null && !record.ok ? target : undefined;
+
+  return (
+    <div className="mt-4">
+      <div className="quiz-grid-paper mb-4 rounded-xl border border-primary/15 px-4 py-4 text-center [background-size:18px_18px]">
+        <MathFormula
+          formula={formatFunc(target)}
+          className="text-xl font-medium text-blue-950 sm:text-2xl"
+        />
+      </div>
+      <DragParabola
+        value={shown}
+        onChange={answered ? undefined : setAttempt}
+        disabled={answered}
+        reference={reference}
+      />
+      {!answered && (
+        <>
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            {lang === "ru"
+              ? "Двигайте вершину · тяните точку вверх/вниз, меняя изгиб"
+              : "Төбені жылжытыңыз · нүктені жоғары/төмен жылжытып иілуін өзгертіңіз"}
+          </p>
+          <Button
+            className="mt-3 h-12 w-full text-base font-semibold"
+            onClick={() =>
+              onCheckDrag?.(gradeDrag(attempt, target), JSON.stringify(attempt))
+            }
+          >
+            {t("check_button")}
+          </Button>
+        </>
+      )}
+    </div>
   );
 }
 

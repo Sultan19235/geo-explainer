@@ -30,12 +30,13 @@ import { validatePack } from "@/lib/quiz/pack";
 const OPTION_LABELS = ["A", "B", "C", "D", "E", "F"];
 const MAX_DISTRACTORS = 5;
 
-type GraphMode = "A" | "B" | "C";
+type GraphMode = "A" | "B" | "C" | "D";
 
 const MODE_TABS: { mode: GraphMode; label: string }[] = [
   { mode: "A", label: "Формула → график" },
   { mode: "B", label: "График → қасиет" },
   { mode: "C", label: "График → формула" },
+  { mode: "D", label: "Теңдеу → сызу" },
 ];
 
 const ASK_TABS: { ask: GraphAsk; label: string }[] = [
@@ -47,7 +48,8 @@ const ASK_TABS: { ask: GraphAsk; label: string }[] = [
 
 type BuiltQuestion =
   | { mode: "A" | "C"; equation: QuadParams; distractors: QuadParams[] }
-  | { mode: "B"; equation: QuadParams; ask: GraphAsk };
+  | { mode: "B"; equation: QuadParams; ask: GraphAsk }
+  | { mode: "D"; equation: QuadParams };
 
 // Parse a school-style number: accepts a decimal comma and a unicode minus.
 function num(s: string): number {
@@ -138,8 +140,10 @@ export function GraphBuilderClient() {
     if (usesDistractors) {
       if (distractors.length < 1) return;
       setQuestions((qs) => [...qs, { mode, equation, distractors }]);
-    } else {
+    } else if (mode === "B") {
       setQuestions((qs) => [...qs, { mode: "B", equation, ask }]);
+    } else {
+      setQuestions((qs) => [...qs, { mode: "D", equation }]);
     }
     setError(null);
   }
@@ -161,11 +165,13 @@ export function GraphBuilderClient() {
         graph:
           q.mode === "B"
             ? { mode: "B" as const, equation: q.equation, ask: q.ask }
-            : {
-                mode: q.mode,
-                equation: q.equation,
-                distractors: q.distractors,
-              },
+            : q.mode === "D"
+              ? { mode: "D" as const, equation: q.equation }
+              : {
+                  mode: q.mode,
+                  equation: q.equation,
+                  distractors: q.distractors,
+                },
       })),
     };
   }
@@ -350,7 +356,7 @@ export function GraphBuilderClient() {
                 </div>
               )}
             </div>
-          ) : (
+          ) : mode === "B" ? (
             <div className="rounded-2xl border border-border bg-card p-5">
               <Label>Қандай қасиет сұралады?</Label>
               <div className="mt-3 grid grid-cols-2 gap-2">
@@ -372,6 +378,15 @@ export function GraphBuilderClient() {
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
                 Дұрыс жауап пен қате нұсқалар автоматты құрылады.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <Label>Сүйреп салу</Label>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Оқушы осы теңдеуге сәйкес параболаны төбесі мен нүктесін
+                жылжытып салады. Дұрыс жауап — теңдеудің өзі. Бүтін a, m, n
+                мәндерін қолданыңыз (жарты қадаммен a да болады).
               </p>
             </div>
           )}
@@ -433,7 +448,9 @@ export function GraphBuilderClient() {
                       <span className="ml-2 text-xs text-muted-foreground">
                         {q.mode === "B"
                           ? ASK_TABS.find((a) => a.ask === q.ask)?.label
-                          : `+${q.distractors.length} қате`}
+                          : q.mode === "D"
+                            ? "сүйреп салу"
+                            : `+${q.distractors.length} қате`}
                       </span>
                     </span>
                     <button
@@ -536,6 +553,27 @@ function StudentPreview({
           ))}
         </div>
         <PreviewNote />
+      </>
+    );
+  }
+
+  // Mode D: equation stem + the target shape (what a correct build looks like).
+  if (mode === "D") {
+    return (
+      <>
+        <div className="quiz-grid-paper mb-4 rounded-xl border border-primary/15 px-4 py-5 text-center [background-size:18px_18px]">
+          <MathFormula
+            formula={formatFunc(equation)}
+            className="text-2xl font-medium text-blue-950"
+          />
+        </div>
+        <div className="mx-auto mb-3 aspect-square w-full max-w-[220px] overflow-hidden rounded-xl border border-emerald-500 bg-white">
+          <ParabolaThumb params={equation} window={7} className="size-full" />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Оқушы параболаны осы теңдеуге сәйкес сүйреп салады (дұрыс форма —
+          жоғарыда).
+        </p>
       </>
     );
   }
