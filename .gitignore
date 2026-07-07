@@ -46,3 +46,6 @@ next-env.d.ts
 /*.html
 README_files/
 _reference/
+
+# Self-hosted GeoGebra engine (scripts/fetch-geogebra.sh)
+/public/geogebra/
