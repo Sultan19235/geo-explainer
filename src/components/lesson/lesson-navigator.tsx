@@ -13,7 +13,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lang } from "@/lib/i18n/strings";
-import { pickText, type ProblemPack } from "@/lib/lesson/types";
+import { pickText } from "@/lib/lesson/types";
+import type { BankProblem } from "@/lib/lesson/player-adapter";
 
 export function LessonNavigator({
   problems,
@@ -24,7 +25,7 @@ export function LessonNavigator({
   lang,
   extraControls,
 }: {
-  problems: ProblemPack[];
+  problems: BankProblem[];
   activeIndex: number;
   onJump: (index: number) => void;
   isFullscreen: boolean;

@@ -21,7 +21,10 @@ export type SceneOp =
   | { hide: string[] }
   | { set: [obj: string, value: number] }
   | { anim: { obj: string; to: number; ms?: number; delay?: number } }
-  | { style: { obj: string } & StyleProps };
+  | { style: { obj: string } & StyleProps }
+  // Free-form program op: runs author code against the lesson-runtime
+  // toolkit (uploaded lesson files build their models this way).
+  | { fn: (toolkit: unknown) => void };
 
 export type SceneControl = {
   obj: string;
@@ -47,6 +50,14 @@ export type BuiltScene = {
   control?: SceneControl;
   viewDirection: string;
   fit?: FitBox;
+  // Uploaded lesson files: steps move the model FORWARD only, so going back
+  // replays init + steps 0..k on a cleared construction (registry scenes
+  // instead encode each step as an absolute state).
+  replayBack?: boolean;
+  // Scene contains fn-ops and needs the lesson-runtime toolkit loaded.
+  needsRuntime?: boolean;
+  // Perspective to apply before init ("T" 3D / "G" 2D); default "T".
+  perspective?: "T" | "G";
 };
 
 export type SceneBuilder = (params: Params) => BuiltScene;
@@ -445,4 +456,41 @@ export function buildScene(id: string, params: Params): BuiltScene | null {
   const builder = SCENES[id];
   if (!builder) return null;
   return builder(params);
+}
+
+// ─── Uploaded lesson files → BuiltScene adapters ────────────────────────────
+// A lesson file's init/run functions become fn-ops so the same GgbView (with
+// its focus guard, toolbar restore, pen overlay, resize handling) drives both
+// registry scenes and uploaded content.
+
+type FileProgramSource = {
+  view?: "3d" | "2d";
+  home?: string;
+  fit?: [number, number, number, number, number, number];
+  axes?: boolean;
+  init?: (g: unknown) => void;
+  stepRuns?: (((g: unknown) => void) | undefined)[];
+};
+
+export function sceneFromFileProgram(source: FileProgramSource): BuiltScene {
+  const init: SceneOp[] = [
+    {
+      fn: (toolkit) => {
+        const g = toolkit as { hideAxes(): void };
+        if (!source.axes) g.hideAxes();
+        source.init?.(toolkit);
+      },
+    },
+  ];
+  return {
+    init,
+    steps: (source.stepRuns ?? []).map((run) => ({
+      ops: run ? [{ fn: run }] : [],
+    })),
+    viewDirection: source.home ? `SetViewDirection(${source.home})` : "",
+    fit: source.fit,
+    replayBack: true,
+    needsRuntime: true,
+    perspective: source.view === "2d" ? "G" : "T",
+  };
 }
