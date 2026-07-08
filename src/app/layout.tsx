@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, Geist_Mono } from "next/font/google";
+import { IBM_Plex_Sans, Geist_Mono, Literata } from "next/font/google";
 import "./globals.css";
 import { LanguageProvider } from "@/lib/i18n/context";
 import { AuthProvider, type AuthUser } from "@/lib/auth/context";
@@ -16,6 +16,14 @@ const ibmPlexSans = IBM_Plex_Sans({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+// Textbook voice for headings — covers the Kazakh Cyrillic letters
+// (ә, ғ, қ, ң, ө, ұ, ү, і) via cyrillic-ext.
+const literata = Literata({
+  variable: "--font-display",
+  subsets: ["latin", "cyrillic", "cyrillic-ext"],
+  weight: ["600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -49,7 +57,7 @@ export default async function RootLayout({
   return (
     <html lang="kk">
       <body
-        className={`${ibmPlexSans.variable} ${geistMono.variable} antialiased`}
+        className={`${ibmPlexSans.variable} ${geistMono.variable} ${literata.variable} antialiased`}
       >
         <AuthProvider initialUser={initialUser}>
           <LanguageProvider>{children}</LanguageProvider>

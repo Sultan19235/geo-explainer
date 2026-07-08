@@ -37,7 +37,7 @@ export function SiteHeader({
           ) : null}
           <Link
             href="/"
-            className="truncate text-base font-bold tracking-tight"
+            className="shrink-0 whitespace-nowrap font-heading text-base font-bold tracking-tight"
           >
             {t("brand")}
           </Link>
@@ -66,7 +66,13 @@ export function SiteHeader({
                 <div className="flex items-center gap-2">
                   <Link
                     href="/login"
-                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                    className={buttonVariants({
+                      variant: "outline",
+                      size: "sm",
+                      // On the narrowest screens signup wins the slot; login
+                      // stays reachable via the signup page's login link.
+                      className: "hidden sm:inline-flex",
+                    })}
                   >
                     {t("login_button")}
                   </Link>

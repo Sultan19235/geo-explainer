@@ -18,21 +18,29 @@ export default function HomePage() {
   const { t } = useT();
   const { user } = useAuth();
 
+  // Each step carries one of the teacher's pens: blue = theory/writing,
+  // green = picking problems, red = conducting/checking.
   const steps = [
     {
       icon: BookOpenIcon,
       title: t("how_step_1_title"),
       text: t("how_step_1_text"),
+      chip: "bg-pen-blue-soft text-pen-blue",
+      num: "text-pen-blue",
     },
     {
       icon: CheckSquareIcon,
       title: t("how_step_2_title"),
       text: t("how_step_2_text"),
+      chip: "bg-pen-green-soft text-pen-green",
+      num: "text-pen-green",
     },
     {
       icon: PresentationIcon,
       title: t("how_step_3_title"),
       text: t("how_step_3_text"),
+      chip: "bg-pen-red-soft text-pen-red",
+      num: "text-pen-red",
     },
   ];
 
@@ -41,52 +49,110 @@ export default function HomePage() {
       <SiteHeader showLoginButton />
 
       <main className="flex-1">
-        {/* Hero: squared exercise-book paper with one parabola stroke — the
-            same voice as the live-quiz screens. */}
+        {/* Hero: an open exercise-book page. Left — the pitch in textbook
+            serif; right — three pen strokes plot themselves like a teacher
+            sketching at the board. */}
         <section className="grid-paper relative overflow-hidden border-b border-border/60">
-          <svg
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 h-full w-full"
-            viewBox="0 0 1200 480"
-            preserveAspectRatio="xMidYMax slice"
-            fill="none"
-          >
-            <path
-              className="hero-parabola-path"
-              d="M100 50Q600 770 1100 50"
-              pathLength="1"
-              stroke="var(--primary)"
-              strokeOpacity="0.3"
-              strokeWidth="2.5"
-            />
-            <circle
-              className="hero-parabola-dot"
-              cx="600"
-              cy="410"
-              r="5"
-              fill="var(--sun-bright)"
-            />
-          </svg>
-          <div className="relative mx-auto flex max-w-4xl flex-col items-center px-6 py-16 text-center sm:py-24">
-            <h1 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight sm:text-5xl">
-              {t("hero_title")}
-            </h1>
-            <p className="mt-5 max-w-2xl text-base text-muted-foreground sm:text-lg sm:leading-8">
-              {t("hero_subtitle")}
-            </p>
-            <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <Link
-                href="/grades"
-                className={buttonVariants({ size: "lg" })}
+          <div className="mx-auto grid max-w-6xl items-center gap-10 px-6 py-14 sm:py-20 lg:grid-cols-[1.05fr_0.95fr] lg:gap-8">
+            <div className="flex flex-col items-start text-left">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-pen-blue">
+                {t("hero_eyebrow")}
+              </p>
+              <h1 className="mt-4 max-w-2xl text-balance font-heading text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl">
+                {t("hero_title")}
+              </h1>
+              <p className="mt-5 max-w-xl text-base text-muted-foreground sm:text-lg sm:leading-8">
+                {t("hero_subtitle")}
+              </p>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Link
+                  href="/grades"
+                  className={buttonVariants({ size: "lg" })}
+                >
+                  {t("hero_cta_primary")}
+                </Link>
+                <Link
+                  href={user ? "/dashboard" : "/signup"}
+                  className={buttonVariants({ size: "lg", variant: "outline" })}
+                >
+                  {user ? t("nav_profile") : t("hero_cta_secondary")}
+                </Link>
+              </div>
+            </div>
+            <div className="relative mx-auto w-full max-w-[520px]">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 520 430"
+                fill="none"
+                className="h-auto w-full"
               >
-                {t("hero_cta_primary")}
-              </Link>
-              <Link
-                href={user ? "/dashboard" : "/signup"}
-                className={buttonVariants({ size: "lg", variant: "outline" })}
-              >
-                {user ? t("nav_profile") : t("hero_cta_secondary")}
-              </Link>
+                <path
+                  className="hero-stroke"
+                  style={{ animationDelay: "0.2s" }}
+                  d="M40 40Q260 640 480 40"
+                  pathLength={1}
+                  stroke="var(--pen-red)"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                />
+                <path
+                  className="hero-stroke"
+                  style={{ animationDelay: "0.7s" }}
+                  d="M30 305L490 92"
+                  pathLength={1}
+                  stroke="var(--pen-blue)"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                />
+                <circle
+                  className="hero-stroke"
+                  style={{ animationDelay: "1.15s" }}
+                  cx="382"
+                  cy="298"
+                  r="72"
+                  pathLength={1}
+                  stroke="var(--pen-green)"
+                  strokeWidth="3"
+                />
+                <circle
+                  className="hero-fade"
+                  style={{ animationDelay: "1.7s" }}
+                  cx="260"
+                  cy="340"
+                  r="5"
+                  fill="var(--sun-bright)"
+                />
+                <text
+                  className="font-math hero-fade"
+                  style={{ animationDelay: "1.7s" }}
+                  x="206"
+                  y="388"
+                  fill="var(--pen-red)"
+                  fontSize="21"
+                >
+                  y = x²
+                </text>
+                <text
+                  className="font-math hero-fade"
+                  style={{ animationDelay: "1.85s" }}
+                  x="336"
+                  y="72"
+                  fill="var(--pen-blue)"
+                  fontSize="21"
+                >
+                  y = kx + b
+                </text>
+                <text
+                  className="font-math hero-fade"
+                  style={{ animationDelay: "2s" }}
+                  x="316"
+                  y="406"
+                  fill="var(--pen-green)"
+                  fontSize="21"
+                >
+                  x² + y² = r²
+                </text>
+              </svg>
             </div>
           </div>
         </section>
@@ -94,19 +160,27 @@ export default function HomePage() {
         {/* How it works */}
         <section className="border-b border-border/60 bg-muted/30">
           <div className="mx-auto max-w-5xl px-6 py-16 sm:py-20">
-            <h2 className="text-center text-2xl font-semibold tracking-tight sm:text-3xl">
+            <h2 className="text-center font-heading text-2xl font-bold tracking-tight sm:text-3xl">
               {t("how_it_works_title")}
             </h2>
+            <div
+              aria-hidden
+              className="mx-auto mt-3 h-[3px] w-10 rounded-full bg-pen-blue"
+            />
             <div className="mt-10 grid gap-5 sm:grid-cols-3">
               {steps.map((step, index) => {
                 const Icon = step.icon;
                 return (
                   <Card key={step.title} className="h-full">
                     <CardHeader>
-                      <div className="mb-2 inline-flex size-10 items-center justify-center rounded-lg bg-accent text-accent-foreground">
+                      <div
+                        className={`mb-2 inline-flex size-10 items-center justify-center rounded-lg ${step.chip}`}
+                      >
                         <Icon className="size-5" />
                       </div>
-                      <div className="text-xs font-semibold tracking-wide text-muted-foreground">
+                      <div
+                        className={`text-xs font-semibold tracking-wide ${step.num}`}
+                      >
                         {String(index + 1).padStart(2, "0")}
                       </div>
                       <CardTitle className="text-lg">{step.title}</CardTitle>
@@ -124,9 +198,13 @@ export default function HomePage() {
         {/* Available grades */}
         <section className="border-b border-border/60">
           <div className="mx-auto max-w-5xl px-6 py-16 sm:py-20">
-            <h2 className="text-center text-2xl font-semibold tracking-tight sm:text-3xl">
+            <h2 className="text-center font-heading text-2xl font-bold tracking-tight sm:text-3xl">
               {t("grades_section_title")}
             </h2>
+            <div
+              aria-hidden
+              className="mx-auto mt-3 h-[3px] w-10 rounded-full bg-pen-blue"
+            />
             <div className="mt-8 flex flex-wrap justify-center gap-2">
               {GRADES.map((grade) => (
                 <Link

@@ -9,7 +9,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-heading: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -42,6 +42,12 @@
   --color-sun: var(--sun);
   --color-sun-soft: var(--sun-soft);
   --color-sun-bright: var(--sun-bright);
+  --color-pen-blue: var(--pen-blue);
+  --color-pen-blue-soft: var(--pen-blue-soft);
+  --color-pen-red: var(--pen-red);
+  --color-pen-red-soft: var(--pen-red-soft);
+  --color-pen-green: var(--pen-green);
+  --color-pen-green-soft: var(--pen-green-soft);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -52,26 +58,35 @@
 }
 
 :root {
-  --background: #f6f8fc;
-  --foreground: #182035;
+  --background: #fbfcfe;
+  --foreground: #1d2440;
   --card: #ffffff;
-  --card-foreground: #182035;
+  --card-foreground: #1d2440;
   --popover: #ffffff;
-  --popover-foreground: #182035;
-  --primary: #2245c3;
+  --popover-foreground: #1d2440;
+  --primary: #232b54;
   --primary-foreground: #ffffff;
-  --secondary: #eef2f9;
-  --secondary-foreground: #182035;
-  --muted: #eef2f9;
-  --muted-foreground: #5d6b85;
-  --accent: #dde7fb;
-  --accent-foreground: #1e3fae;
+  --secondary: #eef1f8;
+  --secondary-foreground: #1d2440;
+  --muted: #eef1f8;
+  --muted-foreground: #5b6784;
+  --accent: #e8edfb;
+  --accent-foreground: #2440b3;
   --destructive: #dc2626;
-  --border: #d9e0ec;
-  --input: #d9e0ec;
-  --ring: #2245c3;
-  /* The one warm accent — the flag's gold sun. Reserved for "free sample"
-     and live-quiz markers; everything else stays in the blue family.
+  --border: #dde3ee;
+  --input: #dde3ee;
+  --ring: #2b50e0;
+  /* The teacher's pens. Each color has a job — never decoration:
+     blue pen = writing/theory/links, red pen = checking/tests,
+     green pen = graphs/geometry/success. The -soft shades are chip
+     backgrounds; the base shades are dark enough for text on white. */
+  --pen-blue: #2b50e0;
+  --pen-blue-soft: #e8edfb;
+  --pen-red: #c73325;
+  --pen-red-soft: #fbe9e6;
+  --pen-green: #17864b;
+  --pen-green-soft: #e2f3e9;
+  /* The highlighter (flag-gold) — reserved for "free sample" markers.
      --sun is the only shade dark enough for text. */
   --sun: #8a5d08;
   --sun-soft: #fbf0da;
@@ -159,31 +174,31 @@
 .quiz-grid-paper {
   background-color: var(--background);
   background-image:
-    linear-gradient(to right, rgba(34, 69, 195, 0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(34, 69, 195, 0.06) 1px, transparent 1px);
+    linear-gradient(to right, rgba(43, 80, 224, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(43, 80, 224, 0.07) 1px, transparent 1px);
   background-size: 26px 26px;
 }
 
-/* Landing hero: one parabola stroke draws itself on load, then the vertex
-   dot lights up. */
-@keyframes hero-parabola-draw {
+/* Landing hero: the pen strokes (parabola, line, circle) draw themselves
+   in sequence, then the labels fade in. Stagger via inline animation-delay. */
+@keyframes hero-stroke-draw {
   to {
     stroke-dashoffset: 0;
   }
 }
-.hero-parabola-path {
+.hero-stroke {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
-  animation: hero-parabola-draw 1.6s cubic-bezier(0.4, 0, 0.2, 1) 0.2s forwards;
+  animation: hero-stroke-draw 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
-@keyframes hero-dot-in {
+@keyframes hero-fade-in {
   to {
     opacity: 1;
   }
 }
-.hero-parabola-dot {
+.hero-fade {
   opacity: 0;
-  animation: hero-dot-in 0.4s ease-out 1.5s forwards;
+  animation: hero-fade-in 0.5s ease-out forwards;
 }
 
 @keyframes quiz-parabola-draw {
@@ -244,11 +259,11 @@
   .quiz-pop {
     animation: none;
   }
-  .hero-parabola-path {
+  .hero-stroke {
     animation: none;
     stroke-dashoffset: 0;
   }
-  .hero-parabola-dot {
+  .hero-fade {
     animation: none;
     opacity: 1;
   }
