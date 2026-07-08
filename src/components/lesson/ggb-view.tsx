@@ -4,6 +4,10 @@
 // loaded once per page; the applet initializes lazily when scrolled into
 // view, rebuilds when the scene changes, and applies scene steps (with
 // smooth value animation when the teacher advances one step forward).
+//
+// Two content sources drive the same applet: registry scenes (sceneId +
+// params → scenes.ts) and uploaded lesson-file programs (`program` — built
+// via sceneFromFileProgram, executed against the lesson-runtime toolkit).
 
 import {
   forwardRef,
@@ -17,7 +21,14 @@ import {
 import { DraftingCompassIcon, RotateCcwIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lang } from "@/lib/i18n/strings";
-import { createApplet, loadGgbEngine, nextAppletId, type GgbApi } from "@/lib/lesson/ggb";
+import {
+  clearConstruction,
+  createApplet,
+  loadGgbEngine,
+  nextAppletId,
+  type GgbApi,
+} from "@/lib/lesson/ggb";
+import { loadLessonRuntime } from "@/lib/lesson/file-loader";
 import { buildScene, type BuiltScene, type SceneOp } from "@/lib/lesson/scenes";
 import { pickText, type Params } from "@/lib/lesson/types";
 import { PenOverlay } from "./pen-overlay";
@@ -27,8 +38,12 @@ export type GgbViewHandle = {
 };
 
 type GgbViewProps = {
-  sceneId: string;
-  params: Params;
+  // Registry scene…
+  sceneId?: string;
+  params?: Params;
+  // …or an uploaded lesson-file program (with a stable identity key).
+  program?: BuiltScene;
+  programKey?: string;
   step: number;
   // True when the teacher moved exactly one step forward — value changes
   // then play as smooth animations instead of jumping.
@@ -72,13 +87,15 @@ function removeFocusScrollGuard() {
 }
 
 export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
-  { sceneId, params, step, animate, lang, className },
+  { sceneId, params, program, programKey, step, animate, lang, className },
   ref,
 ) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<GgbApi | null>(null);
+  const toolkitRef = useRef<unknown>(null);
   const animCancelsRef = useRef<(() => void)[]>([]);
   const appliedSceneKeyRef = useRef<string>("");
+  const prevStepRef = useRef(0);
   const restoreBase64Ref = useRef<string | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [visible, setVisible] = useState(false);
@@ -86,13 +103,13 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
   const [sliderValue, setSliderValue] = useState<number | null>(null);
   const [toolbarOn, setToolbarOn] = useState(false);
 
-  const paramsKey = JSON.stringify(params);
+  const paramsKey = JSON.stringify(params ?? {});
   const scene: BuiltScene | null = useMemo(
-    () => buildScene(sceneId, params),
+    () => program ?? (sceneId ? buildScene(sceneId, params ?? {}) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sceneId, paramsKey],
+    [sceneId, paramsKey, program],
   );
-  const sceneKey = `${sceneId}:${paramsKey}`;
+  const sceneKey = program ? `program:${programKey}` : `${sceneId}:${paramsKey}`;
 
   const cancelAnimations = useCallback(() => {
     for (const cancel of animCancelsRef.current) cancel();
@@ -140,6 +157,8 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
         try {
           if ("cmd" in op) {
             api.evalCommand(op.cmd);
+          } else if ("fn" in op) {
+            if (toolkitRef.current) op.fn(toolkitRef.current);
           } else if ("show" in op) {
             for (const name of op.show) api.setVisible(name, true);
           } else if ("hide" in op) {
@@ -202,10 +221,12 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
         }
       }
     }
-    try {
-      api.evalCommand(scene.viewDirection);
-    } catch {
-      // best effort
+    if (scene.viewDirection) {
+      try {
+        api.evalCommand(scene.viewDirection);
+      } catch {
+        // best effort
+      }
     }
   }, [scene]);
 
@@ -217,6 +238,18 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
     appliedSceneKeyRef.current = sceneKey;
   }, [scene, sceneKey, applyOps, applyViewFit]);
 
+  // Replay-style scenes (uploaded files): steps only move the model forward,
+  // so reaching step k from scratch means running steps 0..k in order.
+  const applyStepsUpTo = useCallback(
+    (target: number) => {
+      if (!scene) return;
+      for (let k = 0; k <= Math.min(target, scene.steps.length - 1); k++) {
+        applyOps(scene.steps[k]?.ops ?? [], false);
+      }
+    },
+    [scene, applyOps],
+  );
+
   const applyStep = useCallback(
     (withAnimation: boolean) => {
       if (!scene) return;
@@ -227,6 +260,24 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
     },
     [scene, step, cancelAnimations, applyOps],
   );
+
+  // Full rebuild to the current step (used by replay scenes going backward,
+  // and by scene switches on a live applet).
+  const rebuildScene = useCallback(() => {
+    const api = apiRef.current;
+    if (!api || !scene) return;
+    cancelAnimations();
+    clearConstruction(api);
+    try {
+      api.setPerspective(scene.perspective ?? "T");
+    } catch {
+      // best effort
+    }
+    applySceneInit();
+    if (scene.replayBack) applyStepsUpTo(step);
+    else applyStep(false);
+    prevStepRef.current = step;
+  }, [scene, step, cancelAnimations, applySceneInit, applyStepsUpTo, applyStep]);
 
   // The web3d applet focuses its canvas when it finishes loading, despite
   // preventFocus — and the browser scroll-jumps to the focused element. With
@@ -272,7 +323,10 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
     const restoreBase64 = restoreBase64Ref.current;
     restoreBase64Ref.current = null;
 
-    loadGgbEngine()
+    const prerequisites: Promise<unknown>[] = [loadGgbEngine()];
+    if (scene.needsRuntime) prerequisites.push(loadLessonRuntime());
+
+    Promise.all(prerequisites)
       .then(() => {
         if (cancelled) return;
         createApplet(
@@ -295,13 +349,16 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
               return;
             }
             apiRef.current = api;
+            toolkitRef.current = scene.needsRuntime
+              ? window.LessonRuntime?.createToolkit(api) ?? null
+              : null;
             // The "3d" app still mounts an algebra sidebar; hide it so the
             // applet is pure graphics (same trick as the legacy template).
             // Skipped on base64 restore — setPerspective would reset the
             // camera we're trying to preserve.
             if (!restoreBase64) {
               try {
-                api.setPerspective("T");
+                api.setPerspective(scene.perspective ?? "T");
                 api.setVisible("algebra", false);
               } catch {
                 // best effort
@@ -326,9 +383,12 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
             if (restoreBase64) {
               // The snapshot already contains the scene at the current step.
               appliedSceneKeyRef.current = sceneKey;
+              prevStepRef.current = step;
             } else {
               applySceneInit();
-              applyStep(false);
+              if (scene.replayBack) applyStepsUpTo(step);
+              else applyStep(false);
+              prevStepRef.current = step;
             }
             try {
               api.setSize(wrapper.clientWidth, wrapper.clientHeight);
@@ -348,6 +408,7 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
       cancelAnimations();
       const api = apiRef.current;
       apiRef.current = null;
+      toolkitRef.current = null;
       if (api) {
         try {
           api.remove();
@@ -365,16 +426,8 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
   useEffect(() => {
     if (status !== "ready") return;
     if (appliedSceneKeyRef.current === sceneKey) return;
-    const api = apiRef.current;
-    if (!api || !scene) return;
-    cancelAnimations();
-    try {
-      (api as unknown as { newConstruction?: () => void }).newConstruction?.();
-    } catch {
-      // keep going — init commands overwrite objects by name anyway
-    }
-    applySceneInit();
-    applyStep(false);
+    if (!apiRef.current || !scene) return;
+    rebuildScene();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, sceneKey]);
 
@@ -382,7 +435,21 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
   useEffect(() => {
     if (status !== "ready") return;
     if (appliedSceneKeyRef.current !== sceneKey) return;
-    applyStep(animate);
+    const prev = prevStepRef.current;
+    prevStepRef.current = step;
+    if (scene?.replayBack) {
+      if (step > prev) {
+        // Forward: run only the newly reached steps, in order.
+        cancelAnimations();
+        for (let k = prev + 1; k <= step; k++) {
+          applyOps(scene.steps[k]?.ops ?? [], false);
+        }
+      } else if (step < prev) {
+        rebuildScene();
+      }
+    } else {
+      applyStep(animate);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, step]);
 

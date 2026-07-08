@@ -22,7 +22,8 @@ import { Input } from "@/components/ui/input";
 import { useT } from "@/lib/i18n/context";
 import type { Lang } from "@/lib/i18n/strings";
 import { cn } from "@/lib/utils";
-import { pickText, type ProblemPack } from "@/lib/lesson/types";
+import { pickText } from "@/lib/lesson/types";
+import type { BankProblem } from "@/lib/lesson/player-adapter";
 import {
   createLessonSetAction,
   deleteLessonSetAction,
@@ -55,13 +56,13 @@ type SetsState =
   | { status: "unauthorized" }
   | { status: "ready"; sets: LessonSetSummary[] };
 
-function problemTags(problem: ProblemPack, lang: Lang): string[] {
+function problemTags(problem: BankProblem, lang: Lang): string[] {
   return (problem.tags ?? []).map((tag) => pickText(tag, lang));
 }
 
-function searchableText(problem: ProblemPack): string {
+function searchableText(problem: BankProblem): string {
   const parts: string[] = [problem.number];
-  const pushLocalized = (value: ProblemPack["title"]) => {
+  const pushLocalized = (value: BankProblem["title"]) => {
     if (typeof value === "string") parts.push(value);
     else {
       parts.push(value.kz);
@@ -85,7 +86,7 @@ export function ProblemPicker({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  problems: ProblemPack[];
+  problems: BankProblem[];
   // null = the lesson is on the "all problems" default (nothing explicitly
   // picked yet) — the drawer then opens with an empty selection.
   appliedIds: string[] | null;
@@ -145,7 +146,7 @@ export function ProblemPicker({
     () =>
       picked
         .map((id) => problems.find((problem) => problem.id === id))
-        .filter((problem): problem is ProblemPack => Boolean(problem)),
+        .filter((problem): problem is BankProblem => Boolean(problem)),
     [picked, problems],
   );
 
@@ -505,7 +506,7 @@ function BankCard({
   order,
   onToggle,
 }: {
-  problem: ProblemPack;
+  problem: BankProblem;
   lang: Lang;
   difficultyLabel: string;
   picked: boolean;

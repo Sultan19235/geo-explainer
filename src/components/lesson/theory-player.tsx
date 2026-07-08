@@ -1,16 +1,23 @@
 "use client";
 
-// Theory player with two views over the same pack: present mode (one section
-// at a time next to the model — for the projector) and scroll mode (the whole
-// topic as a readable document).
+// Theory player with two views over the same content: present mode (one
+// section at a time next to the model — for the projector) and scroll mode
+// (all sections stacked as full-height slides). Renders both native packs
+// (blocks) and uploaded lesson files (bilingual HTML) via PlayerTheory.
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lang } from "@/lib/i18n/strings";
-import { pickText, type TheoryPack } from "@/lib/lesson/types";
+import { pickText } from "@/lib/lesson/types";
+import type {
+  PlayerGgbSource,
+  PlayerTheory,
+  PlayerTheorySection,
+} from "@/lib/lesson/player-adapter";
 import { GgbView } from "./ggb-view";
 import { LessonBlocks } from "./blocks";
+import { LessonHtml } from "./lesson-html";
 import { SplitRow } from "./split-row";
 
 const WORDS = {
@@ -23,19 +30,91 @@ const WORDS = {
 
 type Mode = "present" | "scroll";
 
+function TheoryGgb({
+  ggb,
+  sceneStep,
+  animate,
+  lang,
+  className,
+}: {
+  ggb: PlayerGgbSource;
+  sceneStep: number;
+  animate: boolean;
+  lang: Lang;
+  className?: string;
+}) {
+  return ggb.kind === "scene" ? (
+    <GgbView
+      sceneId={ggb.sceneId}
+      params={ggb.params}
+      step={sceneStep}
+      animate={animate}
+      lang={lang}
+      className={className}
+    />
+  ) : (
+    <GgbView
+      program={ggb.program}
+      programKey={ggb.programKey}
+      step={sceneStep}
+      animate={animate}
+      lang={lang}
+      className={className}
+    />
+  );
+}
+
+function SectionText({
+  section,
+  index,
+  lang,
+  params,
+}: {
+  section: PlayerTheorySection;
+  index: number;
+  lang: Lang;
+  params?: PlayerTheory["params"];
+}) {
+  return (
+    <div className="flex min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-7">
+        <div className="flex items-center gap-2.5 border-b-2 border-[#16a34a] pb-2">
+          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[#16a34a] text-[12px] font-bold text-white">
+            {index + 1}
+          </span>
+          <h3 className="text-[length:calc(15px*var(--lesson-scale,1))] font-bold text-[#15803d]">
+            {pickText(section.title, lang)}
+          </h3>
+        </div>
+        <div className="mt-3.5">
+          {section.blocks ? (
+            <LessonBlocks blocks={section.blocks} lang={lang} params={params} />
+          ) : section.html ? (
+            <LessonHtml
+              html={section.html}
+              lang={lang}
+              className="text-[length:calc(15px*var(--lesson-scale,1))]"
+            />
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function TheoryPlayer({
-  pack,
+  theory,
   lang,
 }: {
-  pack: TheoryPack;
+  theory: PlayerTheory;
   lang: Lang;
 }) {
   const [mode, setMode] = useState<Mode>("present");
   const [state, setState] = useState({ index: 0, animate: false });
   const rootRef = useRef<HTMLDivElement>(null);
   const modeMountedRef = useRef(false);
-  const total = pack.sections.length;
-  const section = pack.sections[state.index];
+  const total = theory.sections.length;
+  const section = theory.sections[state.index];
 
   // Switching present ↔ scroll swaps a short layout for a very tall one and
   // the browser keeps the old scroll offset — snap back to the section top.
@@ -81,7 +160,7 @@ export function TheoryPlayer({
           {WORDS.badge[lang] ?? WORDS.badge.kz}
         </span>
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-[#1a1a2e]">
-          {pickText(pack.title, lang)}
+          {pickText(theory.title, lang)}
         </h2>
         <div className="inline-flex items-center gap-0.5 rounded-md border border-[#d8dde5] bg-[#f8f9fb] p-0.5">
           {(["present", "scroll"] as const).map((value) => (
@@ -107,11 +186,10 @@ export function TheoryPlayer({
         <SplitRow
           className="h-[520px] md:h-[560px]"
           left={
-            section?.scene ? (
-              <GgbView
-                sceneId={section.scene.id}
-                params={{ ...pack.params, ...section.scene.params }}
-                step={section.sceneStep ?? 0}
+            section?.ggb ? (
+              <TheoryGgb
+                ggb={section.ggb}
+                sceneStep={section.sceneStep}
                 animate={state.animate}
                 lang={lang}
                 className="border-b-[1.5px] border-[#d8dde5] md:border-b-0"
@@ -121,102 +199,79 @@ export function TheoryPlayer({
             )
           }
           right={
-          <div className="flex min-h-0 flex-col">
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-7">
-              <div className="flex items-center gap-2.5 border-b-2 border-[#16a34a] pb-2">
-                <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[#16a34a] text-[12px] font-bold text-white">
-                  {state.index + 1}
+            <div className="flex min-h-0 flex-col">
+              {section && (
+                <SectionText
+                  section={section}
+                  index={state.index}
+                  lang={lang}
+                  params={theory.params}
+                />
+              )}
+              <div className="flex items-center justify-end gap-4 border-t-[1.5px] border-[#d8dde5] px-5 py-2.5">
+                <button
+                  type="button"
+                  onClick={goPrev}
+                  disabled={state.index <= 0}
+                  className="flex h-9 items-center gap-1.5 rounded-md bg-[#eef1f5] px-4 text-[13px] font-semibold text-[#6b7280] transition-colors enabled:hover:bg-[#e2e6ec] enabled:hover:text-[#1a1a2e] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ChevronLeftIcon className="size-4" />
+                  {WORDS.prev[lang] ?? WORDS.prev.kz}
+                </button>
+                <span className="text-[13px] font-semibold text-[#6b7280]">
+                  {state.index + 1} / {total}
                 </span>
-                <h3 className="text-[length:calc(15px*var(--lesson-scale,1))] font-bold text-[#15803d]">
-                  {section ? pickText(section.title, lang) : ""}
-                </h3>
-              </div>
-              <div className="mt-3.5">
-                {section && (
-                  <LessonBlocks
-                    blocks={section.blocks}
-                    lang={lang}
-                    params={pack.params}
-                  />
-                )}
+                <button
+                  type="button"
+                  onClick={goNext}
+                  disabled={state.index >= total - 1}
+                  className="flex h-9 items-center gap-1.5 rounded-md bg-[#2563eb] px-4 text-[13px] font-semibold text-white transition-colors enabled:hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {WORDS.next[lang] ?? WORDS.next.kz}
+                  <ChevronRightIcon className="size-4" />
+                </button>
               </div>
             </div>
-
-            <div className="flex items-center justify-end gap-4 border-t-[1.5px] border-[#d8dde5] px-5 py-2.5">
-              <button
-                type="button"
-                onClick={goPrev}
-                disabled={state.index <= 0}
-                className="flex h-9 items-center gap-1.5 rounded-md bg-[#eef1f5] px-4 text-[13px] font-semibold text-[#6b7280] transition-colors enabled:hover:bg-[#e2e6ec] enabled:hover:text-[#1a1a2e] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <ChevronLeftIcon className="size-4" />
-                {WORDS.prev[lang] ?? WORDS.prev.kz}
-              </button>
-              <span className="text-[13px] font-semibold text-[#6b7280]">
-                {state.index + 1} / {total}
-              </span>
-              <button
-                type="button"
-                onClick={goNext}
-                disabled={state.index >= total - 1}
-                className="flex h-9 items-center gap-1.5 rounded-md bg-[#2563eb] px-4 text-[13px] font-semibold text-white transition-colors enabled:hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:bg-slate-300"
-              >
-                {WORDS.next[lang] ?? WORDS.next.kz}
-                <ChevronRightIcon className="size-4" />
-              </button>
-            </div>
-          </div>
           }
         />
       ) : (
         // Scroll mode = the same slides stacked: each section keeps the
         // present-mode height and splitter so it reads from the back rows.
         <div className="flex flex-col divide-y-[1.5px] divide-[#d8dde5]">
-          {pack.sections.map((item, itemIndex) => {
-            const text = (
-              <div className="flex min-h-0 flex-col">
-                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-7">
-                  <div className="flex items-center gap-2.5 border-b-2 border-[#16a34a] pb-2">
-                    <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[#16a34a] text-[12px] font-bold text-white">
-                      {itemIndex + 1}
-                    </span>
-                    <h3 className="text-[length:calc(15px*var(--lesson-scale,1))] font-bold text-[#15803d]">
-                      {pickText(item.title, lang)}
-                    </h3>
-                  </div>
-                  <div className="mt-3.5">
-                    <LessonBlocks
-                      blocks={item.blocks}
-                      lang={lang}
-                      params={pack.params}
-                    />
-                  </div>
-                </div>
-              </div>
-            );
-
-            return item.scene ? (
+          {theory.sections.map((item, itemIndex) =>
+            item.ggb ? (
               <SplitRow
                 key={item.id}
                 className="h-[520px] md:h-[560px]"
                 left={
-                  <GgbView
-                    sceneId={item.scene.id}
-                    params={{ ...pack.params, ...item.scene.params }}
-                    step={item.sceneStep ?? 0}
+                  <TheoryGgb
+                    ggb={item.ggb}
+                    sceneStep={item.sceneStep}
                     animate={false}
                     lang={lang}
                     className="border-b-[1.5px] border-[#d8dde5] md:border-b-0"
                   />
                 }
-                right={text}
+                right={
+                  <SectionText
+                    section={item}
+                    index={itemIndex}
+                    lang={lang}
+                    params={theory.params}
+                  />
+                }
               />
             ) : (
               <div key={item.id} className="py-2">
-                {text}
+                <SectionText
+                  section={item}
+                  index={itemIndex}
+                  lang={lang}
+                  params={theory.params}
+                />
               </div>
-            );
-          })}
+            ),
+          )}
         </div>
       )}
     </div>

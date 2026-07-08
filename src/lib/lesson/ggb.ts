@@ -33,8 +33,27 @@ export type GgbApi = {
   showToolBar(show: boolean): void;
   // Full applet state (construction + camera) as a .ggb base64 string.
   getBase64(): string;
+  exists(name: string): boolean;
+  deleteObject(name: string): void;
+  getAllObjectNames(): string[];
   remove(): void;
 };
+
+// Wipes the construction object-by-object. Never use newConstruction() for
+// this: on the classic app it also resets the perspective back to 2D.
+export function clearConstruction(api: GgbApi): void {
+  try {
+    for (const name of api.getAllObjectNames()) {
+      try {
+        api.deleteObject(name);
+      } catch {
+        // already gone
+      }
+    }
+  } catch {
+    // best effort
+  }
+}
 
 // Window.GGBApplet is declared globally in components/quiz/geogebra-figure.tsx.
 

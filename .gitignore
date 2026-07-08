@@ -49,3 +49,8 @@ _reference/
 
 # Self-hosted GeoGebra engine (scripts/fetch-geogebra.sh)
 /public/geogebra/
+
+# Teacher's local authoring workspace — only the lesson-file toolkit
+# (previewer, format spec, reference examples) is versioned.
+/html-web-apps/*
+!/html-web-apps/lesson-files/

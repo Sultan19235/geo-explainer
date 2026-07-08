@@ -203,6 +203,7 @@ export const STRINGS = {
     admin_nav_topics: "Тақырыптар",
     admin_nav_problems: "Есептер",
     admin_nav_quizzes: "Тесттер",
+    admin_nav_lessons: "Сабақтар",
     admin_nav_teachers: "Мұғалімдер",
     admin_back_home: "← Басты бет",
 
@@ -539,6 +540,7 @@ export const STRINGS = {
     admin_nav_topics: "Темы",
     admin_nav_problems: "Задачи",
     admin_nav_quizzes: "Тесты",
+    admin_nav_lessons: "Уроки",
     admin_nav_teachers: "Учителя",
     admin_back_home: "← Главная",
 
