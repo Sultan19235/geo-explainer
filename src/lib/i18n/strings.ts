@@ -9,6 +9,7 @@ export const STRINGS = {
     login_button: "Кіру",
     logout_button: "Шығу",
     nav_profile: "Профиль",
+    nav_home: "Басты бет",
     signup_button: "Тіркелу",
     email_label: "Электрондық пошта",
     password_label: "Құпиясөз",
@@ -36,6 +37,9 @@ export const STRINGS = {
     password_strength_4: "Күшті",
     first_name_label: "Аты",
     last_name_label: "Тегі",
+    gender_label: "Жынысы",
+    gender_male: "Ер",
+    gender_female: "Әйел",
     password_show: "Құпиясөзді көрсету",
     password_hide: "Құпиясөзді жасыру",
     password_requirements_title: "Құпиясөз құрамында болуы керек:",
@@ -72,10 +76,9 @@ export const STRINGS = {
     reset_pending: "Сақталуда...",
 
     // Landing
-    hero_title:
-      "Математика мұғалімдеріне арналған интерактивті геометрия сабақтары",
+    hero_title: "Математика сабағына қажеттің бәрі — бір жерде",
     hero_subtitle:
-      "Динамикалық моделдер, интерактивті есептер және сабаққа дайын материалдар — бір жерде.",
+      "Алгебра мен геометрия бойынша теория, есептер және интерактивті тесттер. 7–11 сынып мұғалімдеріне арналған.",
     hero_cta_primary: "Сабақтарды қарау",
     hero_cta_secondary: "Тіркелу",
     how_it_works_title: "Қалай жұмыс істейді",
@@ -87,8 +90,8 @@ export const STRINGS = {
       "Есептер банкынан бүгінгі сабаққа қажет есептерді таңдап алыңыз.",
     how_step_3_title: "Сабақты өткізіңіз",
     how_step_3_text:
-      "Интерактивті моделдермен сабақты түсіндіріп, есептерді бірге шешіңіз.",
-    grades_section_title: "Қол жетімді сыныптар",
+      "Интерактивті модельдермен сабақты түсіндіріп, есептерді бірге шешіңіз.",
+    grades_section_title: "Қолжетімді сыныптар",
     grade_badge: (n: number) => `${n}-сынып`,
     footer_copyright: "© 2026 Geo Explainer.",
     footer_contact: "Байланыс: hello@geo-explainer.kz",
@@ -104,6 +107,7 @@ export const STRINGS = {
     profile_name: "Аты-жөні",
     profile_email: "Электрондық пошта",
     profile_phone: "Телефон",
+    profile_gender: "Жынысы",
     profile_member_since: "Тіркелген күні",
     profile_not_set: "—",
     profile_purchased_grades: "Сатып алынған сыныптар",
@@ -138,10 +142,12 @@ export const STRINGS = {
 
     // Grades catalog
     grades_title: "Сабақтар каталогы",
-    grades_subtitle: "Сыныпты таңдаңыз және жарияланған тақырыптарды қараңыз.",
+    grades_subtitle: "Сыныпты таңдап, тақырыптар мен тесттерді ашыңыз.",
     grades_load_error: "Тақырыптарды жүктеу қатесі",
     grade_topics_count: (n: number) => `${n} жарияланған тақырып`,
     grade_topics_zero: "Тақырып жоқ",
+    grade_topics_badge: (n: number) => `${n} тақырып`,
+    grade_quizzes_badge: (n: number) => `${n} тест`,
 
     // Grade detail
     back_to_grades: "← Сыныптар",
@@ -346,6 +352,7 @@ export const STRINGS = {
     login_button: "Войти",
     logout_button: "Выйти",
     nav_profile: "Профиль",
+    nav_home: "Главная",
     signup_button: "Регистрация",
     email_label: "Электронная почта",
     password_label: "Пароль",
@@ -373,6 +380,9 @@ export const STRINGS = {
     password_strength_4: "Надёжный",
     first_name_label: "Имя",
     last_name_label: "Фамилия",
+    gender_label: "Пол",
+    gender_male: "Мужской",
+    gender_female: "Женский",
     password_show: "Показать пароль",
     password_hide: "Скрыть пароль",
     password_requirements_title: "Пароль должен содержать:",
@@ -409,10 +419,9 @@ export const STRINGS = {
     reset_pending: "Сохранение...",
 
     // Landing
-    hero_title:
-      "Интерактивные уроки геометрии для учителей математики",
+    hero_title: "Всё для урока математики — в одном месте",
     hero_subtitle:
-      "Динамические модели, интерактивные задачи и готовые материалы для урока — в одном месте.",
+      "Теория, задачи и интерактивные тесты по алгебре и геометрии. Для учителей 7–11 классов.",
     hero_cta_primary: "Смотреть уроки",
     hero_cta_secondary: "Регистрация",
     how_it_works_title: "Как это работает",
@@ -441,6 +450,7 @@ export const STRINGS = {
     profile_name: "Имя",
     profile_email: "Электронная почта",
     profile_phone: "Телефон",
+    profile_gender: "Пол",
     profile_member_since: "Дата регистрации",
     profile_not_set: "—",
     profile_purchased_grades: "Купленные классы",
@@ -474,10 +484,12 @@ export const STRINGS = {
 
     // Grades catalog
     grades_title: "Каталог уроков",
-    grades_subtitle: "Выберите класс и просмотрите опубликованные темы.",
+    grades_subtitle: "Выберите класс — внутри темы и тесты.",
     grades_load_error: "Ошибка загрузки тем",
     grade_topics_count: (n: number) => `${n} опубликованных тем`,
     grade_topics_zero: "Нет тем",
+    grade_topics_badge: (n: number) => `Тем: ${n}`,
+    grade_quizzes_badge: (n: number) => `Тестов: ${n}`,
 
     // Grade detail
     back_to_grades: "← Классы",

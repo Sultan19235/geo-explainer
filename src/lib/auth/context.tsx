@@ -8,11 +8,13 @@ import {
   useState,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { parseGender, type Gender } from "@/lib/auth/gender";
 
 export type AuthUser = {
   id: string;
   email: string | null;
   fullName: string | null;
+  gender: Gender | null;
 };
 
 type AuthContextValue = {
@@ -56,6 +58,7 @@ export function AuthProvider({
                 (sessionUser.user_metadata?.full_name as string | undefined) ??
                 (sessionUser.user_metadata?.name as string | undefined) ??
                 null,
+              gender: parseGender(sessionUser.user_metadata?.gender),
             }
           : null,
       );

@@ -39,6 +39,9 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-sun: var(--sun);
+  --color-sun-soft: var(--sun-soft);
+  --color-sun-bright: var(--sun-bright);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -49,24 +52,30 @@
 }
 
 :root {
-  --background: #f8f9fb;
-  --foreground: #1a1a2e;
+  --background: #f6f8fc;
+  --foreground: #182035;
   --card: #ffffff;
-  --card-foreground: #1a1a2e;
+  --card-foreground: #182035;
   --popover: #ffffff;
-  --popover-foreground: #1a1a2e;
-  --primary: #2563eb;
+  --popover-foreground: #182035;
+  --primary: #2245c3;
   --primary-foreground: #ffffff;
-  --secondary: #f1f3f7;
-  --secondary-foreground: #1a1a2e;
-  --muted: #f1f3f7;
-  --muted-foreground: #6b7280;
-  --accent: #dbeafe;
-  --accent-foreground: #1d4ed8;
+  --secondary: #eef2f9;
+  --secondary-foreground: #182035;
+  --muted: #eef2f9;
+  --muted-foreground: #5d6b85;
+  --accent: #dde7fb;
+  --accent-foreground: #1e3fae;
   --destructive: #dc2626;
-  --border: #d8dde5;
-  --input: #d8dde5;
-  --ring: #2563eb;
+  --border: #d9e0ec;
+  --input: #d9e0ec;
+  --ring: #2245c3;
+  /* The one warm accent — the flag's gold sun. Reserved for "free sample"
+     and live-quiz markers; everything else stays in the blue family.
+     --sun is the only shade dark enough for text. */
+  --sun: #8a5d08;
+  --sun-soft: #fbf0da;
+  --sun-bright: #f0a63c;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -144,13 +153,37 @@
   margin-left: 1px;
 }
 
-/* Squared exercise-book paper (тор көз) — the backdrop of every quiz screen. */
+/* Squared exercise-book paper (тор көз) — the backdrop of quiz screens and
+   the landing hero. */
+.grid-paper,
 .quiz-grid-paper {
-  background-color: #f6f8fc;
+  background-color: var(--background);
   background-image:
-    linear-gradient(to right, rgba(37, 99, 235, 0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(37, 99, 235, 0.06) 1px, transparent 1px);
+    linear-gradient(to right, rgba(34, 69, 195, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(34, 69, 195, 0.06) 1px, transparent 1px);
   background-size: 26px 26px;
+}
+
+/* Landing hero: one parabola stroke draws itself on load, then the vertex
+   dot lights up. */
+@keyframes hero-parabola-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.hero-parabola-path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: hero-parabola-draw 1.6s cubic-bezier(0.4, 0, 0.2, 1) 0.2s forwards;
+}
+@keyframes hero-dot-in {
+  to {
+    opacity: 1;
+  }
+}
+.hero-parabola-dot {
+  opacity: 0;
+  animation: hero-dot-in 0.4s ease-out 1.5s forwards;
 }
 
 @keyframes quiz-parabola-draw {
@@ -210,5 +243,13 @@
   .quiz-confetti-piece,
   .quiz-pop {
     animation: none;
+  }
+  .hero-parabola-path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .hero-parabola-dot {
+    animation: none;
+    opacity: 1;
   }
 }

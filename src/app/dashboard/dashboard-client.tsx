@@ -5,10 +5,13 @@ import { useRef, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import { Copy, Pencil, Shuffle, Trash2 } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
+import { TeacherAvatar } from "@/components/teacher-avatar";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import type { Gender } from "@/lib/auth/gender";
 import { useT } from "@/lib/i18n/context";
+import { createClient } from "@/lib/supabase/client";
 import type { SavedQuizSummary } from "@/lib/quiz/saved-quiz";
 import {
   deleteSavedQuizAction,
@@ -32,15 +35,9 @@ function LogoutButton() {
   );
 }
 
-function initials(name: string | null, email: string) {
-  const source = name?.trim() || email;
-  const parts = source.split(/[\s@.]+/).filter(Boolean);
-  const letters = parts.slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "");
-  return letters.join("") || "?";
-}
-
 export function DashboardClient({
   email,
+  gender,
   fullName,
   phone,
   createdAt,
@@ -52,6 +49,7 @@ export function DashboardClient({
   logoutAction,
 }: {
   email: string;
+  gender: Gender | null;
   fullName: string | null;
   phone: string | null;
   createdAt: string | null;
@@ -63,6 +61,26 @@ export function DashboardClient({
   logoutAction: () => Promise<void>;
 }) {
   const { t, lang } = useT();
+
+  // Gender is edited right here (chips below), so the avatar tracks local
+  // state; the header avatar follows via onAuthStateChange after updateUser.
+  const [genderValue, setGenderValue] = useState<Gender | null>(gender);
+  const [savingGender, setSavingGender] = useState(false);
+
+  const pickGender = async (next: Gender) => {
+    if (savingGender || genderValue === next) return;
+    setSavingGender(true);
+    const supabase = createClient();
+    const { error } = await supabase.auth.updateUser({
+      data: { gender: next },
+    });
+    setSavingGender(false);
+    if (error) {
+      window.alert(t("my_quizzes_error"));
+      return;
+    }
+    setGenderValue(next);
+  };
 
   const locale = lang === "ru" ? "ru-RU" : "kk-KZ";
   const formatDate = (value: string | null) => {
@@ -113,9 +131,7 @@ export function DashboardClient({
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-10">
         {/* Profile header */}
         <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-center">
-          <div className="flex size-20 shrink-0 items-center justify-center rounded-full bg-blue-600 text-2xl font-bold text-white">
-            {initials(fullName, email)}
-          </div>
+          <TeacherAvatar gender={genderValue} className="size-20" />
           <div className="min-w-0">
             <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">
               {fullName?.trim() || email}
@@ -151,6 +167,32 @@ export function DashboardClient({
                     </dd>
                   </div>
                 ))}
+                <div className="px-4 py-3">
+                  <dt className="text-xs text-muted-foreground">
+                    {t("profile_gender")}
+                  </dt>
+                  <dd className="mt-1.5 flex gap-2">
+                    {(["male", "female"] as const).map((option) => {
+                      const active = genderValue === option;
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          disabled={savingGender}
+                          onClick={() => pickGender(option)}
+                          className={
+                            "rounded-full border px-3 py-1 text-xs font-semibold transition-colors disabled:opacity-50 " +
+                            (active
+                              ? "border-primary bg-accent text-accent-foreground"
+                              : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground")
+                          }
+                        >
+                          {t(option === "male" ? "gender_male" : "gender_female")}
+                        </button>
+                      );
+                    })}
+                  </dd>
+                </div>
               </CardContent>
             </Card>
           </section>
@@ -189,9 +231,9 @@ export function DashboardClient({
                     href={`/grades/${gradeId}`}
                     className="group block focus:outline-none"
                   >
-                    <Card className="h-full border-border/80 bg-background transition-all duration-150 group-hover:-translate-y-0.5 group-hover:border-blue-500 group-hover:shadow-lg group-hover:shadow-blue-500/10 group-focus-visible:border-blue-500">
-                      <CardContent className="flex items-center gap-4 px-4 py-5">
-                        <span className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-2xl font-bold text-blue-600">
+                    <Card className="h-full transition-all duration-150 group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:shadow-primary/10 group-hover:ring-primary/40 group-focus-visible:ring-primary">
+                      <CardContent className="flex items-center gap-4">
+                        <span className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-accent text-2xl font-bold text-primary">
                           {gradeId}
                         </span>
                         <div className="min-w-0 flex-1">
@@ -204,7 +246,7 @@ export function DashboardClient({
                               : t("grade_topics_zero")}
                           </p>
                         </div>
-                        <span className="text-sm font-medium text-blue-600 opacity-0 transition-opacity group-hover:opacity-100">
+                        <span className="text-sm font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
                           {t("profile_open_grade")} →
                         </span>
                       </CardContent>

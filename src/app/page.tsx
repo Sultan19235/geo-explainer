@@ -12,8 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useT } from "@/lib/i18n/context";
-
-const GRADES = [7, 8, 9, 10, 11] as const;
+import { GRADES } from "@/lib/grades";
 
 export default function HomePage() {
   const { t } = useT();
@@ -42,9 +41,33 @@ export default function HomePage() {
       <SiteHeader showLoginButton />
 
       <main className="flex-1">
-        {/* Hero */}
-        <section className="border-b border-border/60">
-          <div className="mx-auto flex max-w-4xl flex-col items-center px-6 py-16 text-center sm:py-24">
+        {/* Hero: squared exercise-book paper with one parabola stroke — the
+            same voice as the live-quiz screens. */}
+        <section className="grid-paper relative overflow-hidden border-b border-border/60">
+          <svg
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 h-full w-full"
+            viewBox="0 0 1200 480"
+            preserveAspectRatio="xMidYMax slice"
+            fill="none"
+          >
+            <path
+              className="hero-parabola-path"
+              d="M100 50Q600 770 1100 50"
+              pathLength="1"
+              stroke="var(--primary)"
+              strokeOpacity="0.3"
+              strokeWidth="2.5"
+            />
+            <circle
+              className="hero-parabola-dot"
+              cx="600"
+              cy="410"
+              r="5"
+              fill="var(--sun-bright)"
+            />
+          </svg>
+          <div className="relative mx-auto flex max-w-4xl flex-col items-center px-6 py-16 text-center sm:py-24">
             <h1 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight sm:text-5xl">
               {t("hero_title")}
             </h1>
@@ -80,7 +103,7 @@ export default function HomePage() {
                 return (
                   <Card key={step.title} className="h-full">
                     <CardHeader>
-                      <div className="mb-2 inline-flex size-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                      <div className="mb-2 inline-flex size-10 items-center justify-center rounded-lg bg-accent text-accent-foreground">
                         <Icon className="size-5" />
                       </div>
                       <div className="text-xs font-semibold tracking-wide text-muted-foreground">
@@ -109,7 +132,7 @@ export default function HomePage() {
                 <Link
                   key={grade}
                   href={`/grades/${grade}`}
-                  className="inline-flex items-center rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold transition-colors hover:border-blue-500 hover:bg-blue-50/60 hover:text-blue-700"
+                  className="inline-flex items-center rounded-full border border-border bg-card px-4 py-2 text-sm font-semibold transition-colors hover:border-primary/60 hover:bg-accent/60 hover:text-accent-foreground"
                 >
                   {t("grade_badge")(grade)}
                 </Link>

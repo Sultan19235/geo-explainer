@@ -4,14 +4,8 @@ import Link from "next/link";
 import { useT } from "@/lib/i18n/context";
 import { useAuth } from "@/lib/auth/context";
 import { LanguageToggle } from "./language-toggle";
+import { TeacherAvatar } from "./teacher-avatar";
 import { buttonVariants } from "./ui/button";
-
-function profileInitials(name: string | null, email: string | null) {
-  const source = name?.trim() || email || "";
-  const parts = source.split(/[\s@.]+/).filter(Boolean);
-  const letters = parts.slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "");
-  return letters.join("") || "?";
-}
 
 type SiteHeaderProps = {
   showLoginButton?: boolean;
@@ -47,6 +41,12 @@ export function SiteHeader({
           >
             {t("brand")}
           </Link>
+          <Link
+            href="/"
+            className="shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            {t("nav_home")}
+          </Link>
         </div>
         <div className="flex items-center gap-2">
           <LanguageToggle />
@@ -55,12 +55,10 @@ export function SiteHeader({
             (user ? (
               <Link
                 href="/dashboard"
-                className="flex items-center gap-2 rounded-full border border-border bg-background py-1 pl-1 pr-3 text-sm font-medium transition-colors hover:border-blue-500 hover:text-blue-700"
+                className="flex items-center gap-2 rounded-full border border-border bg-background py-1 pl-1 pr-3 text-sm font-medium transition-colors hover:border-primary/60 hover:text-primary"
                 title={t("nav_profile")}
               >
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
-                  {profileInitials(user.fullName, user.email)}
-                </span>
+                <TeacherAvatar gender={user.gender} className="size-7" />
                 <span className="hidden sm:inline">{t("nav_profile")}</span>
               </Link>
             ) : (

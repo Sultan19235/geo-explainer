@@ -3,6 +3,7 @@ import { IBM_Plex_Sans, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { LanguageProvider } from "@/lib/i18n/context";
 import { AuthProvider, type AuthUser } from "@/lib/auth/context";
+import { parseGender } from "@/lib/auth/gender";
 import { PresenceTracker } from "@/components/presence-tracker";
 import { createClient } from "@/lib/supabase/server";
 
@@ -20,7 +21,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Geo Explainer",
   description:
-    "Математика мұғалімдеріне арналған интерактивті геометрия сабақтары",
+    "Математика мұғалімдеріне арналған платформа: алгебра мен геометрия бойынша теория, есептер және интерактивті тесттер",
 };
 
 export default async function RootLayout({
@@ -41,6 +42,7 @@ export default async function RootLayout({
           (user.user_metadata?.full_name as string | undefined) ??
           (user.user_metadata?.name as string | undefined) ??
           null,
+        gender: parseGender(user.user_metadata?.gender),
       }
     : null;
 
