@@ -21,8 +21,11 @@ one you are asked for:
 
 ## Lesson files — the complete spec
 
-**The single source of truth is `html-web-apps/lesson-files/FORMAT.md`** —
-read it before writing any file. Summary of the contract:
+**Read these two before writing any file:**
+`html-web-apps/lesson-files/FORMAT.md` (the format contract) and
+`html-web-apps/lesson-files/SKILL.md` (the full authoring skill: toolkit
+reference, pedagogy arc, figure recipes, checklist — portable, the teacher
+also uses it in other Claude environments). Summary of the contract:
 
 - One file = `/*__LESSON_META__ {json} __LESSON_META__*/` header (server
   parses it without executing) + `registerLessonProblem({...})` or

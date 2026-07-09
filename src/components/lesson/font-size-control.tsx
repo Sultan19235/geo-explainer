@@ -13,6 +13,11 @@ export const FONT_SCALES = [0.9, 1, 1.15, 1.3, 1.5] as const;
 export const FONT_SCALE_DEFAULT_INDEX = 1;
 const STORAGE_KEY = "lesson-font-scale";
 
+// GeoGebra draws its labels on canvas, out of CSS reach — live applets
+// (GgbView) listen for this event and re-apply the scale as the GGB app
+// font size. detail = the new scale factor.
+export const LESSON_FONT_SCALE_EVENT = "mathsabaq:lesson-font-scale";
+
 export function useLessonFontScale() {
   const [index, setIndex] = useState(FONT_SCALE_DEFAULT_INDEX);
 
@@ -29,6 +34,9 @@ export function useLessonFontScale() {
     const clamped = Math.min(FONT_SCALES.length - 1, Math.max(0, next));
     setIndex(clamped);
     window.localStorage.setItem(STORAGE_KEY, String(clamped));
+    window.dispatchEvent(
+      new CustomEvent(LESSON_FONT_SCALE_EVENT, { detail: FONT_SCALES[clamped] }),
+    );
   };
 
   return { index, scale: FONT_SCALES[index], change };
