@@ -103,6 +103,7 @@ Same vocabulary as the old HTML template, minus the applet argument:
 <div class="lf-given">\[ R = 3,\; H = 8 \]</div>
 <div class="lf-answer">Жауабы: \( V = 125 \)</div>
 <div class="lf-callout">Модельді айналдырып көріңіз.</div>
+<p>…<b class="lf-find">оның көлемін табыңыз</b>…</p>  <!-- goal highlight (red pill), inline -->
 <p>Plain paragraphs…</p>
 ```
 

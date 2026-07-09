@@ -533,7 +533,7 @@ function BankCard({
       type="button"
       onClick={onToggle}
       className={cn(
-        "relative flex min-h-[120px] flex-col gap-2 rounded-lg border-[1.5px] border-[#d8dde5] bg-white p-3 text-left transition-all",
+        "relative flex flex-col gap-2 rounded-lg border-[1.5px] border-[#d8dde5] bg-white p-3 text-left transition-all",
         "hover:-translate-y-0.5 hover:border-[#2563eb] hover:shadow-[0_4px_12px_rgba(37,99,235,0.12)]",
         picked &&
           "border-[#2563eb] bg-gradient-to-br from-[#dbeafe] to-white shadow-[0_4px_12px_rgba(37,99,235,0.15)]",
@@ -581,11 +581,13 @@ function BankCard({
       </div>
 
       {problem.statementHtml && (
-        <LessonHtml
-          html={problem.statementHtml}
-          lang={lang}
-          className="line-clamp-3 text-[12px] leading-[1.5] text-[#6b7280]"
-        />
+        // shrink-0 stops the flex card from crushing the preview to nothing in
+        // a narrow column; max-height (not line-clamp) does the truncation,
+        // because the lesson-html reset forces display:flow-root and kills
+        // -webkit-box, so -webkit-line-clamp never engages. 3 lines @ 18px.
+        <div className="shrink-0 max-h-[54px] overflow-hidden text-[12px] leading-[1.5] text-[#6b7280] [&_.katex]:text-[1.02em] [&_p]:!my-0">
+          <LessonHtml html={problem.statementHtml} lang={lang} />
+        </div>
       )}
 
       <div className="mt-auto flex flex-wrap gap-1">
