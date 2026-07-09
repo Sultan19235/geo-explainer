@@ -14,14 +14,65 @@
 
   var COLORS = {
     BLUE: [37, 99, 235],
-    RED: [200, 40, 40],
+    RED: [220, 38, 38],
     GREEN: [22, 163, 74],
     ORANGE: [234, 140, 30],
     GRAY: [160, 165, 175],
     PURPLE: [124, 58, 237],
+    MAGENTA: [219, 39, 119],
+    TEAL: [13, 148, 136],
     DARK: [55, 65, 81],
     LIQUID: [59, 130, 246],
   };
+
+  // GeoGebra's 3D view rasterizes $LaTeX$ captions into low-resolution
+  // textures (blurry on hi-dpi screens), while plain-text labels go through
+  // the crisp dpr-aware font path. Simple $…$ captions — letters, digits,
+  // _ indices, ^2/^3, = / √ ° — are therefore converted to plain unicode
+  // text; anything richer stays LaTeX and renders as before.
+  var SUB_DIGITS = { 0: "₀", 1: "₁", 2: "₂", 3: "₃", 4: "₄", 5: "₅", 6: "₆", 7: "₇", 8: "₈", 9: "₉" };
+  var SUP_DIGITS = { 2: "²", 3: "³" };
+  function crispCaption(s) {
+    var m = /^\$(.*)\$$/.exec(String(s));
+    if (!m) return s;
+    var t = m[1]
+      .replace(/_\{(\d+)\}/g, function (_, d) {
+        return d.replace(/\d/g, function (c) { return SUB_DIGITS[c]; });
+      })
+      .replace(/_(\d)/g, function (_, d) { return SUB_DIGITS[d]; })
+      .replace(/\^\{?([23])\}?/g, function (_, d) { return SUP_DIGITS[d]; })
+      .replace(/\\[,;!]/g, " ");
+    if (/[\\{}_^$]/.test(t)) return s; // still complex — keep LaTeX
+    return t;
+  }
+
+  // Label textures rasterize at the app font size — the default 16 is small
+  // and fuzzy, so the runtime patches the settings XML with its current font
+  // size (base 20). The site player rescales it live with the classroom
+  // A−/A+ control via LessonRuntime.setFontSize; the size sticks, so applets
+  // that boot later (lazy theory sections) come up at the chosen size too.
+  // hidePlate keeps the xOy plate off for lesson-file applets, which a
+  // setXML round-trip would otherwise resurrect; registry scenes keep their
+  // own plate state. Idempotent: an unchanged XML skips the round-trip.
+  var BASE_FONT_SIZE = 20;
+  var appFontSize = BASE_FONT_SIZE;
+
+  function applyFontSize(api, size, hidePlate) {
+    if (typeof size === "number" && size > 0) appFontSize = Math.round(size);
+    try {
+      var xml = api.getXML();
+      var patched = xml.replace(
+        /<font\s+size="\d+"/,
+        '<font size="' + appFontSize + '"'
+      );
+      if (hidePlate) {
+        patched = patched.replace(/<plate\s+show="true"/, '<plate show="false"');
+      }
+      if (patched !== xml) api.setXML(patched);
+    } catch (e) {
+      // best effort — a failed patch must not break the applet
+    }
+  }
 
   function createToolkit(api) {
     // Every operation is wrapped: a failed command must never break the
@@ -35,6 +86,10 @@
     }
 
     var g = { api: api };
+
+    // Runs at applet boot; the object-by-object board wipe between steps
+    // never resets the font size.
+    applyFontSize(api, undefined, true);
 
     Object.keys(COLORS).forEach(function (name) {
       g[name] = COLORS[name];
@@ -115,7 +170,7 @@
     };
     g.cap = function (n, latex) {
       safe(function () {
-        api.setCaption(n, latex);
+        api.setCaption(n, crispCaption(latex));
         api.setLabelStyle(n, 3);
         api.setLabelVisible(n, true);
       });
@@ -232,6 +287,8 @@
   window.LessonRuntime = {
     version: 1,
     COLORS: COLORS,
+    baseFontSize: BASE_FONT_SIZE,
+    setFontSize: applyFontSize,
     createToolkit: createToolkit,
     capture: function (onProblem, onTheory) {
       problemCallback = onProblem || null;

@@ -10,6 +10,10 @@ import type { LessonProblemDef, LessonTheoryDef } from "./file-format";
 
 type LessonRuntimeGlobal = {
   version: number;
+  // Default GGB app font size; the player multiplies it by --lesson-scale.
+  baseFontSize: number;
+  // Re-applies the app font size on a live applet (see lesson-runtime.js).
+  setFontSize(api: unknown, size?: number, hidePlate?: boolean): void;
   createToolkit(api: unknown): Record<string, unknown>;
   capture(
     onProblem: ((def: LessonProblemDef) => void) | null,

@@ -31,6 +31,7 @@ import {
 import { loadLessonRuntime } from "@/lib/lesson/file-loader";
 import { buildScene, type BuiltScene, type SceneOp } from "@/lib/lesson/scenes";
 import { pickText, type Params } from "@/lib/lesson/types";
+import { LESSON_FONT_SCALE_EVENT } from "./font-size-control";
 import { PenOverlay } from "./pen-overlay";
 
 export type GgbViewHandle = {
@@ -56,6 +57,20 @@ type Status = "idle" | "loading" | "ready" | "error";
 
 function easeInOut(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// GeoGebra rasterizes label text on its own canvas, so the --lesson-scale
+// CSS variable (A−/A+ control) can't reach it. The same scale is applied
+// instead as the GGB app font size, through the lesson runtime.
+function ggbFontSize(scale: number): number {
+  return Math.round((window.LessonRuntime?.baseFontSize ?? 20) * scale);
+}
+
+function lessonScaleOf(node: HTMLElement): number {
+  const raw = parseFloat(
+    getComputedStyle(node).getPropertyValue("--lesson-scale"),
+  );
+  return Number.isFinite(raw) && raw > 0 ? raw : 1;
 }
 
 // Ref-counted prototype patch: focus() on elements inside a GGB wrapper is
@@ -323,8 +338,14 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
     const restoreBase64 = restoreBase64Ref.current;
     restoreBase64Ref.current = null;
 
+    // The runtime is required to run lesson-file programs; registry scenes
+    // load it too (best-effort) because setFontSize lives there.
     const prerequisites: Promise<unknown>[] = [loadGgbEngine()];
-    if (scene.needsRuntime) prerequisites.push(loadLessonRuntime());
+    prerequisites.push(
+      scene.needsRuntime
+        ? loadLessonRuntime()
+        : loadLessonRuntime().catch(() => null),
+    );
 
     Promise.all(prerequisites)
       .then(() => {
@@ -349,6 +370,13 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
               return;
             }
             apiRef.current = api;
+            // Set the font size before the toolkit boots so its own font
+            // patch sees the already-correct value (no second XML round-trip).
+            window.LessonRuntime?.setFontSize(
+              api,
+              ggbFontSize(lessonScaleOf(wrapper)),
+              scene.needsRuntime === true,
+            );
             toolkitRef.current = scene.needsRuntime
               ? window.LessonRuntime?.createToolkit(api) ?? null
               : null;
@@ -478,6 +506,23 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
       observer.disconnect();
     };
   }, []);
+
+  // Follow the A−/A+ control on a live applet: lesson text rescales via
+  // CSS, the GGB label font re-applies through the runtime.
+  useEffect(() => {
+    const onScale = (event: Event) => {
+      const api = apiRef.current;
+      const scale = (event as CustomEvent<number>).detail;
+      if (!api || typeof scale !== "number") return;
+      window.LessonRuntime?.setFontSize(
+        api,
+        ggbFontSize(scale),
+        scene?.needsRuntime === true,
+      );
+    };
+    window.addEventListener(LESSON_FONT_SCALE_EVENT, onScale);
+    return () => window.removeEventListener(LESSON_FONT_SCALE_EVENT, onScale);
+  }, [scene?.needsRuntime]);
 
   useImperativeHandle(ref, () => ({
     resetView: applyViewFit,
