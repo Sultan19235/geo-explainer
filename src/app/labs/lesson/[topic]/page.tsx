@@ -32,6 +32,7 @@ type ItemRow = {
   tags_kz: string[];
   tags_ru: string[];
   published: boolean;
+  updated_at: string;
 };
 
 async function isAdminRequest(): Promise<boolean> {
@@ -90,7 +91,7 @@ export default async function LessonTopicPage({
   let query = admin
     .from("lesson_items")
     .select(
-      "id, kind, file_id, number, title_kz, title_ru, difficulty, tags_kz, tags_ru, published",
+      "id, kind, file_id, number, title_kz, title_ru, difficulty, tags_kz, tags_ru, published, updated_at",
     )
     .eq("topic_id", topicRow.id)
     .order("order_index", { ascending: true });
@@ -107,6 +108,8 @@ export default async function LessonTopicPage({
     difficulty: row.difficulty,
     tagsKz: row.tags_kz ?? [],
     tagsRu: row.tags_ru ?? [],
+    // Cache-buster for /lesson-files/<id>?v= — changes on re-upload.
+    version: Date.parse(row.updated_at) || 0,
   });
 
   const topicProps: FileLessonTopic = {

@@ -33,6 +33,9 @@ export type GgbApi = {
   showToolBar(show: boolean): void;
   // Full applet state (construction + camera) as a .ggb base64 string.
   getBase64(): string;
+  // Screenshot of the graphics view — used as a freeze-frame while the
+  // applet rebuilds (toolbar toggle), so the teacher never sees a blank.
+  getPNGBase64(exportScale: number, transparent: boolean, dpi: number): string;
   exists(name: string): boolean;
   deleteObject(name: string): void;
   getAllObjectNames(): string[];

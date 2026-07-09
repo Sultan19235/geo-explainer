@@ -122,18 +122,29 @@ export function LessonShell({
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  // Fullscreen locks page scroll on <html>, NOT <body>: Base UI's dialog
+  // scroll lock bails out when <html> overflow is already hidden, so the two
+  // locks can never clobber each other's saved styles (the old body-level
+  // lock left the page stuck unscrollable after fullscreen → bank → exit
+  // fullscreen → close bank).
   useEffect(() => {
     if (!isFullscreen) return;
-    document.body.style.overflow = "hidden";
+    const html = document.documentElement;
+    const previous = html.style.overflow;
+    html.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = previous;
+    };
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    if (!isFullscreen || pickerOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setIsFullscreen(false);
     };
     window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = "";
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [isFullscreen]);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isFullscreen, pickerOpen]);
 
   useEffect(() => {
     if (!problem || !onActiveProblem) return;
@@ -268,6 +279,9 @@ export function LessonShell({
             problems={problems}
             activeIndex={activeIndex}
             onJump={jump}
+            // Drag-reorder commits through the same path as the bank picker,
+            // so the active problem and the ?q= URL stay in sync.
+            onReorder={applySelection}
             isFullscreen={isFullscreen}
             onToggleFullscreen={() => setIsFullscreen((value) => !value)}
             lang={lang}

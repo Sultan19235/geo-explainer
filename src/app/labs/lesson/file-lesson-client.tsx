@@ -8,11 +8,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Loader2Icon } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n/context";
 import { TheoryPlayer } from "@/components/lesson/theory-player";
 import { ProblemPlayer } from "@/components/lesson/problem-player";
 import type { LessonProblemDef, LessonTheoryDef } from "@/lib/lesson/file-format";
-import { loadLessonFile, preloadLessonFile } from "@/lib/lesson/file-loader";
+import { loadLessonFile, type LoadedLessonFile } from "@/lib/lesson/file-loader";
 import {
   fileToPlayerProblem,
   fileToPlayerTheory,
@@ -32,6 +33,8 @@ export type LessonItemRef = {
   difficulty: "easy" | "med" | "hard" | null;
   tagsKz: string[];
   tagsRu: string[];
+  // updated_at as epoch ms — cache-buster for the immutable file URL.
+  version: number;
 };
 
 export type FileLessonTopic = {
@@ -42,8 +45,8 @@ export type FileLessonTopic = {
   subtitleRu: string | null;
 };
 
-function fileUrl(itemId: string): string {
-  return `/lesson-files/${itemId}`;
+function fileUrl(item: LessonItemRef): string {
+  return `/lesson-files/${item.itemId}?v=${item.version}`;
 }
 
 function toLocalized(kz: string, ru: string | null): Localized {
@@ -54,9 +57,14 @@ function zipTags(kz: string[], ru: string[]): Localized[] {
   return kz.map((tag, index) => toLocalized(tag, ru[index] ?? null));
 }
 
-function Loading({ label }: { label: string }) {
+function Loading({ label, className }: { label: string; className?: string }) {
   return (
-    <div className="flex h-[220px] items-center justify-center gap-3 text-sm text-[#6b7280]">
+    <div
+      className={cn(
+        "flex items-center justify-center gap-3 text-sm text-[#6b7280]",
+        className ?? "h-[220px]",
+      )}
+    >
       <Loader2Icon className="size-5 animate-spin" />
       {label}
     </div>
@@ -83,16 +91,23 @@ export function FileLessonClient({
     [problemItems],
   );
 
+  // Bank cards show the real statement once the file is parsed (the
+  // background preload below fills problemDefs shortly after page load).
   const bank: BankProblem[] = useMemo(
     () =>
-      problemItems.map((item) => ({
-        id: item.fileId,
-        number: item.number,
-        title: toLocalized(item.titleKz, item.titleRu),
-        difficulty: item.difficulty ?? undefined,
-        tags: zipTags(item.tagsKz, item.tagsRu),
-      })),
-    [problemItems],
+      problemItems.map((item) => {
+        const def = problemDefs[item.fileId];
+        const loadedDef = def && def !== "loading" && def !== "error" ? def : null;
+        return {
+          id: item.fileId,
+          number: item.number,
+          title: toLocalized(item.titleKz, item.titleRu),
+          difficulty: item.difficulty ?? undefined,
+          tags: zipTags(item.tagsKz, item.tagsRu),
+          statementHtml: loadedDef?.statement,
+        };
+      }),
+    [problemItems, problemDefs],
   );
 
   // Theory files are few — load them all up front.
@@ -100,7 +115,7 @@ export function FileLessonClient({
     let cancelled = false;
     Promise.all(
       theoryItems.map((item) =>
-        loadLessonFile(fileUrl(item.itemId)).then((loaded) =>
+        loadLessonFile(fileUrl(item)).then((loaded) =>
           loaded.kind === "theory" ? loaded.def : null,
         ),
       ),
@@ -117,21 +132,54 @@ export function FileLessonClient({
     };
   }, [theoryItems]);
 
+  const storeLoaded = (bankId: string, loaded: LoadedLessonFile) => {
+    setProblemDefs((current) => {
+      const existing = current[bankId];
+      if (existing && existing !== "loading") return current;
+      return {
+        ...current,
+        [bankId]: loaded.kind === "problem" ? loaded.def : "error",
+      };
+    });
+  };
+
   const ensureProblem = (bankId: string) => {
     const item = itemByFileId.get(bankId);
     if (!item || problemDefs[bankId]) return;
     setProblemDefs((current) => ({ ...current, [bankId]: "loading" }));
-    loadLessonFile(fileUrl(item.itemId))
-      .then((loaded) => {
-        setProblemDefs((current) => ({
-          ...current,
-          [bankId]: loaded.kind === "problem" ? loaded.def : "error",
-        }));
-      })
+    loadLessonFile(fileUrl(item))
+      .then((loaded) => storeLoaded(bankId, loaded))
       .catch(() => {
         setProblemDefs((current) => ({ ...current, [bankId]: "error" }));
       });
   };
+
+  // Preload every problem file: warm the HTTP cache in parallel (responses
+  // are immutable thanks to ?v=), then parse them one by one through the
+  // runtime queue so any jump — near or far — is served locally and the bank
+  // can show statements. Parsing is sequential with at most one file queued,
+  // so a teacher's click still jumps ahead of the remaining preloads.
+  useEffect(() => {
+    let cancelled = false;
+    for (const item of problemItems) {
+      void fetch(fileUrl(item)).catch(() => {});
+    }
+    (async () => {
+      for (const item of problemItems) {
+        if (cancelled) return;
+        try {
+          const loaded = await loadLessonFile(fileUrl(item));
+          if (cancelled) return;
+          storeLoaded(item.fileId, loaded);
+        } catch {
+          // Best-effort; ensureProblem surfaces real errors on demand.
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [problemItems]);
 
   const theory = theoryDefs ? fileToPlayerTheory(theoryDefs) : null;
   const title = toLocalized(topic.titleKz, topic.titleRu);
@@ -159,19 +207,26 @@ export function FileLessonClient({
           <Loading label={lang === "ru" ? "Загрузка теории…" : "Теория жүктелуде…"} />
         ) : null
       }
-      onActiveProblem={(problem, next) => {
+      onActiveProblem={(problem) => {
         ensureProblem(problem.id);
-        const nextItem = next ? itemByFileId.get(next.id) : null;
-        if (nextItem) preloadLessonFile(fileUrl(nextItem.itemId));
       }}
       renderProblem={(problem, { isFullscreen }) => {
+        // Loading/error placeholders keep the player's exact footprint so a
+        // far jump doesn't collapse the section (worst in fullscreen, where
+        // it read as "the lesson closed").
+        const frameClass = isFullscreen ? "min-h-0 flex-1" : "h-[620px]";
         const def = problemDefs[problem.id];
         if (!def || def === "loading") {
-          return <Loading label={loadingLabel} />;
+          return <Loading label={loadingLabel} className={frameClass} />;
         }
         if (def === "error") {
           return (
-            <div className="grid h-[220px] place-items-center px-6 text-center text-sm text-[#dc2626]">
+            <div
+              className={cn(
+                "grid place-items-center px-6 text-center text-sm text-[#dc2626]",
+                frameClass,
+              )}
+            >
               {errorLabel}
             </div>
           );

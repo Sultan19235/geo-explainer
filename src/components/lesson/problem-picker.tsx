@@ -24,6 +24,7 @@ import type { Lang } from "@/lib/i18n/strings";
 import { cn } from "@/lib/utils";
 import { pickText } from "@/lib/lesson/types";
 import type { BankProblem } from "@/lib/lesson/player-adapter";
+import { LessonHtml } from "@/components/lesson/lesson-html";
 import {
   createLessonSetAction,
   deleteLessonSetAction,
@@ -71,6 +72,14 @@ function searchableText(problem: BankProblem): string {
   };
   pushLocalized(problem.title);
   for (const tag of problem.tags ?? []) pushLocalized(tag);
+  // Statement HTML (when the file is already parsed) — tags stripped so the
+  // teacher can search by the problem's actual wording.
+  if (problem.statementHtml) {
+    parts.push(problem.statementHtml.kz.replace(/<[^>]+>/g, " "));
+    if (problem.statementHtml.ru) {
+      parts.push(problem.statementHtml.ru.replace(/<[^>]+>/g, " "));
+    }
+  }
   return parts.join(" ").toLowerCase();
 }
 
@@ -235,8 +244,10 @@ export function ProblemPicker({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        overlayClassName="bg-slate-950/45 supports-backdrop-filter:backdrop-blur-0"
-        className="top-auto right-0 bottom-0 left-0 flex h-[82vh] max-h-[760px] w-full max-w-none translate-x-0 translate-y-0 grid-rows-none flex-col gap-0 rounded-b-none rounded-t-[14px] border-t-[1.5px] border-[#d8dde5] bg-white p-0 text-[#1a1a2e] shadow-[0_-10px_30px_rgba(0,0,0,0.18)] sm:max-w-none data-open:animate-in data-open:slide-in-from-bottom data-open:duration-300 data-closed:animate-out data-closed:slide-out-to-bottom data-closed:duration-200"
+        // z-[120] keeps the drawer above the fullscreen problems section
+        // (z-[100]) — without it the bank opens invisibly BEHIND fullscreen.
+        overlayClassName="z-[120] bg-slate-950/45 supports-backdrop-filter:backdrop-blur-0"
+        className="top-auto right-0 bottom-0 left-0 z-[120] flex h-[82vh] max-h-[760px] w-full max-w-none translate-x-0 translate-y-0 grid-rows-none flex-col gap-0 rounded-b-none rounded-t-[14px] border-t-[1.5px] border-[#d8dde5] bg-white p-0 text-[#1a1a2e] shadow-[0_-10px_30px_rgba(0,0,0,0.18)] sm:max-w-none data-open:animate-in data-open:slide-in-from-bottom data-open:duration-300 data-closed:animate-out data-closed:slide-out-to-bottom data-closed:duration-200"
       >
         <div className="mx-auto mt-2 mb-1 h-1 w-[42px] rounded-full bg-[#c5cad3]" />
 
@@ -568,6 +579,14 @@ function BankCard({
       <div className="text-[13.5px] font-semibold leading-[1.4] text-[#1a1a2e]">
         {title}
       </div>
+
+      {problem.statementHtml && (
+        <LessonHtml
+          html={problem.statementHtml}
+          lang={lang}
+          className="line-clamp-3 text-[12px] leading-[1.5] text-[#6b7280]"
+        />
+      )}
 
       <div className="mt-auto flex flex-wrap gap-1">
         {tags.length > 0 ? (

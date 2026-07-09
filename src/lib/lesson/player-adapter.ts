@@ -12,13 +12,15 @@ export type PlayerGgbSource =
   | { kind: "program"; program: BuiltScene; programKey: string };
 
 // What the bank drawer and the navigator need to know about a problem —
-// metadata only, satisfied by both packs and uploaded items' DB rows.
+// metadata from the DB row, plus the statement once the file is parsed
+// (filled in progressively by the lesson page's background preload).
 export type BankProblem = {
   id: string;
   number: string;
   title: Localized;
   difficulty?: "easy" | "med" | "hard";
   tags?: Localized[];
+  statementHtml?: { kz: string; ru?: string };
 };
 
 export type PlayerStep = {

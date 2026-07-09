@@ -32,7 +32,7 @@ async function isAdminRequest(): Promise<boolean> {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -65,13 +65,17 @@ export async function GET(
     return new Response("Lesson file is unavailable.", { status: 404 });
   }
 
+  // The lesson page appends ?v=<updated_at> to every file URL, so a
+  // versioned response can be cached forever — re-uploads change the URL.
+  // Unversioned requests keep the short cache as before.
+  const versioned = request.nextUrl.searchParams.has("v");
   return new Response(await file.text(), {
     status: 200,
     headers: {
       "Content-Type": "text/javascript; charset=utf-8",
-      // Content changes only via re-upload; a short public cache keeps
-      // problem switching snappy without staling edits for long.
-      "Cache-Control": "public, max-age=120",
+      "Cache-Control": versioned
+        ? "public, max-age=31536000, immutable"
+        : "public, max-age=120",
       "X-Content-Type-Options": "nosniff",
     },
   });
