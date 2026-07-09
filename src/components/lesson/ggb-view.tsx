@@ -117,9 +117,6 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
   const [retryToken, setRetryToken] = useState(0);
   const [sliderValue, setSliderValue] = useState<number | null>(null);
   const [toolbarOn, setToolbarOn] = useState(false);
-  // Screenshot of the applet shown while it rebuilds (toolbar toggle) — the
-  // teacher sees a freeze-frame instead of a white flash.
-  const [freezeFrame, setFreezeFrame] = useState<string | null>(null);
 
   const paramsKey = JSON.stringify(params ?? {});
   const scene: BuiltScene | null = useMemo(
@@ -534,8 +531,7 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
   // The toolbar exists only if the applet was created with it, so toggling
   // rebuilds the applet. The current state (construction + camera) is
   // snapshotted first and restored into the new applet — the teacher's
-  // rotated/zoomed view must survive the toggle. A PNG freeze-frame covers
-  // the rebuild so nothing visibly blinks.
+  // rotated/zoomed view must survive the toggle.
   const toggleToolbar = () => {
     if (status !== "ready") return;
     try {
@@ -543,26 +539,10 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
     } catch {
       restoreBase64Ref.current = null;
     }
-    try {
-      const png =
-        apiRef.current?.getPNGBase64(window.devicePixelRatio || 1, false, 72) ??
-        "";
-      setFreezeFrame(png ? `data:image/png;base64,${png}` : null);
-    } catch {
-      setFreezeFrame(null);
-    }
     setToolbarOn((value) => !value);
     setStatus("idle");
     setRetryToken((token) => token + 1);
   };
-
-  // Hold the freeze-frame briefly past "ready" so the rebuilt applet has
-  // painted before the cover comes off.
-  useEffect(() => {
-    if (status !== "ready" || !freezeFrame) return;
-    const timer = window.setTimeout(() => setFreezeFrame(null), 400);
-    return () => window.clearTimeout(timer);
-  }, [status, freezeFrame]);
 
   const control = scene?.control;
   const showControl =
@@ -651,23 +631,7 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
         </div>
       )}
 
-      {freezeFrame && status !== "error" && (
-        <div className="absolute inset-0 z-[7] bg-white">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={freezeFrame}
-            alt=""
-            className="pointer-events-none h-full w-full object-contain"
-          />
-          {status !== "ready" && (
-            <div className="absolute top-2.5 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border-[1.5px] border-[#d8dde5] bg-white/95 px-3 py-1 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-              <div className="size-3.5 animate-spin rounded-full border-2 border-[#d8dde5] border-t-[#2563eb]" />
-            </div>
-          )}
-        </div>
-      )}
-
-      {status !== "ready" && !(freezeFrame && status !== "error") && (
+      {status !== "ready" && (
         <div className="absolute inset-0 z-[6] flex flex-col items-center justify-center gap-3 bg-white">
           {status === "error" ? (
             <>
