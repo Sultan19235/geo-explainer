@@ -62,6 +62,37 @@ export async function submitScore(
   };
 }
 
+export type ResolveResult =
+  | { status: SessionStatus; studentPath: string | null }
+  | { error: "network" };
+
+// Universal join: turns a room code the teacher wrote on the board into that
+// room's student join path (GET /resolve, server v5+). On older servers the
+// route is missing entirely — the HTML 404 fails JSON parsing and reports as
+// "network", which the /join page shows as a retryable error.
+export async function resolveCode(code: string): Promise<ResolveResult> {
+  try {
+    const res = await fetch(
+      `${BACKEND}/resolve?code=${encodeURIComponent(code)}`,
+    );
+    // 404 is a real answer (unknown code; v5 sends a JSON body). Anything
+    // else non-ok — 429 from the shared per-IP limiter, 5xx — is a retryable
+    // failure, NOT "wrong code": a whole school can share one NAT'd IP.
+    if (!res.ok && res.status !== 404) return { error: "network" };
+    const data = (await res.json()) as {
+      status?: SessionStatus;
+      studentPath?: unknown;
+    };
+    return {
+      status: data.status ?? "not_found",
+      studentPath:
+        typeof data.studentPath === "string" ? data.studentPath : null,
+    };
+  } catch {
+    return { error: "network" };
+  }
+}
+
 // ─── Teacher side ───────────────────────────────────────────────────────────
 
 // One student row as the /live SSE stream reports it.
@@ -96,6 +127,11 @@ export type LiveEvent =
 // it's optional here (null → the server's host-secret gate is dormant anyway).
 export async function createSession(
   title: string,
+  // The room's student join link, site-relative and WITHOUT the code (it
+  // doesn't exist yet), e.g. "/play/algebra-7?q=a,b". The server (v5+) stores
+  // it so the universal /join page can turn a typed room code back into this
+  // exact quiz; older servers simply ignore the field.
+  studentPath?: string,
 ): Promise<
   { code: string; hostSecret: string | null } | { error: "unauthorized" | "network" }
 > {
@@ -110,7 +146,7 @@ export async function createSession(
     const res = await fetch(`${BACKEND}/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, token }),
+      body: JSON.stringify({ title, token, studentPath }),
     });
     if (res.status === 401) return { error: "unauthorized" };
     const data = (await res.json()) as { code?: string; hostSecret?: string };

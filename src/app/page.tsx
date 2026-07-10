@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { BookOpenIcon, CheckSquareIcon, PresentationIcon } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
+import { JoinCodeForm } from "@/components/quiz/join-code-form";
 import { useAuth } from "@/lib/auth/context";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -64,6 +65,15 @@ export default function HomePage() {
               >
                 {user ? t("nav_profile") : t("hero_cta_secondary")}
               </Link>
+            </div>
+            {/* Universal quiz entrance: students land on matem.school and
+                type the room code from the board. Kept plain on purpose —
+                the design-refresh branch owns the pretty homepage. */}
+            <div className="mt-10 w-full max-w-xs rounded-xl border border-border bg-muted/30 p-4 sm:max-w-sm">
+              <p className="mb-2 text-sm font-medium text-muted-foreground">
+                {t("home_join_hint")}
+              </p>
+              <JoinCodeForm />
             </div>
           </div>
         </section>

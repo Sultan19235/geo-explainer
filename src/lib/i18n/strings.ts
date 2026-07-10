@@ -93,6 +93,19 @@ export const STRINGS = {
     footer_copyright: "© 2026 Geo Explainer.",
     footer_contact: "Байланыс: hello@geo-explainer.kz",
 
+    // Join by room code (universal entrance: matem.school + code on the board)
+    join_page_title: "Сабаққа қосылу",
+    join_page_subtitle: "Мұғалім тақтаға жазған бөлме кодын енгізіңіз.",
+    join_code_label: "Бөлме коды",
+    join_button: "Қосылу",
+    join_checking: "Тексерілуде...",
+    join_error_short: "Код 6 таңбадан тұрады.",
+    join_error_not_found: "Бұл код табылмады. Кодты тексеріп, қайта енгізіңіз.",
+    join_error_ended: "Бұл сабақ аяқталды.",
+    join_error_no_link: "Бұл бөлмеге QR код арқылы кіру керек — мұғалімнен сұраңыз.",
+    join_error_network: "Байланыс қатесі. Интернетті тексеріп, қайта көріңіз.",
+    home_join_hint: "Оқушыларға: мұғалім берген кодты енгізіңіз",
+
     // Dashboard
     dashboard_greeting: "Сәлеметсіз бе",
     dashboard_my_lessons: "Менің сабақтарым",
@@ -446,6 +459,19 @@ export const STRINGS = {
     grade_badge: (n: number) => `${n} класс`,
     footer_copyright: "© 2026 Geo Explainer.",
     footer_contact: "Контакты: hello@geo-explainer.kz",
+
+    // Join by room code (universal entrance: matem.school + code on the board)
+    join_page_title: "Подключиться к уроку",
+    join_page_subtitle: "Введите код комнаты, который учитель написал на доске.",
+    join_code_label: "Код комнаты",
+    join_button: "Подключиться",
+    join_checking: "Проверка...",
+    join_error_short: "Код состоит из 6 символов.",
+    join_error_not_found: "Код не найден. Проверьте код и попробуйте ещё раз.",
+    join_error_ended: "Этот урок уже завершён.",
+    join_error_no_link: "В эту комнату входят по QR-коду — спросите учителя.",
+    join_error_network: "Ошибка сети. Проверьте интернет и попробуйте ещё раз.",
+    home_join_hint: "Ученикам: введите код от учителя",
 
     // Dashboard
     dashboard_greeting: "Здравствуйте",
