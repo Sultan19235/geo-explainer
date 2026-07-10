@@ -247,7 +247,7 @@ export function ProblemPicker({
         // z-[120] keeps the drawer above the fullscreen problems section
         // (z-[100]) — without it the bank opens invisibly BEHIND fullscreen.
         overlayClassName="z-[120] bg-slate-950/45 supports-backdrop-filter:backdrop-blur-0"
-        className="top-auto right-0 bottom-0 left-0 z-[120] flex h-[82vh] max-h-[760px] w-full max-w-none translate-x-0 translate-y-0 grid-rows-none flex-col gap-0 rounded-b-none rounded-t-[14px] border-t-[1.5px] border-[#d8dde5] bg-white p-0 text-[#1a1a2e] shadow-[0_-10px_30px_rgba(0,0,0,0.18)] sm:max-w-none data-open:animate-in data-open:slide-in-from-bottom data-open:duration-300 data-closed:animate-out data-closed:slide-out-to-bottom data-closed:duration-200"
+        className="top-auto right-0 bottom-0 left-0 z-[120] flex h-[94vh] max-h-[920px] w-full max-w-none translate-x-0 translate-y-0 grid-rows-none flex-col gap-0 rounded-b-none rounded-t-[14px] border-t-[1.5px] border-[#d8dde5] bg-white p-0 text-[#1a1a2e] shadow-[0_-10px_30px_rgba(0,0,0,0.18)] sm:max-w-none data-open:animate-in data-open:slide-in-from-bottom data-open:duration-300 data-closed:animate-out data-closed:slide-out-to-bottom data-closed:duration-200"
       >
         <div className="mx-auto mt-2 mb-1 h-1 w-[42px] rounded-full bg-[#c5cad3]" />
 
@@ -296,7 +296,9 @@ export function ProblemPicker({
           </div>
 
           {allTags.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            // One scrollable row instead of a wrap: with many tags the header
+            // was eating the space the card grid needs on classroom screens.
+            <div className="mt-3 flex items-center gap-1.5 overflow-x-auto pb-1">
               {allTags.map((tag) => {
                 const active = activeTags.includes(tag);
                 return (
@@ -306,7 +308,7 @@ export function ProblemPicker({
                     onClick={() => toggleTag(tag)}
                     aria-pressed={active}
                     className={cn(
-                      "rounded-full border-[1.5px] px-3 py-1 text-xs font-semibold transition-colors",
+                      "shrink-0 whitespace-nowrap rounded-full border-[1.5px] px-3 py-1 text-xs font-semibold transition-colors",
                       active
                         ? "border-[#2563eb] bg-[#eff6ff] text-[#1d4ed8]"
                         : "border-[#d8dde5] bg-white text-[#6b7280] hover:border-[#c5cad3] hover:text-[#1a1a2e]",
@@ -320,7 +322,7 @@ export function ProblemPicker({
                 <button
                   type="button"
                   onClick={() => setActiveTags([])}
-                  className="grid size-6 place-items-center rounded-full text-[#6b7280] transition-colors hover:bg-[#eef1f5] hover:text-[#1a1a2e]"
+                  className="grid size-6 shrink-0 place-items-center rounded-full text-[#6b7280] transition-colors hover:bg-[#eef1f5] hover:text-[#1a1a2e]"
                   aria-label={t("bank_clear_all")}
                 >
                   <XIcon className="size-3.5" />
@@ -348,13 +350,15 @@ export function ProblemPicker({
               </button>
             </div>
 
-            <div className="flex max-h-24 flex-wrap gap-2 overflow-y-auto">
+            {/* One scrolling row: with 10+ picked, a wrapping tray squeezed
+                the card grid down to a single visible row of problems. */}
+            <div className="flex gap-2 overflow-x-auto pb-1">
               {pickedProblems.map((problem, index) => {
                 const title = pickText(problem.title, lang);
                 return (
                   <span
                     key={problem.id}
-                    className="inline-flex max-w-64 items-center gap-1.5 rounded-full border-[1.5px] border-[#d8dde5] bg-white py-1 pr-1 pl-3 text-xs text-[#1a1a2e]"
+                    className="inline-flex max-w-64 shrink-0 items-center gap-1.5 rounded-full border-[1.5px] border-[#d8dde5] bg-white py-1 pr-1 pl-3 text-xs text-[#1a1a2e]"
                   >
                     <span className="truncate">
                       <strong className="text-[#1d4ed8]">{index + 1}.</strong>{" "}
@@ -582,10 +586,11 @@ function BankCard({
 
       {problem.statementHtml && (
         // shrink-0 stops the flex card from crushing the preview to nothing in
-        // a narrow column; max-height (not line-clamp) does the truncation,
-        // because the lesson-html reset forces display:flow-root and kills
-        // -webkit-box, so -webkit-line-clamp never engages. 3 lines @ 18px.
-        <div className="shrink-0 max-h-[54px] overflow-hidden text-[12px] leading-[1.5] text-[#6b7280] [&_.katex]:text-[1.02em] [&_p]:!my-0">
+        // a narrow column. line-clamp-3 truncates by LINE (Chrome's
+        // standardized line-clamp reports display:flow-root but clamps fine),
+        // so KaTeX-taller lines are never sliced mid-glyph the way a pixel
+        // max-height did. p margins/leading normalized for compact lines.
+        <div className="shrink-0 line-clamp-3 text-[12px] text-[#6b7280] [&_.katex]:text-[1.02em] [&_p]:!my-0 [&_p]:!leading-[1.55]">
           <LessonHtml html={problem.statementHtml} lang={lang} />
         </div>
       )}
