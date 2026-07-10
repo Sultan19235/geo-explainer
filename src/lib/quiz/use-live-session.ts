@@ -12,7 +12,7 @@
 // uploaded pages' localStorage schema (sections at top level) stays readable.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchStatus, submitScore } from "./live-client";
+import { fetchStatus, submitScore, type AnswerMap } from "./live-client";
 
 const STATE_TTL = 3 * 60 * 60 * 1000; // saved progress expires after 3h
 const HEARTBEAT_MS = 15_000;
@@ -22,6 +22,8 @@ export type QuizPhase = "checking" | "join" | "waiting" | "active" | "ended";
 
 export type QuizStats = { correct: number; wrong: number; streak: number };
 
+const MAX_ANSWER_ENTRIES = 500; // mirrors the server's cap
+
 type SavedBase = {
   studentId: string;
   name: string;
@@ -30,8 +32,20 @@ type SavedBase = {
   streak: number;
   tabSwitches: number;
   awaySeconds: number;
+  answers?: AnswerMap;
   ts: number;
 };
+
+// Restore only well-formed entries — old saved states predate the field.
+function sanitizeAnswers(raw: unknown): AnswerMap {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: AnswerMap = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (key.length === 0 || key.length > 64) continue;
+    if (value === 0 || value === 1) out[key] = value;
+  }
+  return out;
+}
 
 export type JoinError = "name" | "code" | "not_found" | "ended" | "network";
 
@@ -74,6 +88,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     name: "",
     extra: opts.defaultExtra,
     stats: { correct: 0, wrong: 0, streak: 0 },
+    answers: {} as AnswerMap,
     focused: true,
     tabSwitches: 0,
     awaySeconds: 0,
@@ -95,6 +110,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         streak: s.stats.streak,
         tabSwitches: s.tabSwitches,
         awaySeconds: away,
+        answers: s.answers,
         ts: Date.now(),
       };
       localStorage.setItem(
@@ -150,6 +166,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
           focused: s.focused,
           tabSwitches: s.tabSwitches,
           awaySeconds: away,
+          answers: Object.keys(s.answers).length > 0 ? s.answers : undefined,
         });
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
         if (res.status === "ended" || res.status === "not_found") endQuiz();
@@ -211,6 +228,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         };
         s.tabSwitches = restored.tabSwitches || 0;
         s.awaySeconds = restored.awaySeconds || 0;
+        s.answers = sanitizeAnswers(restored.answers);
         s.extra = opts.sanitizeExtra(restored) ?? opts.defaultExtra;
         setExtraState(s.extra);
         setStats(s.stats);
@@ -248,6 +266,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
       s.name = trimmed;
       s.studentId = "stu_" + Math.random().toString(36).slice(2, 11);
       s.stats = { correct: 0, wrong: 0, streak: 0 };
+      s.answers = {};
       setStats(s.stats);
       setStudentName(trimmed);
 
@@ -344,9 +363,19 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
   }, [phase, sendScore]);
 
   // ── Answers ──────────────────────────────────────────────────────────────
+  // questionId (when the quiz has stable ids) files the outcome into the
+  // per-question map that rides every /submit, so the teacher's console can
+  // save "who got which question" at the end.
   const recordAnswer = useCallback(
-    (isCorrect: boolean) => {
+    (isCorrect: boolean, questionId?: string) => {
       const s = session.current;
+      if (
+        questionId &&
+        (questionId in s.answers ||
+          Object.keys(s.answers).length < MAX_ANSWER_ENTRIES)
+      ) {
+        s.answers = { ...s.answers, [questionId]: isCorrect ? 1 : 0 };
+      }
       s.stats = isCorrect
         ? {
             correct: s.stats.correct + 1,

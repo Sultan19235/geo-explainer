@@ -404,7 +404,7 @@ function QuestionFlow({
 
   const answer = (record: AnswerRecord) => {
     if (prior) return;
-    session.recordAnswer(record.ok);
+    session.recordAnswer(record.ok, question.id);
     session.updateExtra({
       answered: { ...extra.answered, [question.id]: record },
     });

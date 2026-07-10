@@ -136,6 +136,22 @@ export const STRINGS = {
     my_quizzes_cancel: "Болдырмау",
     my_quizzes_error: "Қате шықты. Қайталап көріңіз.",
 
+    // Profile — quiz results history
+    profile_results: "Тест нәтижелері",
+    results_empty: "Сақталған нәтижелер әлі жоқ.",
+    results_empty_hint:
+      "Тест аяқталғанда нәтижелер осында автоматты түрде сақталады.",
+    results_students: (n: number) => `${n} оқушы`,
+    results_average: (p: number) => `орташа ${p}%`,
+    results_details: "Толығырақ",
+    results_hide: "Жасыру",
+    results_delete: "Өшіру",
+    results_delete_confirm: (title: string) =>
+      `«${title}» нәтижесін өшіру керек пе?`,
+    results_by_question: "Сұрақтар бойынша",
+    results_question_label: (n: number) => `${n}-сұрақ`,
+    results_away: (n: number) => `${n}× сыртта`,
+
     // Grades catalog
     grades_title: "Сабақтар каталогы",
     grades_subtitle: "Сыныпты таңдаңыз және жарияланған тақырыптарды қараңыз.",
@@ -472,6 +488,22 @@ export const STRINGS = {
     my_quizzes_save: "Сохранить",
     my_quizzes_cancel: "Отмена",
     my_quizzes_error: "Произошла ошибка. Попробуйте ещё раз.",
+
+    // Profile — quiz results history
+    profile_results: "Результаты тестов",
+    results_empty: "Сохранённых результатов пока нет.",
+    results_empty_hint:
+      "Результаты сохраняются здесь автоматически после завершения теста.",
+    results_students: (n: number) => `${n} учеников`,
+    results_average: (p: number) => `средний ${p}%`,
+    results_details: "Подробнее",
+    results_hide: "Скрыть",
+    results_delete: "Удалить",
+    results_delete_confirm: (title: string) =>
+      `Удалить результат «${title}»?`,
+    results_by_question: "По вопросам",
+    results_question_label: (n: number) => `Вопрос ${n}`,
+    results_away: (n: number) => `${n}× вне экрана`,
 
     // Grades catalog
     grades_title: "Каталог уроков",

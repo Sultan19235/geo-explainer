@@ -15,6 +15,11 @@ export type StatusResponse = {
   timeLeft?: number; // seconds, present while a session exists
 };
 
+// Per-question outcomes, question id -> 1 (correct) | 0 (wrong). Only quizzes
+// with stable question ids send it (pack quizzes); generator quizzes make a
+// fresh question per student, so there is nothing comparable to key on.
+export type AnswerMap = Record<string, 0 | 1>;
+
 export type SubmitPayload = {
   code: string;
   studentId: string;
@@ -25,6 +30,7 @@ export type SubmitPayload = {
   focused: boolean;
   tabSwitches: number;
   awaySeconds: number;
+  answers?: AnswerMap;
 };
 
 export async function fetchStatus(code: string): Promise<StatusResponse> {
@@ -68,6 +74,7 @@ export type StudentRecord = {
   focused: boolean;
   tabSwitches: number;
   awaySeconds: number;
+  answers?: AnswerMap;
   updatedAt: number;
 };
 

@@ -16,6 +16,8 @@ import {
   renameSavedQuizAction,
 } from "@/lib/quiz/saved-quiz-actions";
 import { SAVED_QUIZ_NAME_MAX } from "@/lib/quiz/saved-quiz";
+import type { QuizResultSummary } from "@/lib/quiz/quiz-result";
+import { QuizResultsSection } from "./quiz-results-section";
 
 export type PurchasedGrade = {
   gradeId: number;
@@ -47,6 +49,7 @@ export function DashboardClient({
   isAdmin,
   purchasedGrades,
   savedQuizzes,
+  quizResults,
   accessExpiresAt,
   accessActive,
   logoutAction,
@@ -58,6 +61,7 @@ export function DashboardClient({
   isAdmin: boolean;
   purchasedGrades: PurchasedGrade[];
   savedQuizzes: SavedQuizSummary[];
+  quizResults: QuizResultSummary[];
   accessExpiresAt: string | null;
   accessActive: boolean;
   logoutAction: () => Promise<void>;
@@ -259,6 +263,9 @@ export function DashboardClient({
             </Card>
           )}
         </section>
+
+        {/* Quiz results history */}
+        <QuizResultsSection results={quizResults} />
       </main>
     </div>
   );

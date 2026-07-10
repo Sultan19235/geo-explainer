@@ -123,6 +123,10 @@ export const ENGINE_STRINGS = {
     c_new_session: "Жаңа сессия",
     c_results_empty: "Бұл сессияда оқушы болмады.",
     c_results_note: "Нәтижелер сақталмайды — экранды жаппас бұрын қажетін жазып алыңыз.",
+    c_results_saving: "Нәтижелер профильге сақталуда…",
+    c_results_saved: "Нәтижелер профиліңізге сақталды.",
+    c_results_save_error: "Нәтижелерді сақтау сәтсіз болды.",
+    c_results_retry: "Қайталау",
   },
   ru: {
     // student — join
@@ -242,6 +246,10 @@ export const ENGINE_STRINGS = {
     c_new_session: "Новая сессия",
     c_results_empty: "В этой сессии не было учеников.",
     c_results_note: "Результаты не сохраняются — запишите нужное до закрытия экрана.",
+    c_results_saving: "Результаты сохраняются в профиль…",
+    c_results_saved: "Результаты сохранены в вашем профиле.",
+    c_results_save_error: "Не удалось сохранить результаты.",
+    c_results_retry: "Повторить",
   },
 } as const;
 

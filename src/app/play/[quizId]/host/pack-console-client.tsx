@@ -61,6 +61,10 @@ import {
   useTeacherSession,
   type LiveStudent,
 } from "@/lib/quiz/use-teacher-session";
+import {
+  useResultAutosave,
+  type ResultSaveStatus,
+} from "@/lib/quiz/use-result-autosave";
 
 const AVATAR_COLORS = [
   "#2563eb",
@@ -180,6 +184,20 @@ export function PackConsoleClient({
 
   const quizTitle = loc(title, lang);
 
+  // Freeze the scoreboard into the teacher's profile when the room ends.
+  // canSave=false (dev-preview) has no signed-in owner, so nothing to save to.
+  const resultSave = useResultAutosave({
+    phase: session.phase,
+    code: session.code,
+    students: session.students,
+    enabled: canSave,
+    quizId,
+    title: quizTitle,
+    // Generator rooms mint a fresh question per student — no stable ids to
+    // record per-question detail against.
+    questionIds: generator ? null : selectedIds,
+  });
+
   // Keep the join link (and QR) clean when `q` adds nothing: the whole pack in
   // pack order, or the whole pack under shuffle where order is irrelevant.
   // selectedIds only ever holds distinct ids from this pack, so length
@@ -279,7 +297,12 @@ export function PackConsoleClient({
       )}
 
       {session.phase === "results" && (
-        <ResultsScreen students={session.students} onNew={session.reset} />
+        <ResultsScreen
+          students={session.students}
+          onNew={session.reset}
+          saveStatus={resultSave.status}
+          onRetrySave={resultSave.retry}
+        />
       )}
 
       {qrOpen && session.code && (
@@ -1640,9 +1663,13 @@ function MiniStat({
 function ResultsScreen({
   students,
   onNew,
+  saveStatus,
+  onRetrySave,
 }: {
   students: Map<string, LiveStudent>;
   onNew: () => void;
+  saveStatus: ResultSaveStatus;
+  onRetrySave: () => void;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -1727,9 +1754,36 @@ function ResultsScreen({
         </>
       )}
 
-      <p className="mt-5 text-center text-xs text-muted-foreground">
-        {t("c_results_note")}
-      </p>
+      <div className="mt-5 flex min-h-7 items-center justify-center gap-2 text-xs">
+        {saveStatus === "saving" && (
+          <span className="flex items-center gap-1.5 text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+            {t("c_results_saving")}
+          </span>
+        )}
+        {saveStatus === "saved" && (
+          <span className="flex items-center gap-1.5 font-semibold text-emerald-600">
+            <Check className="size-3.5" aria-hidden />
+            {t("c_results_saved")}
+          </span>
+        )}
+        {saveStatus === "error" && (
+          <span className="flex items-center gap-2 font-semibold text-destructive">
+            {t("c_results_save_error")}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onRetrySave}
+              className="h-7 px-2 text-xs font-semibold"
+            >
+              {t("c_results_retry")}
+            </Button>
+          </span>
+        )}
+        {saveStatus === "off" && (
+          <span className="text-muted-foreground">{t("c_results_note")}</span>
+        )}
+      </div>
       <div className="mt-4 flex justify-center">
         <Button onClick={onNew} variant="outline" className="font-semibold">
           {t("c_new_session")}

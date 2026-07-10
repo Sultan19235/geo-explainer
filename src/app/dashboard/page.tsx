@@ -4,6 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { teacherHasGradeAccess } from "@/lib/teacher-access";
 import { endLoginSession } from "@/lib/analytics/track";
 import type { SavedQuizSummary } from "@/lib/quiz/saved-quiz";
+import {
+  QUIZ_RESULTS_DASHBOARD_LIMIT,
+  type QuizResultSummary,
+  type ResultStudent,
+} from "@/lib/quiz/quiz-result";
 import { DashboardClient, type PurchasedGrade } from "./dashboard-client";
 
 async function logout() {
@@ -33,6 +38,17 @@ type SavedQuizRow = {
   order_mode: string;
   updated_at: string;
   quizzes: { title_kz: string; title_ru: string | null } | null;
+};
+
+type QuizResultRow = {
+  id: string;
+  quiz_id: string | null;
+  title: string;
+  room_code: string;
+  question_ids: string[] | null;
+  students: ResultStudent[];
+  student_count: number;
+  ended_at: string;
 };
 
 export default async function DashboardPage() {
@@ -110,6 +126,29 @@ export default async function DashboardPage() {
     updatedAt: row.updated_at,
   }));
 
+  // Auto-saved live-quiz outcomes, newest first (RLS scopes to this teacher).
+  // Errors — e.g. the quiz_results migration not applied yet — degrade to an
+  // empty history section instead of breaking the profile.
+  const { data: resultRows } = await supabase
+    .from("quiz_results")
+    .select(
+      "id, quiz_id, title, room_code, question_ids, students, student_count, ended_at",
+    )
+    .order("ended_at", { ascending: false })
+    .limit(QUIZ_RESULTS_DASHBOARD_LIMIT)
+    .returns<QuizResultRow[]>();
+
+  const quizResults: QuizResultSummary[] = (resultRows ?? []).map((row) => ({
+    id: row.id,
+    quizId: row.quiz_id,
+    title: row.title,
+    roomCode: row.room_code,
+    questionIds: row.question_ids,
+    students: Array.isArray(row.students) ? row.students : [],
+    studentCount: row.student_count,
+    endedAt: row.ended_at,
+  }));
+
   return (
     <DashboardClient
       email={teacher?.email ?? user.email ?? ""}
@@ -119,6 +158,7 @@ export default async function DashboardPage() {
       isAdmin={!!teacher?.is_admin}
       purchasedGrades={purchasedGrades}
       savedQuizzes={savedQuizzes}
+      quizResults={quizResults}
       accessExpiresAt={teacher?.access_expires_at ?? null}
       accessActive={accessActive}
       logoutAction={logout}
