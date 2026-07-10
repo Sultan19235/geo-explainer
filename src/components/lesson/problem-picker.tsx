@@ -379,7 +379,9 @@ export function ProblemPicker({
           </div>
         )}
 
-        <div className="grid flex-1 content-start grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3 overflow-y-auto px-[22px] py-[18px]">
+        {/* 340px min column (3-up on a 1280 classroom screen): wide enough
+            that full statements fit in a few lines without truncation. */}
+        <div className="grid flex-1 content-start grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3 overflow-y-auto px-[22px] py-[18px]">
           {filteredProblems.length === 0 ? (
             <div className="col-span-full py-16 text-center text-sm text-[#6b7280]">
               {t("bank_nothing_found")}
@@ -585,12 +587,11 @@ function BankCard({
       </div>
 
       {problem.statementHtml && (
-        // shrink-0 stops the flex card from crushing the preview to nothing in
-        // a narrow column. line-clamp-3 truncates by LINE (Chrome's
-        // standardized line-clamp reports display:flow-root but clamps fine),
-        // so KaTeX-taller lines are never sliced mid-glyph the way a pixel
-        // max-height did. p margins/leading normalized for compact lines.
-        <div className="shrink-0 line-clamp-3 text-[12px] text-[#6b7280] [&_.katex]:text-[1.02em] [&_p]:!my-0 [&_p]:!leading-[1.55]">
+        // Full statement, untruncated — the teacher picks problems by their
+        // text, so hiding it behind an ellipsis defeated the card. Columns
+        // are wide enough (min 340px) that this stays a few lines. shrink-0
+        // stops the flex card from crushing it in a tight column.
+        <div className="shrink-0 text-[12.5px] text-[#6b7280] [&_.katex]:text-[1.02em] [&_p]:!my-0 [&_p]:!leading-[1.55]">
           <LessonHtml html={problem.statementHtml} lang={lang} />
         </div>
       )}
