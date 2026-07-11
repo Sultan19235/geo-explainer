@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="kk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MathSabaq · Lesson file previewer</title>
+<!-- KaTeX (same renderer family as the site player) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<!-- GeoGebra engine -->
+<script src="https://www.geogebra.org/apps/deployggb.js"></script>
+<!-- Canonical lesson-file runtime (copy of the site's /lesson-runtime.js) -->
+<script src="lesson-runtime.js"></script>
+<style>
+  :root { --exp-font: 15px; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background:#f8f9fb; color:#1a1a2e; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+  header { display:flex; align-items:center; gap:12px; padding:10px 16px; background:#fff; border-bottom:1.5px solid #d8dde5; flex-wrap:wrap; }
+  header h1 { font-size:15px; font-weight:700; }
+  header .hint { font-size:12px; color:#6b7280; }
+  .spacer { flex:1; }
+  .btn { border:1.5px solid #d8dde5; background:#fff; color:#6b7280; border-radius:6px; padding:5px 12px; font-size:12.5px; font-weight:600; cursor:pointer; }
+  .btn:hover { color:#1a1a2e; border-color:#c5cad3; }
+  .btn.active { background:#2563eb; border-color:#2563eb; color:#fff; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .group { display:flex; gap:4px; }
+
+  main { flex:1; display:flex; min-height:0; }
+  aside { width:250px; border-right:1.5px solid #d8dde5; background:#fff; overflow-y:auto; padding:10px; }
+  aside .drop { border:2px dashed #c5cad3; border-radius:10px; padding:18px 10px; text-align:center; color:#6b7280; font-size:12.5px; cursor:pointer; }
+  aside .drop.over { border-color:#2563eb; color:#2563eb; }
+  aside ul { list-style:none; margin-top:10px; display:flex; flex-direction:column; gap:6px; }
+  aside li button { width:100%; text-align:left; border:1.5px solid #d8dde5; background:#fff; border-radius:8px; padding:8px 10px; font-size:12.5px; cursor:pointer; }
+  aside li button:hover { border-color:#2563eb; }
+  aside li button.active { border-color:#2563eb; background:#eff6ff; }
+  aside li .kind { font-size:10px; font-weight:700; text-transform:uppercase; color:#6b7280; }
+  aside li .err { color:#dc2626; font-size:11px; }
+
+  #stage { flex:1; display:flex; min-width:0; }
+  #graph-panel { width:50%; min-width:200px; position:relative; background:#fff; overflow:hidden; }
+  #ggb-holder { position:absolute; inset:0; }
+  #resizer { width:9px; cursor:col-resize; background:#f1f3f7; display:flex; align-items:center; justify-content:center; }
+  #resizer::after { content:""; width:3px; height:36px; border-radius:3px; background:#c5cad3; }
+  #resizer:hover { background:#dbe3f0; }
+
+  #text-panel { flex:1; min-width:0; display:flex; flex-direction:column; background:#fff; border-left:1.5px solid #d8dde5; }
+  #statement { border-bottom:1.5px solid #d8dde5; background:#fbfcfe; padding:14px 20px; max-height:42%; overflow-y:auto; font-size:var(--exp-font); line-height:1.7; }
+  #statement .plabel { display:inline-block; background:#eff6ff; color:#2563eb; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; border-radius:4px; padding:3px 9px; margin-bottom:10px; }
+  #steps { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:20px; font-size:var(--exp-font); line-height:1.7; }
+  .stepblock.faded { opacity:.65; }
+  .stepblock .shead { display:flex; align-items:center; gap:9px; border-bottom:2px solid #2563eb; padding-bottom:7px; margin-bottom:10px; }
+  .stepblock .snum { width:22px; height:22px; border-radius:50%; background:#2563eb; color:#fff; font-size:11.5px; font-weight:700; display:grid; place-items:center; flex-shrink:0; }
+  .stepblock h3 { font-size:1em; color:#2563eb; }
+  #navbar { display:flex; align-items:center; justify-content:flex-end; gap:14px; border-top:1.5px solid #d8dde5; padding:9px 16px; }
+  #navbar .counter { font-size:12.5px; font-weight:600; color:#6b7280; }
+  #navbar .btn.primary { background:#2563eb; border-color:#2563eb; color:#fff; }
+  #navbar .btn.primary:disabled { background:#cbd5e1; border-color:#cbd5e1; }
+
+  /* Sanctioned content classes — keep in sync with the site player */
+  .lf-formula { border:1.5px solid #d8dde5; background:#f8f9fb; border-radius:8px; padding:10px 14px; text-align:center; margin:10px 0; }
+  .lf-formula-label { font-size:.72em; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:#6b7280; margin-top:4px; }
+  .lf-given { border:1.5px solid #bfdbfe; background:#eff6ff; border-radius:8px; padding:12px 16px; text-align:center; margin:10px 0; }
+  .lf-answer { border:1.5px solid #bbf7d0; background:#f0fdf4; border-radius:8px; padding:11px 16px; margin:10px 0; font-weight:600; }
+  .lf-callout { border-left:3px solid #f59e0b; background:#fffbeb; border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; color:#78350f; font-size:.92em; }
+  .lf-find { background:#fee2e2; color:#b91c1c; border-radius:5px; padding:1px 6px; font-weight:600; }
+  #steps p, #statement p { margin:6px 0; }
+
+  #empty { flex:1; display:grid; place-items:center; color:#6b7280; font-size:14px; padding:30px; text-align:center; }
+  #ggb-loading { position:absolute; inset:0; display:grid; place-items:center; background:#fff; z-index:5; color:#6b7280; font-size:13px; }
+  #ggb-loading.done { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Lesson previewer</h1>
+  <span class="hint" id="runtime-version"></span>
+  <span class="spacer"></span>
+  <div class="group">
+    <button class="btn active" id="btn-kz" onclick="setLang('kz')">KZ</button>
+    <button class="btn" id="btn-ru" onclick="setLang('ru')">RU</button>
+  </div>
+  <div class="group">
+    <button class="btn" onclick="bumpFont(-1)">A−</button>
+    <button class="btn" onclick="bumpFont(1)">A+</button>
+  </div>
+  <button class="btn" onclick="resetView()">⟲ View</button>
+</header>
+
+<main>
+  <aside>
+    <div class="drop" id="drop" onclick="document.getElementById('file-input').click()">
+      Файлдарды осында тастаңыз<br>немесе басып таңдаңыз (.js)
+    </div>
+    <input type="file" id="file-input" accept=".js" multiple style="display:none">
+    <ul id="file-list"></ul>
+  </aside>
+
+  <div id="stage">
+    <div id="graph-panel">
+      <div id="ggb-holder"><div id="ggb-element"></div></div>
+      <div id="ggb-loading">GeoGebra жүктелуде…</div>
+    </div>
+    <div id="resizer"></div>
+    <div id="text-panel">
+      <div id="empty">Сол жақтан лекция файлын (.js) таңдаңыз — есеп дәл сайттағыдай көрсетіледі.</div>
+      <div id="statement" style="display:none"></div>
+      <div id="steps" style="display:none"></div>
+      <div id="navbar" style="display:none">
+        <button class="btn" id="btn-prev" onclick="navigate(-1)">← Алдыңғы</button>
+        <span class="counter" id="counter"></span>
+        <button class="btn primary" id="btn-next" onclick="navigate(1)">Келесі →</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+// ── state ──
+var files = [];          // { name, kind, def, error }
+var activeIdx = -1;
+var lang = 'kz';
+var fontPx = 15;
+var stepIdx = 0;         // current step (problem) or section (theory)
+var api = null;          // GeoGebra applet api
+var toolkit = null;
+
+document.getElementById('runtime-version').textContent =
+  window.LessonRuntime ? 'runtime v' + LessonRuntime.version : 'runtime NOT loaded!';
+
+// ── GeoGebra boot (once) ──
+// appName "3d" loads the full web3d codebase (classic from the CDN loads the
+// 2D-only build → SetViewDirection unknown, no 3D view). Same app the site
+// player uses in its default mode.
+var applet = new GGBApplet({
+  appName: "3d", width: 800, height: 600, language: "en",
+  showToolBar: false, showAlgebraInput: false, showMenuBar: false,
+  enableRightClick: false, showZoomButtons: false, showResetIcon: false,
+  enableShiftDragZoom: true, preventFocus: true, perspective: "T",
+  appletOnLoad: function (a) {
+    api = a;
+    toolkit = LessonRuntime.createToolkit(a);
+    try { a.setPerspective("T"); a.setVisible("algebra", false); } catch (e) {}
+    document.getElementById('ggb-loading').classList.add('done');
+    fitApplet();
+    if (activeIdx >= 0) activate(activeIdx);
+  }
+});
+window.addEventListener('load', function () { applet.inject('ggb-element'); });
+
+function fitApplet() {
+  if (!api) return;
+  var p = document.getElementById('graph-panel');
+  try { api.setSize(Math.floor(p.clientWidth), Math.floor(p.clientHeight)); } catch (e) {}
+}
+window.addEventListener('resize', fitApplet);
+
+// ── file loading (blob URL → script tag → same registration path as site) ──
+function addFiles(fileList) {
+  Array.prototype.forEach.call(fileList, function (file) {
+    if (!/\.js$/i.test(file.name)) return;
+    var reader = new FileReader();
+    reader.onload = function () { loadSource(file.name, String(reader.result)); };
+    reader.readAsText(file);
+  });
+}
+
+var loadChain = Promise.resolve();
+function loadSource(name, source) {
+  loadChain = loadChain.then(function () {
+    return new Promise(function (resolve) {
+      var entry = { name: name, kind: null, def: null, error: null };
+      var timer = setTimeout(function () {
+        entry.error = 'файл тіркелмеді (register шақырылмады)';
+        finish();
+      }, 8000);
+      function finish() {
+        clearTimeout(timer);
+        LessonRuntime.capture(null, null);
+        // replace an earlier load of the same file name
+        var existing = files.findIndex(function (f) { return f.name === name; });
+        if (existing >= 0) files[existing] = entry; else files.push(entry);
+        renderFileList();
+        if (!entry.error && files.filter(function (f) { return !f.error; }).length === 1) {
+          activate(files.indexOf(entry));
+        }
+        resolve();
+      }
+      LessonRuntime.capture(
+        function (def) { entry.kind = 'problem'; entry.def = def; finish(); },
+        function (def) { entry.kind = 'theory'; entry.def = def; finish(); }
+      );
+      try {
+        var blob = new Blob([source], { type: 'text/javascript' });
+        var url = URL.createObjectURL(blob);
+        var script = document.createElement('script');
+        script.src = url;
+        script.onerror = function () { entry.error = 'скрипт қатесі'; finish(); };
+        document.head.appendChild(script);
+      } catch (e) {
+        entry.error = String(e);
+        finish();
+      }
+    });
+  });
+}
+
+document.getElementById('file-input').addEventListener('change', function (e) {
+  addFiles(e.target.files); e.target.value = '';
+});
+var drop = document.getElementById('drop');
+['dragover', 'dragenter'].forEach(function (t) {
+  drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('over'); });
+});
+['dragleave', 'drop'].forEach(function (t) {
+  drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.remove('over'); });
+});
+drop.addEventListener('drop', function (e) { addFiles(e.dataTransfer.files); });
+
+function renderFileList() {
+  var ul = document.getElementById('file-list');
+  ul.innerHTML = '';
+  files.forEach(function (f, i) {
+    var li = document.createElement('li');
+    var b = document.createElement('button');
+    b.className = i === activeIdx ? 'active' : '';
+    var title = f.def ? pick(f.def.title) : f.name;
+    b.innerHTML = '<span class="kind">' + (f.kind || '?') + (f.def && f.def.number ? ' №' + f.def.number : '') + '</span><br>' +
+      escapeHtml(title) + (f.error ? '<br><span class="err">' + escapeHtml(f.error) + '</span>' : '');
+    b.onclick = function () { if (!f.error) activate(i); };
+    li.appendChild(b);
+    ul.appendChild(li);
+  });
+}
+
+// ── activation & steps (mirrors the site player's algorithm) ──
+function activate(i) {
+  activeIdx = i; stepIdx = 0;
+  renderFileList();
+  rebuildModel();
+  renderText();
+}
+
+function currentDef() { return activeIdx >= 0 ? files[activeIdx].def : null; }
+function isTheory() { return activeIdx >= 0 && files[activeIdx].kind === 'theory'; }
+
+function modelSpec() {
+  var def = currentDef();
+  if (!def) return null;
+  if (isTheory()) {
+    var s = def.sections[stepIdx] || {};
+    return { view: s.view, home: s.home, fit: s.fit, axes: s.axes, init: s.ggb || null, runs: [] };
+  }
+  var runs = [];
+  for (var k = 0; k <= stepIdx; k++) {
+    if (def.steps[k] && typeof def.steps[k].run === 'function') runs.push(def.steps[k].run);
+  }
+  return { view: def.view, home: def.home, fit: def.fit, axes: def.axes, init: def.init, runs: runs };
+}
+
+// Clean construction → init → camera → replay runs 0..stepIdx.
+// Objects are deleted one by one instead of newConstruction(): resetting the
+// whole construction also resets the classic app's perspective to 2D.
+function clearAllObjects() {
+  try {
+    api.getAllObjectNames().forEach(function (n) {
+      try { api.deleteObject(n); } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function rebuildModel() {
+  if (!api || !toolkit) return;
+  var spec = modelSpec();
+  if (!spec) return;
+  clearAllObjects();
+  try { api.setPerspective(spec.view === '2d' ? 'G' : 'T'); } catch (e) {}
+  if (!spec.axes) toolkit.hideAxes();
+  if (spec.init) { try { spec.init(toolkit); } catch (e) { console.error(e); } }
+  applyCamera(spec);
+  spec.runs.forEach(function (run) {
+    try { run(toolkit); } catch (e) { console.error(e); }
+  });
+}
+
+// Forward one step: just run the new step (no rebuild) — same as the site.
+function advanceModel() {
+  var def = currentDef();
+  if (!def || isTheory() || !api) return;
+  var step = def.steps[stepIdx];
+  if (step && typeof step.run === 'function') {
+    try { step.run(toolkit); } catch (e) { console.error(e); }
+  }
+}
+
+function applyCamera(spec) {
+  if (!api) return;
+  if (spec.fit) { try { api.setCoordSystem.apply(api, spec.fit); } catch (e) {} }
+  if (spec.home) { try { api.evalCommand('SetViewDirection(' + spec.home + ')'); } catch (e) {} }
+}
+
+function resetView() {
+  var spec = modelSpec();
+  if (spec) applyCamera(spec);
+}
+
+function navigate(d) {
+  var def = currentDef();
+  if (!def) return;
+  var max = (isTheory() ? def.sections.length : def.steps.length) - 1;
+  var next = Math.max(0, Math.min(max, stepIdx + d));
+  if (next === stepIdx) return;
+  if (isTheory()) {
+    stepIdx = next;
+    rebuildModel();
+  } else if (next > stepIdx) {
+    stepIdx = next;
+    advanceModel();
+  } else {
+    stepIdx = next;
+    rebuildModel();
+  }
+  renderText();
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'ArrowRight') navigate(1);
+  if (e.key === 'ArrowLeft') navigate(-1);
+});
+
+// ── text rendering ──
+function pick(loc) {
+  if (!loc) return '';
+  if (typeof loc === 'string') return loc;
+  return (lang === 'ru' ? loc.ru : null) || loc.kz || '';
+}
+
+function renderText() {
+  var def = currentDef();
+  var empty = document.getElementById('empty');
+  var st = document.getElementById('statement');
+  var steps = document.getElementById('steps');
+  var nav = document.getElementById('navbar');
+  if (!def) { empty.style.display = ''; st.style.display = 'none'; steps.style.display = 'none'; nav.style.display = 'none'; return; }
+  empty.style.display = 'none';
+  steps.style.display = '';
+  nav.style.display = '';
+
+  if (isTheory()) {
+    st.style.display = 'none';
+    var s = def.sections[stepIdx];
+    steps.innerHTML = stepBlock(stepIdx + 1, pick(s.title), pick(s.html), false);
+    document.getElementById('counter').textContent = (stepIdx + 1) + ' / ' + def.sections.length;
+  } else {
+    st.style.display = '';
+    st.innerHTML = '<div class="plabel">Есеп' + (def.number ? ' №' + def.number : '') + '</div>' + pick(def.statement);
+    var html = '';
+    for (var k = 0; k <= stepIdx; k++) {
+      var step = def.steps[k];
+      html += stepBlock(k + 1, pick(step.title), pick(step.html), k < stepIdx);
+    }
+    steps.innerHTML = html;
+    document.getElementById('counter').textContent = (stepIdx + 1) + ' / ' + def.steps.length + ' қадам';
+  }
+  document.getElementById('btn-prev').disabled = stepIdx === 0;
+  var max = (isTheory() ? def.sections.length : def.steps.length) - 1;
+  document.getElementById('btn-next').disabled = stepIdx >= max;
+
+  typeset(st); typeset(steps);
+  steps.scrollTop = steps.scrollHeight;
+}
+
+function stepBlock(n, title, html, faded) {
+  return '<div class="stepblock' + (faded ? ' faded' : '') + '">' +
+    '<div class="shead"><span class="snum">' + n + '</span><h3>' + escapeHtml(title) + '</h3></div>' +
+    '<div>' + html + '</div></div>';
+}
+
+function typeset(el) {
+  if (window.renderMathInElement) {
+    renderMathInElement(el, {
+      delimiters: [
+        { left: '\\[', right: '\\]', display: true },
+        { left: '\\(', right: '\\)', display: false },
+        { left: '$$', right: '$$', display: true },
+        { left: '$', right: '$', display: false }
+      ],
+      throwOnError: false
+    });
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+// ── header controls ──
+function setLang(l) {
+  lang = l;
+  document.getElementById('btn-kz').classList.toggle('active', l === 'kz');
+  document.getElementById('btn-ru').classList.toggle('active', l === 'ru');
+  renderText();
+  renderFileList();
+}
+function bumpFont(d) {
+  fontPx = Math.max(11, Math.min(26, fontPx + d * 2));
+  document.documentElement.style.setProperty('--exp-font', fontPx + 'px');
+}
+
+// ── splitter ──
+(function () {
+  var rs = document.getElementById('resizer');
+  var gp = document.getElementById('graph-panel');
+  var dragging = false;
+  rs.addEventListener('mousedown', function () { dragging = true; document.body.style.userSelect = 'none'; });
+  window.addEventListener('mouseup', function () {
+    if (dragging) { dragging = false; document.body.style.userSelect = ''; fitApplet(); }
+  });
+  window.addEventListener('mousemove', function (e) {
+    if (!dragging) return;
+    var stage = document.getElementById('stage').getBoundingClientRect();
+    var w = ((e.clientX - stage.left) / stage.width) * 100;
+    gp.style.width = Math.max(25, Math.min(70, w)) + '%';
+  });
+})();
+</script>
+</body>
+</html>

@@ -13,6 +13,7 @@ written to any database.
 | `POST /session` | teacher console | create room → `{code}` (token-gated when `QUIZ_TOKEN_SECRET` is set) |
 | `POST /start` / `POST /end` | teacher console | waiting → active → ended |
 | `GET /status?code=` | student page | poll state while waiting / after |
+| `GET /resolve?code=` | /join page | room code → `{status, title, studentPath}` (universal entrance) |
 | `POST /submit` | student page | score heartbeat (15s) + immediate on answer/focus change |
 | `GET /live?code=` | teacher console | SSE stream: `snapshot`, `update`, `started`, `ended` |
 | `GET /health` | anyone | counts + which features are enabled |
@@ -37,7 +38,7 @@ service-role key has no business sitting on a box that doesn't use it).
 ssh root@89.167.9.192 'cp /root/server.js /root/server.js.bak'   # rollback copy
 scp server/server.js root@89.167.9.192:/root/server.js
 ssh root@89.167.9.192 'pm2 restart mathsabaq-live && pm2 save'
-curl -s https://mathsabaq.online/health                          # expect "version":3
+curl -s https://mathsabaq.online/health                          # expect "version":5
 ```
 
 Rollback: `ssh root@89.167.9.192 'cp /root/server.js.bak /root/server.js && pm2 restart mathsabaq-live'`

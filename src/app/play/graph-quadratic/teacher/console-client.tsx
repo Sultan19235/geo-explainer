@@ -30,6 +30,10 @@ import {
   useTeacherSession,
   type LiveStudent,
 } from "@/lib/quiz/use-teacher-session";
+import {
+  useResultAutosave,
+  type ResultSaveStatus,
+} from "@/lib/quiz/use-result-autosave";
 
 const QUIZ_TITLE = "Квадраттық функция";
 
@@ -71,6 +75,20 @@ export function ConsoleClient() {
   const [sections, setSections] = useState<Set<SectionId>>(() => new Set());
   const [qrOpen, setQrOpen] = useState(false);
 
+  // Freeze the scoreboard into the teacher's profile when the room ends.
+  // Signed-out hosts get "off" back from the action and keep the old
+  // ephemeral behavior. No quiz row or stable question ids behind this
+  // legacy console — aggregates only.
+  const resultSave = useResultAutosave({
+    phase: session.phase,
+    code: session.code,
+    students: session.students,
+    enabled: true,
+    quizId: null,
+    title: QUIZ_TITLE,
+    questionIds: null,
+  });
+
   const studentUrl =
     session.code === null
       ? ""
@@ -110,7 +128,12 @@ export function ConsoleClient() {
         />
       )}
       {session.phase === "results" && (
-        <ResultsScreen students={session.students} onNew={session.reset} />
+        <ResultsScreen
+          students={session.students}
+          onNew={session.reset}
+          saveStatus={resultSave.status}
+          onRetrySave={resultSave.retry}
+        />
       )}
 
       {qrOpen && session.code && (
@@ -614,9 +637,13 @@ function Avatar({
 function ResultsScreen({
   students,
   onNew,
+  saveStatus,
+  onRetrySave,
 }: {
   students: Map<string, LiveStudent>;
   onNew: () => void;
+  saveStatus: ResultSaveStatus;
+  onRetrySave: () => void;
 }) {
   const sorted = sortStudents(students);
 
@@ -680,9 +707,37 @@ function ResultsScreen({
         )}
       </div>
 
+      <div className="mt-5 flex min-h-7 items-center justify-center gap-2 text-xs">
+        {saveStatus === "saving" && (
+          <span className="flex items-center gap-1.5 text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+            Нәтижелер профильге сақталуда…
+          </span>
+        )}
+        {saveStatus === "saved" && (
+          <span className="flex items-center gap-1.5 font-semibold text-emerald-600">
+            <Check className="size-3.5" aria-hidden />
+            Нәтижелер профиліңізге сақталды
+          </span>
+        )}
+        {saveStatus === "error" && (
+          <span className="flex items-center gap-2 font-semibold text-destructive">
+            Нәтижелерді сақтау сәтсіз болды
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onRetrySave}
+              className="h-7 px-2 text-xs font-semibold"
+            >
+              Қайталау
+            </Button>
+          </span>
+        )}
+      </div>
+
       <Button
         onClick={onNew}
-        className="mt-6 h-12 w-full text-base font-semibold"
+        className="mt-4 h-12 w-full text-base font-semibold"
       >
         <ArrowLeft className="size-4" aria-hidden />
         Жаңа сабақ

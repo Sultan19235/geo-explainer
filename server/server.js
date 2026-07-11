@@ -1,23 +1,30 @@
 /**
- * MathSabaq Live Score Server — v3
+ * MathSabaq Live Score Server — v5
  * Hetzner Node.js backend — HTTP POST + SSE
- * No Socket.io. Pure HTTP. Sessions live in memory ONLY: by product decision
- * there is no class history — when a session ends, the scores the teacher saw
- * are the whole story, and nothing is written anywhere.
+ * No Socket.io. Pure HTTP. Sessions live in memory ONLY. This server never
+ * writes results anywhere — since 2026-07-10 the teacher's CONSOLE saves the
+ * final scoreboard to Supabase itself (under the teacher's own login), so the
+ * box stays credential-free.
  *
  * Session lifecycle:  waiting → active → ended
  *   POST /session   → creates session (status: waiting)      [token-gated*]
  *   POST /start     → teacher starts quiz (status: active, starts 45-min timer)
  *   POST /end       → teacher ends quiz   (status: ended)
  *   GET  /status    → students poll session state
+ *   GET  /resolve   → room code → student join path (universal /join page)
  *   POST /submit    → student sends score (response includes status + timeLeft)
  *   GET  /live      → teacher SSE stream
  *   GET  /health    → sessions/students counts + enabled features
  *
- * v3 over v2: results persistence removed (no Supabase, no history — sessions
- * evaporate when they end / age out). v2 over v1: collision-checked room
- * codes, /submit broadcasts only real changes, optional auth gate, abuse
- * limits.
+ * v5 over v4: kahoot-style universal entrance. /session stores the console's
+ * `studentPath` (the room's site-relative join link) and public
+ * GET /resolve?code= hands it back, so the website's /join page can turn a
+ * code typed from the whiteboard into the right quiz. v4 over v3: /submit accepts an optional per-question `answers` map
+ * (question id -> 0|1) and relays it to the teacher's SSE stream, so the
+ * console can save per-question detail. v3 over v2: results persistence
+ * removed (no Supabase — sessions evaporate when they end / age out). v2 over
+ * v1: collision-checked room codes, /submit broadcasts only real changes,
+ * optional auth gate, abuse limits.
  *
  * Config (env or a .env file next to this script; real env vars win):
  *   PORT                     default 3000 (prod runs 3001 behind nginx)
@@ -132,6 +139,24 @@ app.use((req, res, next) => {
 const MAX_SESSIONS = 20000;
 const MAX_STUDENTS_PER_SESSION = 100;
 const MAX_NAME_LENGTH = 40;
+const MAX_ANSWER_ENTRIES = 500;
+const MAX_ANSWER_KEY_LENGTH = 64;
+
+// Per-question outcomes from the student engine: { questionId: 0|1 }.
+// Anything malformed is dropped rather than rejected so old clients (which
+// never send the field) and hostile payloads degrade the same way.
+function cleanAnswers(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out = {};
+  let n = 0;
+  for (const [key, value] of Object.entries(raw)) {
+    if (key.length === 0 || key.length > MAX_ANSWER_KEY_LENGTH) continue;
+    if (value !== 0 && value !== 1 && value !== true && value !== false) continue;
+    out[key] = value ? 1 : 0;
+    if (++n >= MAX_ANSWER_ENTRIES) break;
+  }
+  return n > 0 ? out : undefined;
+}
 
 // ─── In-memory session store ───────────────────────────────────────────────
 const sessions = new Map();
@@ -155,6 +180,33 @@ function generateCode() {
 // to control or watch the room when LIVE_HOST_SECRET_ENFORCED is set.
 function generateHostSecret() {
   return crypto.randomBytes(24).toString('base64url');
+}
+
+// The console's student join link for the room, e.g.
+// "/play/algebra-7?q=a,b&shuffle=1". Stored so GET /resolve can turn a typed
+// room code into the right quiz — the kahoot-style universal entrance.
+// Site-RELATIVE on purpose: no origin is ever stored, so moving the website
+// to a new domain invalidates nothing, and the /join page never leaves its
+// own site. Invalid values are dropped silently — a bad or missing path must
+// never block opening a room (old consoles don't send one at all).
+const MAX_STUDENT_PATH_LENGTH = 1000;
+function sanitizeStudentPath(p) {
+  if (typeof p !== 'string' || p.length > MAX_STUDENT_PATH_LENGTH) return null;
+  // "/play/..." plus printable non-space ASCII only (query values arrive
+  // URL-encoded). Rules out protocol-relative "//", whitespace smuggling and
+  // control characters wholesale.
+  if (!/^\/play\/[!-~]*$/.test(p)) return null;
+  // Normalize the way a browser will (dot segments, backslashes, %2e tricks)
+  // and re-check the prefix on the RESULT — "/play/../admin" and friends
+  // normalize right out of /play/. The normalized form is what gets stored,
+  // so /resolve never serves a path this check didn't see.
+  try {
+    const u = new URL(p, 'http://base');
+    if (u.origin !== 'http://base' || !u.pathname.startsWith('/play/')) return null;
+    return u.pathname + u.search;
+  } catch (_) {
+    return null;
+  }
 }
 
 function verifyHostSecret(session, provided) {
@@ -243,8 +295,9 @@ setInterval(() => {
 // ─── Routes ───────────────────────────────────────────────────────────────
 
 // Teacher creates a session → gets a code (status: waiting).
-// Body: { title, token? } — old consoles send only title and still work
-// while the gate is open. (quizId from older v2 consoles is ignored.)
+// Body: { title, token?, studentPath? } — old consoles send only title and
+// still work while the gate is open. (quizId from older v2 consoles is
+// ignored; v5 consoles send studentPath for the universal /join page.)
 app.post('/session', (req, res) => {
   if (!verifyQuizToken(req.body.token)) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -263,6 +316,7 @@ app.post('/session', (req, res) => {
     hostSecret,
     createdAt: Date.now(),
     title: String(req.body.title || 'Math Quiz').slice(0, 200),
+    studentPath: sanitizeStudentPath(req.body.studentPath),
     status: 'waiting',
     startedAt: null,
     students: new Map(),
@@ -325,10 +379,32 @@ app.get('/status', (req, res) => {
   });
 });
 
+// Universal join: the site's /join page turns a room code the teacher wrote
+// on the board into this room's student link. Public by design — it reveals
+// no more than the QR already hands every student in the class. The code is
+// normalized here so phones may lowercase or pad it freely.
+app.get('/resolve', (req, res) => {
+  const code = String(req.query.code || '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: 'Missing code' });
+
+  const session = sessions.get(code);
+  if (!session) return res.status(404).json({ error: 'Session not found', status: 'not_found' });
+
+  checkAutoEnd(session);
+
+  res.json({
+    status: session.status,
+    title: session.title,
+    // null for rooms opened by pre-v5 consoles — the join page tells those
+    // students to use the teacher's QR instead.
+    studentPath: session.studentPath || null
+  });
+});
+
 // Student submits score (heartbeat + on every answer / focus change)
 app.post('/submit', (req, res) => {
   const { code, studentId, name, score, total, finished,
-          focused, tabSwitches, awaySeconds } = req.body;
+          focused, tabSwitches, awaySeconds, answers } = req.body;
 
   if (!code || !studentId) return res.status(400).json({ error: 'Missing fields' });
 
@@ -350,6 +426,9 @@ app.post('/submit', (req, res) => {
     focused:     focused     !== undefined ? focused     : true,
     tabSwitches: tabSwitches !== undefined ? tabSwitches : 0,
     awaySeconds: awaySeconds !== undefined ? awaySeconds : 0,
+    // Keep the last known map when a heartbeat omits/garbles the field, so a
+    // brief bad submit can't wipe detail the console already relies on.
+    answers:     cleanAnswers(answers) || (prev ? prev.answers : undefined),
     updatedAt:   Date.now()
   };
 
@@ -443,7 +522,7 @@ app.get('/live', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     ok: true,
-    version: 3,
+    version: 5,
     sessions: sessions.size,
     students: Array.from(sessions.values()).reduce((n, s) => n + s.students.size, 0),
     authGate: AUTH_ENFORCED,
@@ -454,8 +533,8 @@ app.get('/health', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ MathSabaq server v3 running on port ${PORT}`);
-  console.log(`   class history: never saved (by design)`);
+  console.log(`✅ MathSabaq server v5 running on port ${PORT}`);
+  console.log(`   class history: not saved HERE — the teacher console saves to Supabase`);
   console.log(`   /session auth gate: ${AUTH_ENFORCED ? 'ENFORCED' : 'OPEN — set QUIZ_TOKEN_SECRET to enforce'}`);
   console.log(`   host-secret gate:   ${HOST_SECRET_ENFORCED ? 'ENFORCED' : 'DORMANT — set LIVE_HOST_SECRET_ENFORCED to enforce'}`);
   console.log(`   CORS:               ${CORS_LOCKED ? `locked to ${ALLOWED_ORIGINS.join(', ')}` : 'OPEN — set LIVE_ALLOWED_ORIGINS to lock'}`);

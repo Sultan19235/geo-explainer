@@ -151,6 +151,10 @@
   }
   html {
     @apply font-sans;
+    /* Reserve the scrollbar gutter permanently: opening a modal (which
+       hides page scroll) no longer changes the layout width, so GeoGebra
+       applets don't get resized — and don't blink — around dialogs. */
+    scrollbar-gutter: stable;
   }
 }
 
