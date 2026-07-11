@@ -1,5 +1,15 @@
 export type Lang = "kz" | "ru";
 
+// Russian numeric agreement: 1 раз / 2 раза / 5 раз. Kazakh nouns don't
+// inflect after numerals, so only the ru block needs this.
+const ruPlural = (n: number, one: string, few: string, many: string): string => {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+};
+
 export const STRINGS = {
   kz: {
     // Brand
@@ -300,6 +310,35 @@ export const STRINGS = {
     ua_ago_day: (n: number) => `${n} күн бұрын`,
     ua_minutes: (n: number) => `${n} мин`,
     ua_hours: (n: number) => `${n} сағ`,
+    ua_status_dropped: "Үзілген",
+    ua_online_now: "Қазір желіде",
+    ua_totals_active_today: "Бүгін белсенді",
+    ua_totals_active_week: "Аптада белсенді",
+    ua_totals_quizzes_week: "Аптадағы тесттер",
+    ua_totals_students_week: "Аптадағы оқушылар",
+    ua_col_quiz_runs: "Өткізілген тесттер",
+    ua_col_students_reached: "Оқушылар",
+    ua_col_trend: "14 күн",
+    ua_quiz_sessions_title: "Өткізілген тесттер",
+    ua_qs_col_quiz: "Тест",
+    ua_qs_col_students: "Оқушылар",
+    ua_qs_col_avg: "Орташа нәтиже",
+    ua_qs_none: "Тесттер әлі өткізілмеген.",
+    ua_qs_unavailable:
+      "Тест тарихы әлі қолжетімсіз — quiz_results миграциясы қолданылмаған.",
+    ua_qs_show_students: "Оқушыларды көрсету",
+    ua_qs_hide_students: "Жасыру",
+    ua_room_code: "Бөлме коды",
+    ua_filter_all: "Барлығы",
+    ua_filter_grades: "Сыныптар",
+    ua_filter_lessons: "Сабақтар",
+    ua_filter_quizzes: "Тесттер",
+    ua_times: (n: number) => `${n} рет`,
+    ua_today: "Бүгін",
+    ua_yesterday: "Кеше",
+    ua_activity_30d: "Соңғы 30 күн",
+    ua_sparkline_aria: (days: number, total: number) =>
+      `Соңғы ${days} күндегі белсенділік: ${total} әрекет`,
 
     // Admin: topics list
     topics_title: "Тақырыптар",
@@ -689,6 +728,35 @@ export const STRINGS = {
     ua_ago_day: (n: number) => `${n} дн назад`,
     ua_minutes: (n: number) => `${n} мин`,
     ua_hours: (n: number) => `${n} ч`,
+    ua_status_dropped: "Прервана",
+    ua_online_now: "Сейчас в сети",
+    ua_totals_active_today: "Активны сегодня",
+    ua_totals_active_week: "Активны за неделю",
+    ua_totals_quizzes_week: "Тестов за неделю",
+    ua_totals_students_week: "Учеников за неделю",
+    ua_col_quiz_runs: "Проведено тестов",
+    ua_col_students_reached: "Ученики",
+    ua_col_trend: "14 дней",
+    ua_quiz_sessions_title: "Проведённые тесты",
+    ua_qs_col_quiz: "Тест",
+    ua_qs_col_students: "Ученики",
+    ua_qs_col_avg: "Средний результат",
+    ua_qs_none: "Тесты ещё не проводились.",
+    ua_qs_unavailable:
+      "История тестов пока недоступна — миграция quiz_results не применена.",
+    ua_qs_show_students: "Показать учеников",
+    ua_qs_hide_students: "Скрыть",
+    ua_room_code: "Код комнаты",
+    ua_filter_all: "Все",
+    ua_filter_grades: "Классы",
+    ua_filter_lessons: "Уроки",
+    ua_filter_quizzes: "Тесты",
+    ua_times: (n: number) => `${n} ${ruPlural(n, "раз", "раза", "раз")}`,
+    ua_today: "Сегодня",
+    ua_yesterday: "Вчера",
+    ua_activity_30d: "Последние 30 дней",
+    ua_sparkline_aria: (days: number, total: number) =>
+      `Активность за ${days} ${ruPlural(days, "день", "дня", "дней")}: ${total} ${ruPlural(total, "действие", "действия", "действий")}`,
 
     // Admin: topics list
     topics_title: "Темы",

@@ -6,7 +6,7 @@
 // A login mints an opaque session id into an httpOnly cookie; heartbeats,
 // logout, and page-view events read that cookie to attach to the right session.
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getRequestInfo } from "./request-info";
 
@@ -117,6 +117,21 @@ export async function touchSession(fingerprint?: string | null): Promise<void> {
   }
 }
 
+// True when the current request is a Link prefetch (viewport/hover) rather
+// than a real navigation. Prefetches render the same server components, so
+// pages must check this DURING render — request header APIs are not reliably
+// available inside after() callbacks — and skip scheduling activity logging.
+export async function isPrefetchRequest(): Promise<boolean> {
+  try {
+    const h = await headers();
+    if (h.has("next-router-prefetch")) return true;
+    const purpose = h.get("purpose") ?? h.get("sec-purpose") ?? "";
+    return purpose.toLowerCase().includes("prefetch");
+  } catch {
+    return false;
+  }
+}
+
 // Records a content-usage event tied to the current session. Used in Phase 2 by
 // the grade/lesson/quiz server components. Fire-and-forget.
 export async function logActivity(
@@ -132,13 +147,48 @@ export async function logActivity(
   try {
     const sessionId = await getSessionId();
     const admin = createAdminClient();
+
+    const gradeId = ctx.gradeId ?? null;
+    const topicId = ctx.topicId ?? null;
+    const quizId = ctx.quizId ?? null;
+
+    // Dedup safety net: prefetch and RSC double-fetch both render a page twice
+    // within seconds, which would log the same event twice. Skip the insert if
+    // an identical event (same user, type, target) landed in the last 45s. The
+    // target is matched in the query itself — a quizzes page logs a dozen
+    // open_quiz events at once, so a "recent N rows" scan could miss the one
+    // that matters. A failed lookup falls through to inserting — logging stays
+    // best-effort.
+    const since = new Date(Date.now() - 45_000).toISOString();
+    let dupQuery = admin
+      .from("activity_events")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("type", type)
+      .gte("occurred_at", since)
+      .limit(1);
+    dupQuery =
+      gradeId === null
+        ? dupQuery.is("grade_id", null)
+        : dupQuery.eq("grade_id", gradeId);
+    dupQuery =
+      topicId === null
+        ? dupQuery.is("topic_id", null)
+        : dupQuery.eq("topic_id", topicId);
+    dupQuery =
+      quizId === null
+        ? dupQuery.is("quiz_id", null)
+        : dupQuery.eq("quiz_id", quizId);
+    const { data: dup } = await dupQuery;
+    if (dup && dup.length > 0) return;
+
     await admin.from("activity_events").insert({
       user_id: userId,
       session_id: sessionId,
       type,
-      grade_id: ctx.gradeId ?? null,
-      topic_id: ctx.topicId ?? null,
-      quiz_id: ctx.quizId ?? null,
+      grade_id: gradeId,
+      topic_id: topicId,
+      quiz_id: quizId,
       path: ctx.path ?? null,
     });
   } catch {

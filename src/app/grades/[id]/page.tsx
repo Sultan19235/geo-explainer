@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { logActivity } from "@/lib/analytics/track";
+import { isPrefetchRequest, logActivity } from "@/lib/analytics/track";
 import {
   teacherHasGradeAccess,
   type TeacherAccessRow,
@@ -63,8 +63,9 @@ export default async function GradeTopicsPage({
   ]);
 
   // Track that a signed-in teacher opened this grade. Runs after the response
-  // is sent, so it never delays render.
-  if (user) {
+  // is sent, so it never delays render. Link prefetches render this page too,
+  // so skip those — checked here because headers aren't available in after().
+  if (user && !(await isPrefetchRequest())) {
     after(() =>
       logActivity(user.id, "view_grade", {
         gradeId,
