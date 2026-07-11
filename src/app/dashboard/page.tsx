@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { parseGender } from "@/lib/auth/gender";
 import { teacherHasGradeAccess } from "@/lib/teacher-access";
 import { endLoginSession } from "@/lib/analytics/track";
 import type { SavedQuizSummary } from "@/lib/quiz/saved-quiz";
@@ -48,6 +49,8 @@ type QuizResultRow = {
   question_ids: string[] | null;
   students: ResultStudent[];
   student_count: number;
+  // Optional: absent until the started_at column migration is applied.
+  started_at?: string | null;
   ended_at: string;
 };
 
@@ -129,11 +132,11 @@ export default async function DashboardPage() {
   // Auto-saved live-quiz outcomes, newest first (RLS scopes to this teacher).
   // Errors — e.g. the quiz_results migration not applied yet — degrade to an
   // empty history section instead of breaking the profile.
+  // select("*") instead of an explicit column list so the query keeps working
+  // whether or not the started_at column migration has been applied yet.
   const { data: resultRows } = await supabase
     .from("quiz_results")
-    .select(
-      "id, quiz_id, title, room_code, question_ids, students, student_count, ended_at",
-    )
+    .select("*")
     .order("ended_at", { ascending: false })
     .limit(QUIZ_RESULTS_DASHBOARD_LIMIT)
     .returns<QuizResultRow[]>();
@@ -146,12 +149,14 @@ export default async function DashboardPage() {
     questionIds: row.question_ids,
     students: Array.isArray(row.students) ? row.students : [],
     studentCount: row.student_count,
+    startedAt: row.started_at ?? null,
     endedAt: row.ended_at,
   }));
 
   return (
     <DashboardClient
       email={teacher?.email ?? user.email ?? ""}
+      gender={parseGender(user.user_metadata?.gender)}
       fullName={teacher?.full_name ?? null}
       phone={teacher?.phone ?? null}
       createdAt={teacher?.created_at ?? null}

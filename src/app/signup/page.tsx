@@ -54,6 +54,7 @@ export default function SignupPage() {
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [gender, setGender] = useState<"male" | "female" | "">("");
   const [email, setEmail] = useState("");
   const [emailTouched, setEmailTouched] = useState(false);
   const [password, setPassword] = useState("");
@@ -85,6 +86,7 @@ export default function SignupPage() {
   const canSubmit =
     firstName.trim().length > 0 &&
     lastName.trim().length > 0 &&
+    gender !== "" &&
     isValidEmail(email) &&
     password.length >= MIN_PASSWORD_LENGTH &&
     password === confirm;
@@ -132,6 +134,35 @@ export default function SignupPage() {
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
                   />
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label>{t("gender_label")}</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  {(["male", "female"] as const).map((option) => {
+                    const active = gender === option;
+                    return (
+                      <label
+                        key={option}
+                        className={`flex cursor-pointer items-center justify-center rounded-lg border px-3 py-2 text-sm font-medium transition-colors has-[:focus-visible]:ring-3 has-[:focus-visible]:ring-ring/50 ${
+                          active
+                            ? "border-primary bg-accent/60 text-accent-foreground"
+                            : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="gender"
+                          value={option}
+                          required
+                          checked={active}
+                          onChange={() => setGender(option)}
+                          className="sr-only"
+                        />
+                        {t(option === "male" ? "gender_male" : "gender_female")}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
               <div className="flex flex-col gap-2">

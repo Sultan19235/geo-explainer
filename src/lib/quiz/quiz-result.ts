@@ -31,6 +31,7 @@ export type QuizResultSummary = {
   questionIds: string[] | null;
   students: ResultStudent[];
   studentCount: number;
+  startedAt: string | null;
   endedAt: string;
 };
 

@@ -20,6 +20,7 @@ export async function signup(
 ): Promise<SignupState> {
   const firstName = String(formData.get("first_name") ?? "").trim();
   const lastName = String(formData.get("last_name") ?? "").trim();
+  const gender = String(formData.get("gender") ?? "");
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
   const confirm = String(formData.get("confirm") ?? "");
@@ -27,6 +28,9 @@ export async function signup(
 
   if (!firstName || !lastName) {
     return { error: "Атыңыз бен тегіңізді енгізіңіз." };
+  }
+  if (gender !== "male" && gender !== "female") {
+    return { error: "Жынысыңызды таңдаңыз." };
   }
   if (!email || !password) {
     return { error: "Электрондық пошта мен құпиясөзді енгізіңіз." };
@@ -45,7 +49,9 @@ export async function signup(
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { full_name: fullName } },
+    // gender lives in user_metadata (like full_name); it only picks the
+    // profile avatar.
+    options: { data: { full_name: fullName, gender } },
   });
 
   if (error) {

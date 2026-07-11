@@ -6,9 +6,10 @@ import {
   teacherHasGradeAccess,
   type TeacherAccessRow,
 } from "@/lib/teacher-access";
+import { GRADES } from "@/lib/grades";
 
 export const BUCKET = "lessons";
-export const VALID_GRADES = new Set([7, 8, 9, 10, 11]);
+export const VALID_GRADES = new Set<number>(GRADES);
 // Signed iframe URLs expire after 4 hours and are cached for 1, so a page
 // always gets a URL with ≥3h of validity left — longer than any lesson. A
 // signed URL is path + token; re-uploading to the same path serves the new

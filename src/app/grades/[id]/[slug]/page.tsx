@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { logActivity } from "@/lib/analytics/track";
+import { isPrefetchRequest, logActivity } from "@/lib/analytics/track";
 import { loadAccessibleTopic } from "./topic-access";
 import { LessonHubClient } from "./lesson-hub-client";
 
@@ -13,7 +13,8 @@ export default async function LessonHubPage({
 
   const { supabase, topic, user } = await loadAccessibleTopic(gradeId, slug);
 
-  if (user) {
+  // Skip Link-prefetch renders — only a real navigation counts as a view.
+  if (user && !(await isPrefetchRequest())) {
     after(() =>
       logActivity(user.id, "view_lesson", {
         gradeId: topic.grade_id,

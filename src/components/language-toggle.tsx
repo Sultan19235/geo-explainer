@@ -17,7 +17,7 @@ export function LanguageToggle({ className }: { className?: string }) {
       role="group"
       aria-label="Language"
       className={cn(
-        "inline-flex items-center gap-0.5 rounded-md border border-[#d8dde5] bg-[#f8f9fb] p-0.5",
+        "inline-flex items-center gap-0.5 rounded-md border border-border bg-muted p-0.5",
         className,
       )}
     >
@@ -32,7 +32,7 @@ export function LanguageToggle({ className }: { className?: string }) {
             className={cn(
               "rounded-[5px] px-3.5 py-1 text-xs font-semibold transition-colors",
               active
-                ? "bg-[#2563eb] text-white shadow-sm"
+                ? "bg-primary text-primary-foreground shadow-sm"
                 : "bg-transparent text-muted-foreground hover:text-foreground",
             )}
           >

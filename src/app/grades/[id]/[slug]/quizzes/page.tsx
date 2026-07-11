@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { logActivity } from "@/lib/analytics/track";
+import { isPrefetchRequest, logActivity } from "@/lib/analytics/track";
 import { downloadPack } from "@/lib/quiz/pack-server";
 import {
   createLessonHtmlFrameUrl,
@@ -60,7 +60,8 @@ export default async function QuizzesPage({
 
   // Each rendered quiz iframe is a "used" quiz — log one open_quiz per quiz the
   // teacher is shown. Runs after the response, so it adds no render latency.
-  if (user && quizRows && quizRows.length > 0) {
+  // Link-prefetch renders don't count — checked here, not in after().
+  if (user && quizRows && quizRows.length > 0 && !(await isPrefetchRequest())) {
     const rows = quizRows;
     after(() =>
       Promise.all(
