@@ -33,16 +33,25 @@ export type SubmitPayload = {
   answers?: AnswerMap;
 };
 
+// "not_found" is a load-bearing verdict: the teacher hook deletes its
+// reload-recovery blob on it, and the student page ends the quiz. So only a
+// response that explicitly carries a known status may produce one — anything
+// else (the rate-limiter's 429 {error}, JSON error pages) throws and is
+// handled like a network blip by every caller.
+function parseStatus(data: Partial<StatusResponse>, httpStatus: number) {
+  const s = data.status;
+  if (s !== "waiting" && s !== "active" && s !== "ended" && s !== "not_found") {
+    throw new Error(`quiz backend: unexpected status response (${httpStatus})`);
+  }
+  return { status: s, timeLeft: data.timeLeft };
+}
+
 export async function fetchStatus(code: string): Promise<StatusResponse> {
   const res = await fetch(
     `${BACKEND}/status?code=${encodeURIComponent(code)}`,
   );
   // The server 404s unknown codes but still sends { status: "not_found" }.
-  const data = (await res.json()) as Partial<StatusResponse>;
-  return {
-    status: data.status ?? "not_found",
-    timeLeft: data.timeLeft,
-  };
+  return parseStatus((await res.json()) as Partial<StatusResponse>, res.status);
 }
 
 // Registers presence and reports the score; the response doubles as a status
@@ -56,10 +65,7 @@ export async function submitScore(
     body: JSON.stringify(payload),
   });
   const data = (await res.json()) as Partial<StatusResponse & { ok: boolean }>;
-  return {
-    status: data.status ?? "not_found",
-    timeLeft: data.timeLeft,
-  };
+  return parseStatus(data, res.status);
 }
 
 export type ResolveResult =

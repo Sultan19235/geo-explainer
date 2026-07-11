@@ -11,6 +11,9 @@
 --                 view can label per-question columns. Null for generator rooms.
 -- quiz_id      -> source pack; kept (set null) if the pack is later deleted so
 --                 the history row survives.
+-- started_at   -> when the room went live (console clock). Nullable: the save
+--                 is best-effort and a missing start must not block it; the UI
+--                 shows "—" for duration then.
 
 create table if not exists public.quiz_results (
   id uuid primary key default gen_random_uuid(),
@@ -21,6 +24,7 @@ create table if not exists public.quiz_results (
   question_ids text[] check (question_ids is null or cardinality(question_ids) between 1 and 500),
   students jsonb not null,
   student_count int not null check (student_count between 1 and 200),
+  started_at timestamptz,
   ended_at timestamptz not null default now()
 );
 

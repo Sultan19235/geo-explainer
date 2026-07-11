@@ -10,6 +10,7 @@ import {
   Check,
   Copy,
   EyeOff,
+  History,
   Loader2,
   Play,
   Square,
@@ -29,6 +30,7 @@ import { SECTION_INFO, type SectionId } from "@/lib/quiz/quadratic";
 import {
   useTeacherSession,
   type LiveStudent,
+  type ResumableRoom,
 } from "@/lib/quiz/use-teacher-session";
 import {
   useResultAutosave,
@@ -71,9 +73,25 @@ function sortStudents(students: Map<string, LiveStudent>) {
 }
 
 export function ConsoleClient() {
-  const session = useTeacherSession();
+  // Distinct from the pack consoles' `pack:<uuid>` keys — this legacy console
+  // has no pack row behind it.
+  const session = useTeacherSession({ persistKey: "graph-quadratic" });
   const [sections, setSections] = useState<Set<SectionId>>(() => new Set());
   const [qrOpen, setQrOpen] = useState(false);
+
+  // Reconnect to a room that survived a reload: restore the section ticks the
+  // room was opened with FIRST — the join link/QR derive from them.
+  const resumeRoom = () => {
+    const ctx = session.resumable?.ctx as { sections?: unknown } | undefined;
+    if (ctx && Array.isArray(ctx.sections)) {
+      const known = new Set<string>(SECTION_INFO.map((s) => s.id));
+      const restored = ctx.sections.filter(
+        (id): id is SectionId => typeof id === "string" && known.has(id),
+      );
+      if (restored.length > 0) setSections(new Set(restored));
+    }
+    session.resume();
+  };
 
   // Freeze the scoreboard into the teacher's profile when the room ends.
   // Signed-out hosts get "off" back from the action and keep the old
@@ -89,10 +107,13 @@ export function ConsoleClient() {
     questionIds: null,
   });
 
+  // The join link without the room code — settled before the room opens, so
+  // createRoom sends it to the server for the universal /join page.
+  const studentPath = `/play/graph-quadratic?sec=${[...sections].join(",")}`;
   const studentUrl =
     session.code === null
       ? ""
-      : `${window.location.origin}/play/graph-quadratic?code=${session.code}&sec=${[...sections].join(",")}`;
+      : `${window.location.origin}${studentPath}&code=${session.code}`;
 
   return (
     <main className="quiz-grid-paper min-h-dvh text-foreground">
@@ -102,7 +123,27 @@ export function ConsoleClient() {
           setSections={setSections}
           creating={session.creating}
           createError={session.createError}
-          onCreate={() => session.createRoom(QUIZ_TITLE)}
+          onCreate={() =>
+            session.createRoom(QUIZ_TITLE, studentPath, {
+              sections: [...sections],
+            })
+          }
+          resumable={session.resumable}
+          onResume={resumeRoom}
+          onDiscardResume={() => {
+            // Discarding a still-running room ENDS it for the students —
+            // never let that be a single silent click.
+            if (
+              session.resumable &&
+              session.resumable.status !== "ended" &&
+              !window.confirm(
+                "Ашық бөлме жабылады — оқушыларға «тест аяқталды» деп көрсетіледі. Жаңасын бастайсыз ба?",
+              )
+            ) {
+              return;
+            }
+            session.discardResume();
+          }}
         />
       )}
       {session.phase === "lobby" && session.code && (
@@ -155,12 +196,18 @@ function SetupScreen({
   creating,
   createError,
   onCreate,
+  resumable,
+  onResume,
+  onDiscardResume,
 }: {
   sections: Set<SectionId>;
   setSections: (s: Set<SectionId>) => void;
   creating: boolean;
   createError: "unauthorized" | "network" | null;
   onCreate: () => void;
+  resumable: ResumableRoom | null;
+  onResume: () => void;
+  onDiscardResume: () => void;
 }) {
   const [touched, setTouched] = useState(false);
   const allSelected = sections.size === SECTION_INFO.length;
@@ -183,6 +230,43 @@ function SetupScreen({
           Тікелей тест · Бөлімдерді таңдаңыз
         </p>
       </div>
+
+      {/* a room from a previous page-load is still alive — offer reconnect */}
+      {resumable && (
+        <div
+          role="status"
+          className="mb-4 rounded-2xl border-2 border-primary/40 bg-accent p-4"
+        >
+          <p className="flex flex-wrap items-center gap-2 text-sm font-bold">
+            <History className="size-4 shrink-0 text-primary" aria-hidden />
+            Ашық бөлме табылды
+            <span className="rounded-full border border-primary/20 bg-white px-2 py-0.5 font-mono text-xs font-bold tracking-[0.2em] text-primary">
+              {resumable.code}
+            </span>
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {resumable.status === "ended"
+              ? "Тест аяқталды, бірақ нәтижелері сақтаулы — ашуға болады."
+              : "Бөлме әлі жұмыс істеп тұр — қайта қосылсаңыз, оқушылар нәтижелерімен оралады."}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" onClick={onResume} className="font-semibold">
+              <Play className="size-3.5" aria-hidden />
+              {resumable.status === "ended"
+                ? "Нәтижелерді ашу"
+                : "Қайта қосылу"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onDiscardResume}
+              className="text-muted-foreground"
+            >
+              Жаңасын бастау
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-border bg-card p-5 shadow-lg shadow-blue-950/5">
         <div className="mb-4 flex items-center justify-between border-b border-border pb-3">

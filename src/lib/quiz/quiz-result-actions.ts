@@ -69,6 +69,19 @@ function cleanQuestionIds(raw: unknown): string[] | null {
   return ids;
 }
 
+// The console clock is untrusted input: accept startedAt only if it parses,
+// isn't in the future (small skew allowed) and isn't absurdly old — otherwise
+// save the result without a start time (duration just shows as unknown).
+function cleanStartedAt(raw: unknown, endedAtMs: number): string | null {
+  if (typeof raw !== "string") return null;
+  const ms = Date.parse(raw);
+  if (Number.isNaN(ms)) return null;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  if (ms > endedAtMs + 5 * 60 * 1000) return null;
+  if (ms < endedAtMs - DAY_MS) return null;
+  return new Date(ms).toISOString();
+}
+
 async function requireUser() {
   const supabase = await createClient();
   const {
@@ -87,6 +100,7 @@ export async function saveQuizResultAction(input: {
   roomCode: string;
   questionIds: string[] | null;
   students: ResultStudent[];
+  startedAt?: string | null;
 }): Promise<QuizResultActionResult> {
   const auth = await requireUser();
   if (!auth) return { ok: false, error: "unauthorized" };
@@ -98,21 +112,46 @@ export async function saveQuizResultAction(input: {
     input.questionIds === null ? null : cleanQuestionIds(input.questionIds);
   const quizId =
     input.quizId !== null && UUID_RE.test(input.quizId) ? input.quizId : null;
+  const startedAt = cleanStartedAt(input.startedAt, Date.now());
   if (!title || !roomCode || !students) return { ok: false, error: "invalid" };
 
-  const { data, error } = await auth.supabase
+  type InsertRow = {
+    teacher_id: string;
+    quiz_id: string | null;
+    title: string;
+    room_code: string;
+    question_ids: string[] | null;
+    students: ResultStudent[];
+    student_count: number;
+    started_at?: string;
+  };
+  const baseRow: InsertRow = {
+    teacher_id: auth.user.id,
+    quiz_id: quizId,
+    title,
+    room_code: roomCode,
+    question_ids: questionIds,
+    students,
+    student_count: students.length,
+  };
+  const fullRow: InsertRow = startedAt
+    ? { ...baseRow, started_at: startedAt }
+    : baseRow;
+
+  let { data, error } = await auth.supabase
     .from("quiz_results")
-    .insert({
-      teacher_id: auth.user.id,
-      quiz_id: quizId,
-      title,
-      room_code: roomCode,
-      question_ids: questionIds,
-      students,
-      student_count: students.length,
-    })
+    .insert(fullRow)
     .select("id")
     .single<{ id: string }>();
+  // A deployment where the started_at column migration isn't applied yet must
+  // not lose the whole result — retry the save without the start time.
+  if (error && startedAt && /started_at/i.test(error.message ?? "")) {
+    ({ data, error } = await auth.supabase
+      .from("quiz_results")
+      .insert(baseRow)
+      .select("id")
+      .single<{ id: string }>());
+  }
   if (error || !data) return { ok: false, error: "db" };
 
   // Auto-saves accumulate forever, so prune past the cap instead of refusing

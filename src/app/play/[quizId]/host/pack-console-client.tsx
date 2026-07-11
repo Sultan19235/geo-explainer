@@ -16,6 +16,7 @@ import {
   Flag,
   Expand,
   GripVertical,
+  History,
   ListChecks,
   ListOrdered,
   Loader2,
@@ -60,6 +61,7 @@ import {
 import {
   useTeacherSession,
   type LiveStudent,
+  type ResumableRoom,
 } from "@/lib/quiz/use-teacher-session";
 import {
   useResultAutosave,
@@ -115,6 +117,16 @@ function selectionSnapshot(ids: string[], mode: "custom" | "shuffle") {
   return `${ids.join(",")}|${mode}`;
 }
 
+// The room setup that must survive a teacher-side reload: restoring it before
+// reconnecting keeps the join link/QR and the autosave's question columns
+// identical to the room the students are already in.
+type RoomCtx = {
+  selectedIds: string[];
+  orderMode: "custom" | "shuffle";
+  genSections: SectionId[];
+  genModes: GraphQuizMode[];
+};
+
 export function PackConsoleClient({
   quizId,
   title,
@@ -143,7 +155,9 @@ export function PackConsoleClient({
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
-  const session = useTeacherSession();
+  // persistKey scopes the reload-recovery blob to this quiz — the same room
+  // is offered back whether the console is embedded or standalone.
+  const session = useTeacherSession({ persistKey: `pack:${quizId}` });
   const [qrOpen, setQrOpen] = useState(false);
   // Which questions the teacher includes in this room — an ordered list; in
   // "custom" mode students get exactly this sequence. Defaults to the whole
@@ -211,22 +225,61 @@ export function PackConsoleClient({
       : null;
   // The teacher's generator ticks ride the join link so every student's
   // device generates from exactly this room's choice.
-  const genParam = generator
-    ? `&sec=${genSections.join(",")}&modes=${genModes.join(",")}`
-    : "";
+  const joinParams = [
+    qParam ? `q=${encodeURIComponent(qParam)}` : null,
+    orderMode === "shuffle" ? "shuffle=1" : null,
+    generator ? `sec=${genSections.join(",")}` : null,
+    generator ? `modes=${genModes.join(",")}` : null,
+  ]
+    .filter(Boolean)
+    .join("&");
+  // The join link without the room code: settled before the room opens, so
+  // createRoom sends it to the server for the universal /join page (path
+  // only — the origin is never stored, so domain moves invalidate nothing).
+  const studentPath = `/play/${quizId}${joinParams ? `?${joinParams}` : ""}`;
   // session.code is null during SSR, so window is only touched in the browser.
   const studentUrl =
     session.code === null
       ? ""
-      : `${window.location.origin}/play/${quizId}?code=${session.code}${
-          qParam ? `&q=${encodeURIComponent(qParam)}` : ""
-        }${orderMode === "shuffle" ? "&shuffle=1" : ""}${genParam}`;
+      : `${window.location.origin}${studentPath}${
+          joinParams ? "&" : "?"
+        }code=${session.code}`;
 
   const toggleFullscreen = () => {
     const el = rootRef.current;
     if (!el) return;
     if (document.fullscreenElement) void document.exitFullscreen();
     else void el.requestFullscreen().catch(() => {});
+  };
+
+  // Reconnect to a room that survived a reload: put the console's setup back
+  // to what that room was opened with (dropping ids the pack no longer has),
+  // THEN resume — studentUrl and autosave derive from this state.
+  const resumeRoom = () => {
+    const ctx = session.resumable?.ctx as Partial<RoomCtx> | undefined;
+    if (ctx && typeof ctx === "object") {
+      if (Array.isArray(ctx.selectedIds)) {
+        const known = new Set(questions.map((q) => q.id));
+        const ids = ctx.selectedIds.filter(
+          (id): id is string => typeof id === "string" && known.has(id),
+        );
+        if (ids.length > 0) setSelectedIds(ids);
+      }
+      if (ctx.orderMode === "custom" || ctx.orderMode === "shuffle") {
+        setOrderMode(ctx.orderMode);
+      }
+      if (Array.isArray(ctx.genSections)) {
+        const stored = ctx.genSections as unknown[];
+        setGenSections(
+          SECTION_INFO.map((s) => s.id).filter((id) => stored.includes(id)),
+        );
+      }
+      if (Array.isArray(ctx.genModes)) {
+        const stored = ctx.genModes as unknown[];
+        setGenModes(GRAPH_MODES.filter((m) => stored.includes(m)));
+      }
+    }
+    session.resume();
   };
 
   // Embedded setup blends into the lesson page (plain background, site-style
@@ -263,7 +316,28 @@ export function PackConsoleClient({
           savedMissing={savedQuiz?.missing ?? 0}
           creating={session.creating}
           createError={session.createError}
-          onCreate={() => void session.createRoom(quizTitle)}
+          onCreate={() =>
+            void session.createRoom(quizTitle, studentPath, {
+              selectedIds,
+              orderMode,
+              genSections,
+              genModes,
+            } satisfies RoomCtx)
+          }
+          resumable={session.resumable}
+          onResume={resumeRoom}
+          onDiscardResume={() => {
+            // Discarding a still-running room ENDS it for the students —
+            // never let that be a single silent click.
+            if (
+              session.resumable &&
+              session.resumable.status !== "ended" &&
+              !window.confirm(t("c_resume_discard_confirm"))
+            ) {
+              return;
+            }
+            session.discardResume();
+          }}
           generator={generator}
           genSections={genSections}
           setGenSections={setGenSections}
@@ -344,6 +418,9 @@ function SetupScreen({
   creating,
   createError,
   onCreate,
+  resumable,
+  onResume,
+  onDiscardResume,
   generator,
   genSections,
   setGenSections,
@@ -366,6 +443,9 @@ function SetupScreen({
   creating: boolean;
   createError: "unauthorized" | "network" | null;
   onCreate: () => void;
+  resumable: ResumableRoom | null;
+  onResume: () => void;
+  onDiscardResume: () => void;
   generator: boolean;
   genSections: SectionId[];
   setGenSections: React.Dispatch<React.SetStateAction<SectionId[]>>;
@@ -456,6 +536,14 @@ function SetupScreen({
         embedded ? "py-2" : "px-4 py-6",
       )}
     >
+      {resumable && (
+        <ResumeBanner
+          resumable={resumable}
+          onResume={onResume}
+          onDiscard={onDiscardResume}
+        />
+      )}
+
       {/* header card */}
       <div className={cn(cardClass, "p-5")}>
         {!embedded && (
@@ -743,6 +831,54 @@ function SetupScreen({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// A room from a previous page-load is still alive on the server — offer to
+// reconnect (the /live snapshot brings every student's score back) instead of
+// letting the teacher unknowingly open a duplicate room.
+function ResumeBanner({
+  resumable,
+  onResume,
+  onDiscard,
+}: {
+  resumable: ResumableRoom;
+  onResume: () => void;
+  onDiscard: () => void;
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const ended = resumable.status === "ended";
+  return (
+    <div
+      role="status"
+      className="mb-4 rounded-xl border-[1.5px] border-primary/50 bg-accent p-4"
+    >
+      <p className="flex flex-wrap items-center gap-2 text-sm font-bold">
+        <History className="size-4 shrink-0 text-primary" aria-hidden />
+        {t("c_resume_title")}
+        <span className="rounded-full border border-primary/20 bg-card px-2 py-0.5 font-mono text-xs font-bold tracking-[0.18em] text-primary">
+          {resumable.code}
+        </span>
+      </p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {ended ? t("c_resume_desc_ended") : t("c_resume_desc")}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" onClick={onResume} className="h-9 font-semibold">
+          <Play className="size-4" aria-hidden />
+          {ended ? t("c_resume_results") : t("c_resume_button")}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onDiscard}
+          className="h-9 text-muted-foreground"
+        >
+          {t("c_resume_discard")}
+        </Button>
+      </div>
     </div>
   );
 }

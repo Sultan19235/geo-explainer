@@ -52,6 +52,17 @@ export const ENGINE_STRINGS = {
     c_creating: "Ашылуда...",
     c_err_unauthorized: "Бөлме ашу үшін жүйеге кіру қажет.",
     c_err_network: "Серверге қосылу мүмкін болмады. Қайталап көріңіз.",
+    // console — resume an open room after a reload/closed tab
+    c_resume_title: "Ашық бөлме табылды",
+    c_resume_desc:
+      "Бөлме әлі жұмыс істеп тұр — қайта қосылсаңыз, оқушылар нәтижелерімен оралады.",
+    c_resume_desc_ended:
+      "Тест аяқталды, бірақ нәтижелері сақтаулы — ашуға болады.",
+    c_resume_button: "Қайта қосылу",
+    c_resume_results: "Нәтижелерді ашу",
+    c_resume_discard: "Жаңасын бастау",
+    c_resume_discard_confirm:
+      "Ашық бөлме жабылады — оқушыларға «тест аяқталды» деп көрсетіледі. Жаңасын бастайсыз ба?",
     // console — question picker
     c_select_hint: "Тестке кіретін сұрақтарды таңдаңыз",
     c_select_all: "Барлығын таңдау",
@@ -175,6 +186,17 @@ export const ENGINE_STRINGS = {
     c_creating: "Открываем...",
     c_err_unauthorized: "Чтобы открыть комнату, войдите в систему.",
     c_err_network: "Не удалось связаться с сервером. Попробуйте ещё раз.",
+    // console — resume an open room after a reload/closed tab
+    c_resume_title: "Найдена открытая комната",
+    c_resume_desc:
+      "Комната ещё работает — переподключитесь, и ученики вернутся на экран со своими результатами.",
+    c_resume_desc_ended:
+      "Тест уже завершился, но результаты целы — их можно открыть.",
+    c_resume_button: "Переподключиться",
+    c_resume_results: "Открыть результаты",
+    c_resume_discard: "Начать заново",
+    c_resume_discard_confirm:
+      "Открытая комната будет закрыта — ученики увидят «урок завершён». Начать заново?",
     // console — question picker
     c_select_hint: "Выберите вопросы, которые войдут в тест",
     c_select_all: "Выбрать все",
