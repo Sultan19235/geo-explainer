@@ -55,7 +55,7 @@ export function TopicListClient({ topics }: Props) {
             className={cn(
               "h-full border-border/80 bg-background transition-all duration-150",
               topic.isAccessible
-                ? "group-hover:-translate-y-0.5 group-hover:border-blue-500 group-hover:shadow-md"
+                ? "group-hover:-translate-y-0.5 group-hover:shadow-md group-hover:shadow-primary/5 group-hover:ring-primary/40"
                 : "opacity-80",
             )}
           >
@@ -64,7 +64,7 @@ export function TopicListClient({ topics }: Props) {
                 <CardTitle className="text-xl">{name}</CardTitle>
                 <div className="flex shrink-0 items-center gap-2">
                   {topic.is_free_sample && (
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
+                    <span className="rounded-full bg-sun-soft px-2.5 py-1 text-xs font-medium text-sun ring-1 ring-sun-bright/40">
                       {t("free_sample_badge")}
                     </span>
                   )}
@@ -72,7 +72,7 @@ export function TopicListClient({ topics }: Props) {
                     <LockIcon className="size-4 text-muted-foreground" />
                   )}
                   {topic.isAccessible && (
-                    <ArrowRightIcon className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-blue-600" />
+                    <ArrowRightIcon className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
                   )}
                 </div>
               </div>

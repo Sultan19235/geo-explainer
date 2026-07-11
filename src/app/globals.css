@@ -9,7 +9,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-heading: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -39,6 +39,15 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-sun: var(--sun);
+  --color-sun-soft: var(--sun-soft);
+  --color-sun-bright: var(--sun-bright);
+  --color-pen-blue: var(--pen-blue);
+  --color-pen-blue-soft: var(--pen-blue-soft);
+  --color-pen-red: var(--pen-red);
+  --color-pen-red-soft: var(--pen-red-soft);
+  --color-pen-green: var(--pen-green);
+  --color-pen-green-soft: var(--pen-green-soft);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -49,24 +58,39 @@
 }
 
 :root {
-  --background: #f8f9fb;
-  --foreground: #1a1a2e;
+  --background: #fbfcfe;
+  --foreground: #1d2440;
   --card: #ffffff;
-  --card-foreground: #1a1a2e;
+  --card-foreground: #1d2440;
   --popover: #ffffff;
-  --popover-foreground: #1a1a2e;
-  --primary: #2563eb;
+  --popover-foreground: #1d2440;
+  --primary: #2245c3;
   --primary-foreground: #ffffff;
-  --secondary: #f1f3f7;
-  --secondary-foreground: #1a1a2e;
-  --muted: #f1f3f7;
-  --muted-foreground: #6b7280;
-  --accent: #dbeafe;
-  --accent-foreground: #1d4ed8;
+  --secondary: #eef1f8;
+  --secondary-foreground: #1d2440;
+  --muted: #eef1f8;
+  --muted-foreground: #5b6784;
+  --accent: #e8edfb;
+  --accent-foreground: #2440b3;
   --destructive: #dc2626;
-  --border: #d8dde5;
-  --input: #d8dde5;
-  --ring: #2563eb;
+  --border: #dde3ee;
+  --input: #dde3ee;
+  --ring: #2b50e0;
+  /* The teacher's pens. Each color has a job — never decoration:
+     blue pen = writing/theory/links, red pen = checking/tests,
+     green pen = graphs/geometry/success. The -soft shades are chip
+     backgrounds; the base shades are dark enough for text on white. */
+  --pen-blue: #2b50e0;
+  --pen-blue-soft: #e8edfb;
+  --pen-red: #c73325;
+  --pen-red-soft: #fbe9e6;
+  --pen-green: #17864b;
+  --pen-green-soft: #e2f3e9;
+  /* The highlighter (flag-gold) — reserved for "free sample" markers.
+     --sun is the only shade dark enough for text. */
+  --sun: #8a5d08;
+  --sun-soft: #fbf0da;
+  --sun-bright: #f0a63c;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -148,13 +172,37 @@
   margin-left: 1px;
 }
 
-/* Squared exercise-book paper (тор көз) — the backdrop of every quiz screen. */
+/* Squared exercise-book paper (тор көз) — the backdrop of quiz screens and
+   the landing hero. */
+.grid-paper,
 .quiz-grid-paper {
-  background-color: #f6f8fc;
+  background-color: var(--background);
   background-image:
-    linear-gradient(to right, rgba(37, 99, 235, 0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(37, 99, 235, 0.06) 1px, transparent 1px);
+    linear-gradient(to right, rgba(43, 80, 224, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(43, 80, 224, 0.07) 1px, transparent 1px);
   background-size: 26px 26px;
+}
+
+/* Landing hero: the pen strokes (parabola, line, circle) draw themselves
+   in sequence, then the labels fade in. Stagger via inline animation-delay. */
+@keyframes hero-stroke-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.hero-stroke {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: hero-stroke-draw 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes hero-fade-in {
+  to {
+    opacity: 1;
+  }
+}
+.hero-fade {
+  opacity: 0;
+  animation: hero-fade-in 0.5s ease-out forwards;
 }
 
 @keyframes quiz-parabola-draw {
@@ -214,5 +262,13 @@
   .quiz-confetti-piece,
   .quiz-pop {
     animation: none;
+  }
+  .hero-stroke {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .hero-fade {
+    animation: none;
+    opacity: 1;
   }
 }

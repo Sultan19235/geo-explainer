@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { parseGender } from "@/lib/auth/gender";
 import { teacherHasGradeAccess } from "@/lib/teacher-access";
 import { endLoginSession } from "@/lib/analytics/track";
 import type { SavedQuizSummary } from "@/lib/quiz/saved-quiz";
@@ -152,6 +153,7 @@ export default async function DashboardPage() {
   return (
     <DashboardClient
       email={teacher?.email ?? user.email ?? ""}
+      gender={parseGender(user.user_metadata?.gender)}
       fullName={teacher?.full_name ?? null}
       phone={teacher?.phone ?? null}
       createdAt={teacher?.created_at ?? null}

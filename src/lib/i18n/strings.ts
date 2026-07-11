@@ -3,12 +3,13 @@ export type Lang = "kz" | "ru";
 export const STRINGS = {
   kz: {
     // Brand
-    brand: "Geo Explainer",
+    brand: "matem.school",
 
     // Auth
     login_button: "Кіру",
     logout_button: "Шығу",
     nav_profile: "Профиль",
+    nav_home: "Басты бет",
     signup_button: "Тіркелу",
     email_label: "Электрондық пошта",
     password_label: "Құпиясөз",
@@ -36,6 +37,9 @@ export const STRINGS = {
     password_strength_4: "Күшті",
     first_name_label: "Аты",
     last_name_label: "Тегі",
+    gender_label: "Жынысы",
+    gender_male: "Ер",
+    gender_female: "Әйел",
     password_show: "Құпиясөзді көрсету",
     password_hide: "Құпиясөзді жасыру",
     password_requirements_title: "Құпиясөз құрамында болуы керек:",
@@ -72,10 +76,10 @@ export const STRINGS = {
     reset_pending: "Сақталуда...",
 
     // Landing
-    hero_title:
-      "Математика мұғалімдеріне арналған интерактивті геометрия сабақтары",
+    hero_eyebrow: "Мұғалімнің күнделікті құралы",
+    hero_title: "Математика сабағына қажеттің бәрі — бір жерде",
     hero_subtitle:
-      "Динамикалық моделдер, интерактивті есептер және сабаққа дайын материалдар — бір жерде.",
+      "Алгебра мен геометрия бойынша теория, есептер және интерактивті тесттер. 5–11 сынып мұғалімдеріне арналған.",
     hero_cta_primary: "Сабақтарды қарау",
     hero_cta_secondary: "Тіркелу",
     how_it_works_title: "Қалай жұмыс істейді",
@@ -84,14 +88,32 @@ export const STRINGS = {
       "Сыныпқа сай тақырыпты ашыңыз, теория мен формулаларды бір көріністе көріңіз.",
     how_step_2_title: "Есептерді белгілеңіз",
     how_step_2_text:
-      "Есептер банкынан бүгінгі сабаққа қажет есептерді таңдап алыңыз.",
+      "Есептер қорынан бүгінгі сабаққа қажет есептерді таңдап алыңыз.",
     how_step_3_title: "Сабақты өткізіңіз",
     how_step_3_text:
-      "Интерактивті моделдермен сабақты түсіндіріп, есептерді бірге шешіңіз.",
-    grades_section_title: "Қол жетімді сыныптар",
+      "Интерактивті модельдермен сабақты түсіндіріп, есептерді бірге шешіңіз.",
+    grades_section_title: "Қолжетімді сыныптар",
     grade_badge: (n: number) => `${n}-сынып`,
-    footer_copyright: "© 2026 Geo Explainer.",
-    footer_contact: "Байланыс: hello@geo-explainer.kz",
+    showcase_title: "Платформа ішінде не бар?",
+    showcase_learn_tag: "мұғалім экраны",
+    showcase_learn_title: "Теория және есептер — бір экранда",
+    showcase_learn_p1: "Әр тақырыпта: теория, формулалар және дайын есептер.",
+    showcase_learn_p2:
+      "Есептер қоры — қиындық, тег және іздеу бойынша сүзгілер.",
+    showcase_learn_p3:
+      "GeoGebra интерактивті сызбалары — фигураны сабақта бұрып көрсетіңіз.",
+    showcase_learn_p4: "Қазақша мен орысша бір батырмамен ауысады.",
+    showcase_quiz_tag: "оқушы телефоны",
+    showcase_quiz_title: "Интерактивті тесттер — бүкіл сынып бірге",
+    showcase_quiz_p1:
+      "Оқушылар кодпен қосылады — аккаунт та, орнату да керек емес.",
+    showcase_quiz_p2:
+      "Генератор әр оқушыға өз сұрағын құрады — көшіру мүмкін емес.",
+    showcase_quiz_p3: "Таймер, ұпай және қателер саны — ойын ырғағында.",
+    showcase_quiz_p4:
+      "Нәтижелер мұғалімге бірден көрінеді және профильде сақталады.",
+    footer_copyright: "© 2026 matem.school.",
+    footer_contact: "Байланыс: hello@matem.school",
 
     // Join by room code (universal entrance: matem.school + code on the board)
     join_page_title: "Сабаққа қосылу",
@@ -117,6 +139,7 @@ export const STRINGS = {
     profile_name: "Аты-жөні",
     profile_email: "Электрондық пошта",
     profile_phone: "Телефон",
+    profile_gender: "Жынысы",
     profile_member_since: "Тіркелген күні",
     profile_not_set: "—",
     profile_purchased_grades: "Сатып алынған сыныптар",
@@ -167,10 +190,12 @@ export const STRINGS = {
 
     // Grades catalog
     grades_title: "Сабақтар каталогы",
-    grades_subtitle: "Сыныпты таңдаңыз және жарияланған тақырыптарды қараңыз.",
+    grades_subtitle: "Сыныпты таңдап, тақырыптар мен тесттерді ашыңыз.",
     grades_load_error: "Тақырыптарды жүктеу қатесі",
     grade_topics_count: (n: number) => `${n} жарияланған тақырып`,
     grade_topics_zero: "Тақырып жоқ",
+    grade_topics_badge: (n: number) => `${n} тақырып`,
+    grade_quizzes_badge: (n: number) => `${n} тест`,
 
     // Grade detail
     back_to_grades: "← Сыныптар",
@@ -188,7 +213,7 @@ export const STRINGS = {
     quiz_badge: "Тест",
     theory_heading_suffix: "— теория және формулалар",
     theory_not_uploaded: "Теория файлы әлі жүктелмеген.",
-    bank_button: "Есептер банкы",
+    bank_button: "Есептер қоры",
     bank_search_placeholder: "Іздеу...",
     bank_close: "Жабу",
     bank_today: "Бүгінгі сабаққа",
@@ -208,18 +233,18 @@ export const STRINGS = {
     in_preparation: "Дайындалуда",
     empty_picked_title: "Сабақ есептері таңдалмаған",
     empty_picked_text:
-      "Есептер банкын ашыңыз, бүгінгі сабаққа қажет есептерді белгілеңіз.",
-    open_bank: "Есептер банкын ашу",
+      "Есептер қорын ашыңыз, бүгінгі сабаққа қажет есептерді белгілеңіз.",
+    open_bank: "Есептер қорын ашу",
     fullscreen: "Толық экран",
     nav_prev: "Алдыңғы",
     nav_next: "Келесі",
-    nav_bank: "Банк",
+    nav_bank: "Қор",
 
     // Lesson hub
     hub_back_to_lessons: "Тақырыптар",
     hub_back_to_lesson: "Тақырып",
     hub_learn_title: "Теория және есептер",
-    hub_learn_subtitle: "Теория, формулалар және есептер банкы",
+    hub_learn_subtitle: "Теория, формулалар және есептер қоры",
     hub_quizzes_title: "Тесттер",
     hub_quizzes_subtitle: "Сабаққа арналған интерактивті тесттер",
     hub_problems_count: (n: number) => `${n} есеп`,
@@ -370,12 +395,13 @@ export const STRINGS = {
   },
   ru: {
     // Brand
-    brand: "Geo Explainer",
+    brand: "matem.school",
 
     // Auth
     login_button: "Войти",
     logout_button: "Выйти",
     nav_profile: "Профиль",
+    nav_home: "Главная",
     signup_button: "Регистрация",
     email_label: "Электронная почта",
     password_label: "Пароль",
@@ -403,6 +429,9 @@ export const STRINGS = {
     password_strength_4: "Надёжный",
     first_name_label: "Имя",
     last_name_label: "Фамилия",
+    gender_label: "Пол",
+    gender_male: "Мужской",
+    gender_female: "Женский",
     password_show: "Показать пароль",
     password_hide: "Скрыть пароль",
     password_requirements_title: "Пароль должен содержать:",
@@ -439,10 +468,10 @@ export const STRINGS = {
     reset_pending: "Сохранение...",
 
     // Landing
-    hero_title:
-      "Интерактивные уроки геометрии для учителей математики",
+    hero_eyebrow: "Ежедневный инструмент учителя",
+    hero_title: "Всё для урока математики — в одном месте",
     hero_subtitle:
-      "Динамические модели, интерактивные задачи и готовые материалы для урока — в одном месте.",
+      "Теория, задачи и интерактивные тесты по алгебре и геометрии. Для учителей 5–11 классов.",
     hero_cta_primary: "Смотреть уроки",
     hero_cta_secondary: "Регистрация",
     how_it_works_title: "Как это работает",
@@ -457,8 +486,24 @@ export const STRINGS = {
       "Объясняйте материал с интерактивными моделями и разбирайте задачи вместе с учениками.",
     grades_section_title: "Доступные классы",
     grade_badge: (n: number) => `${n} класс`,
-    footer_copyright: "© 2026 Geo Explainer.",
-    footer_contact: "Контакты: hello@geo-explainer.kz",
+    showcase_title: "Что внутри платформы?",
+    showcase_learn_tag: "экран учителя",
+    showcase_learn_title: "Теория и задачи — на одном экране",
+    showcase_learn_p1: "В каждой теме: теория, формулы и готовые задачи.",
+    showcase_learn_p2: "Банк задач — фильтры по сложности, тегам и поиску.",
+    showcase_learn_p3:
+      "Интерактивные чертежи GeoGebra — вращайте фигуры прямо на уроке.",
+    showcase_learn_p4: "Казахский и русский переключаются одной кнопкой.",
+    showcase_quiz_tag: "телефон ученика",
+    showcase_quiz_title: "Интерактивные тесты — весь класс одновременно",
+    showcase_quiz_p1: "Ученики подключаются по коду — без аккаунтов и установки.",
+    showcase_quiz_p2:
+      "Генератор даёт каждому ученику свой вариант — списать не выйдет.",
+    showcase_quiz_p3: "Таймер, очки и счёт ошибок — в игровом ритме.",
+    showcase_quiz_p4:
+      "Результаты сразу видны учителю и сохраняются в профиле.",
+    footer_copyright: "© 2026 matem.school.",
+    footer_contact: "Контакты: hello@matem.school",
 
     // Join by room code (universal entrance: matem.school + code on the board)
     join_page_title: "Подключиться к уроку",
@@ -484,6 +529,7 @@ export const STRINGS = {
     profile_name: "Имя",
     profile_email: "Электронная почта",
     profile_phone: "Телефон",
+    profile_gender: "Пол",
     profile_member_since: "Дата регистрации",
     profile_not_set: "—",
     profile_purchased_grades: "Купленные классы",
@@ -533,10 +579,12 @@ export const STRINGS = {
 
     // Grades catalog
     grades_title: "Каталог уроков",
-    grades_subtitle: "Выберите класс и просмотрите опубликованные темы.",
+    grades_subtitle: "Выберите класс — внутри темы и тесты.",
     grades_load_error: "Ошибка загрузки тем",
     grade_topics_count: (n: number) => `${n} опубликованных тем`,
     grade_topics_zero: "Нет тем",
+    grade_topics_badge: (n: number) => `Тем: ${n}`,
+    grade_quizzes_badge: (n: number) => `Тестов: ${n}`,
 
     // Grade detail
     back_to_grades: "← Классы",

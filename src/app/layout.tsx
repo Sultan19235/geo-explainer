@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, Geist_Mono } from "next/font/google";
+import { IBM_Plex_Sans, Geist_Mono, Literata } from "next/font/google";
 import "./globals.css";
 import { LanguageProvider } from "@/lib/i18n/context";
 import { AuthProvider, type AuthUser } from "@/lib/auth/context";
+import { parseGender } from "@/lib/auth/gender";
 import { PresenceTracker } from "@/components/presence-tracker";
 import { createClient } from "@/lib/supabase/server";
 
@@ -17,10 +18,18 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Textbook voice for headings — covers the Kazakh Cyrillic letters
+// (ә, ғ, қ, ң, ө, ұ, ү, і) via cyrillic-ext.
+const literata = Literata({
+  variable: "--font-display",
+  subsets: ["latin", "cyrillic", "cyrillic-ext"],
+  weight: ["600", "700"],
+});
+
 export const metadata: Metadata = {
-  title: "Geo Explainer",
+  title: "matem.school",
   description:
-    "Математика мұғалімдеріне арналған интерактивті геометрия сабақтары",
+    "Математика мұғалімдеріне арналған платформа: алгебра мен геометрия бойынша теория, есептер және интерактивті тесттер",
 };
 
 export default async function RootLayout({
@@ -41,13 +50,14 @@ export default async function RootLayout({
           (user.user_metadata?.full_name as string | undefined) ??
           (user.user_metadata?.name as string | undefined) ??
           null,
+        gender: parseGender(user.user_metadata?.gender),
       }
     : null;
 
   return (
     <html lang="kk">
       <body
-        className={`${ibmPlexSans.variable} ${geistMono.variable} antialiased`}
+        className={`${ibmPlexSans.variable} ${geistMono.variable} ${literata.variable} antialiased`}
       >
         <AuthProvider initialUser={initialUser}>
           <LanguageProvider>{children}</LanguageProvider>

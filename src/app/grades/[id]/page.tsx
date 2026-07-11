@@ -6,6 +6,7 @@ import {
   teacherHasGradeAccess,
   type TeacherAccessRow,
 } from "@/lib/teacher-access";
+import { GRADES } from "@/lib/grades";
 import { GradeDetailClient } from "./grade-detail-client";
 import type { GradeTopicListItem } from "./topic-list-client";
 
@@ -20,7 +21,7 @@ type TopicRow = {
   is_free_sample: boolean;
 };
 
-const VALID_GRADES = new Set([7, 8, 9, 10, 11]);
+const VALID_GRADES = new Set<number>(GRADES);
 
 export default async function GradeTopicsPage({
   params,
