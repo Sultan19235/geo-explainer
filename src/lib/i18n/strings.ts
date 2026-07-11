@@ -3,7 +3,7 @@ export type Lang = "kz" | "ru";
 export const STRINGS = {
   kz: {
     // Brand
-    brand: "Geo Explainer",
+    brand: "matem.school",
 
     // Auth
     login_button: "Кіру",
@@ -79,7 +79,7 @@ export const STRINGS = {
     hero_eyebrow: "Мұғалімнің күнделікті құралы",
     hero_title: "Математика сабағына қажеттің бәрі — бір жерде",
     hero_subtitle:
-      "Алгебра мен геометрия бойынша теория, есептер және интерактивті тесттер. 7–11 сынып мұғалімдеріне арналған.",
+      "Алгебра мен геометрия бойынша теория, есептер және интерактивті тесттер. 5–11 сынып мұғалімдеріне арналған.",
     hero_cta_primary: "Сабақтарды қарау",
     hero_cta_secondary: "Тіркелу",
     how_it_works_title: "Қалай жұмыс істейді",
@@ -88,14 +88,32 @@ export const STRINGS = {
       "Сыныпқа сай тақырыпты ашыңыз, теория мен формулаларды бір көріністе көріңіз.",
     how_step_2_title: "Есептерді белгілеңіз",
     how_step_2_text:
-      "Есептер банкынан бүгінгі сабаққа қажет есептерді таңдап алыңыз.",
+      "Есептер қорынан бүгінгі сабаққа қажет есептерді таңдап алыңыз.",
     how_step_3_title: "Сабақты өткізіңіз",
     how_step_3_text:
       "Интерактивті модельдермен сабақты түсіндіріп, есептерді бірге шешіңіз.",
     grades_section_title: "Қолжетімді сыныптар",
     grade_badge: (n: number) => `${n}-сынып`,
-    footer_copyright: "© 2026 Geo Explainer.",
-    footer_contact: "Байланыс: hello@geo-explainer.kz",
+    showcase_title: "Платформа ішінде не бар?",
+    showcase_learn_tag: "мұғалім экраны",
+    showcase_learn_title: "Теория және есептер — бір экранда",
+    showcase_learn_p1: "Әр тақырыпта: теория, формулалар және дайын есептер.",
+    showcase_learn_p2:
+      "Есептер қоры — қиындық, тег және іздеу бойынша сүзгілер.",
+    showcase_learn_p3:
+      "GeoGebra интерактивті сызбалары — фигураны сабақта бұрып көрсетіңіз.",
+    showcase_learn_p4: "Қазақша мен орысша бір батырмамен ауысады.",
+    showcase_quiz_tag: "оқушы телефоны",
+    showcase_quiz_title: "Интерактивті тесттер — бүкіл сынып бірге",
+    showcase_quiz_p1:
+      "Оқушылар кодпен қосылады — аккаунт та, орнату да керек емес.",
+    showcase_quiz_p2:
+      "Генератор әр оқушыға өз сұрағын құрады — көшіру мүмкін емес.",
+    showcase_quiz_p3: "Таймер, ұпай және қателер саны — ойын ырғағында.",
+    showcase_quiz_p4:
+      "Нәтижелер мұғалімге бірден көрінеді және профильде сақталады.",
+    footer_copyright: "© 2026 matem.school.",
+    footer_contact: "Байланыс: hello@matem.school",
 
     // Dashboard
     dashboard_greeting: "Сәлеметсіз бе",
@@ -166,7 +184,7 @@ export const STRINGS = {
     quiz_badge: "Тест",
     theory_heading_suffix: "— теория және формулалар",
     theory_not_uploaded: "Теория файлы әлі жүктелмеген.",
-    bank_button: "Есептер банкы",
+    bank_button: "Есептер қоры",
     bank_search_placeholder: "Іздеу...",
     bank_close: "Жабу",
     bank_today: "Бүгінгі сабаққа",
@@ -186,18 +204,18 @@ export const STRINGS = {
     in_preparation: "Дайындалуда",
     empty_picked_title: "Сабақ есептері таңдалмаған",
     empty_picked_text:
-      "Есептер банкын ашыңыз, бүгінгі сабаққа қажет есептерді белгілеңіз.",
-    open_bank: "Есептер банкын ашу",
+      "Есептер қорын ашыңыз, бүгінгі сабаққа қажет есептерді белгілеңіз.",
+    open_bank: "Есептер қорын ашу",
     fullscreen: "Толық экран",
     nav_prev: "Алдыңғы",
     nav_next: "Келесі",
-    nav_bank: "Банк",
+    nav_bank: "Қор",
 
     // Lesson hub
     hub_back_to_lessons: "Тақырыптар",
     hub_back_to_lesson: "Тақырып",
     hub_learn_title: "Теория және есептер",
-    hub_learn_subtitle: "Теория, формулалар және есептер банкы",
+    hub_learn_subtitle: "Теория, формулалар және есептер қоры",
     hub_quizzes_title: "Тесттер",
     hub_quizzes_subtitle: "Сабаққа арналған интерактивті тесттер",
     hub_problems_count: (n: number) => `${n} есеп`,
@@ -347,7 +365,7 @@ export const STRINGS = {
   },
   ru: {
     // Brand
-    brand: "Geo Explainer",
+    brand: "matem.school",
 
     // Auth
     login_button: "Войти",
@@ -423,7 +441,7 @@ export const STRINGS = {
     hero_eyebrow: "Ежедневный инструмент учителя",
     hero_title: "Всё для урока математики — в одном месте",
     hero_subtitle:
-      "Теория, задачи и интерактивные тесты по алгебре и геометрии. Для учителей 7–11 классов.",
+      "Теория, задачи и интерактивные тесты по алгебре и геометрии. Для учителей 5–11 классов.",
     hero_cta_primary: "Смотреть уроки",
     hero_cta_secondary: "Регистрация",
     how_it_works_title: "Как это работает",
@@ -438,8 +456,24 @@ export const STRINGS = {
       "Объясняйте материал с интерактивными моделями и разбирайте задачи вместе с учениками.",
     grades_section_title: "Доступные классы",
     grade_badge: (n: number) => `${n} класс`,
-    footer_copyright: "© 2026 Geo Explainer.",
-    footer_contact: "Контакты: hello@geo-explainer.kz",
+    showcase_title: "Что внутри платформы?",
+    showcase_learn_tag: "экран учителя",
+    showcase_learn_title: "Теория и задачи — на одном экране",
+    showcase_learn_p1: "В каждой теме: теория, формулы и готовые задачи.",
+    showcase_learn_p2: "Банк задач — фильтры по сложности, тегам и поиску.",
+    showcase_learn_p3:
+      "Интерактивные чертежи GeoGebra — вращайте фигуры прямо на уроке.",
+    showcase_learn_p4: "Казахский и русский переключаются одной кнопкой.",
+    showcase_quiz_tag: "телефон ученика",
+    showcase_quiz_title: "Интерактивные тесты — весь класс одновременно",
+    showcase_quiz_p1: "Ученики подключаются по коду — без аккаунтов и установки.",
+    showcase_quiz_p2:
+      "Генератор даёт каждому ученику свой вариант — списать не выйдет.",
+    showcase_quiz_p3: "Таймер, очки и счёт ошибок — в игровом ритме.",
+    showcase_quiz_p4:
+      "Результаты сразу видны учителю и сохраняются в профиле.",
+    footer_copyright: "© 2026 matem.school.",
+    footer_contact: "Контакты: hello@matem.school",
 
     // Dashboard
     dashboard_greeting: "Здравствуйте",

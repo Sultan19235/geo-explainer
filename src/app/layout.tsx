@@ -27,7 +27,7 @@ const literata = Literata({
 });
 
 export const metadata: Metadata = {
-  title: "Geo Explainer",
+  title: "matem.school",
   description:
     "Математика мұғалімдеріне арналған платформа: алгебра мен геометрия бойынша теория, есептер және интерактивті тесттер",
 };

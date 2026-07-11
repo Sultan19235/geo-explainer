@@ -37,7 +37,7 @@ export function SiteHeader({
           ) : null}
           <Link
             href="/"
-            className="shrink-0 whitespace-nowrap font-heading text-base font-bold tracking-tight"
+            className="shrink-0 whitespace-nowrap font-heading text-base font-bold tracking-tight text-primary"
           >
             {t("brand")}
           </Link>
