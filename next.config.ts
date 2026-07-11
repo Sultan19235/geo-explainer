@@ -45,6 +45,31 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      // join.matem.school is the students' vanity door — everything on that
+      // host bounces to the join page on the canonical origin. Staying on the
+      // subdomain would put quiz pages on a second origin (backend CORS
+      // allowlist, students' saved mid-quiz progress in localStorage), all
+      // for an address-bar cosmetic that lasts two seconds.
+      // join.matem.school/AB12C3 carries a room code along — the short form
+      // for QR payloads; exactly 6 chars so real paths like /join never match.
+      {
+        source: "/:code([A-Za-z0-9]{6})",
+        has: [{ type: "host", value: "join.matem.school" }],
+        destination: "https://matem.school/join?code=:code",
+        permanent: false,
+      },
+      // Everything else on the subdomain (incl. "/" and deep links with
+      // ?code=, whose query passes through untouched) lands on the join page.
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "join.matem.school" }],
+        destination: "https://matem.school/join",
+        permanent: false,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
