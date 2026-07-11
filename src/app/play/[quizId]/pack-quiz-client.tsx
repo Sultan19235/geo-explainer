@@ -241,6 +241,9 @@ function LiveMode({
           />
         ))}
       {session.phase === "ended" && <EndedScreen stats={session.stats} />}
+      {session.phase === "kicked" && (
+        <KickedScreen onRejoin={session.rejoin} />
+      )}
     </main>
   );
 }
@@ -260,7 +263,8 @@ function CenterFrame({ children }: { children: React.ReactNode }) {
 function JoinScreen({ pack, session }: { pack: QuizPack; session: Session }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
-  const [name, setName] = useState("");
+  // Pre-filled after a kick→rejoin round-trip, empty on a fresh visit.
+  const [name, setName] = useState(session.studentName);
   const [code, setCode] = useState("");
 
   return (
@@ -1150,6 +1154,30 @@ function EndedScreen({ stats }: { stats: QuizStats }) {
         <h1 className="text-xl font-bold tracking-tight">{t("ended_title")}</h1>
         <ScoreSummary stats={stats} />
         <p className="mt-3 text-sm text-muted-foreground">{t("ended_desc")}</p>
+      </div>
+    </CenterFrame>
+  );
+}
+
+// The teacher removed this student. Re-joining is allowed by design (a wrong
+// kick shouldn't lock a kid out of the lesson) — the teacher can always kick
+// again.
+function KickedScreen({ onRejoin }: { onRejoin: () => void }) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  return (
+    <CenterFrame>
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-7 text-center shadow-lg shadow-blue-950/5">
+        <div className="mx-auto mb-3 grid size-12 place-items-center rounded-xl bg-red-50 text-2xl">
+          🚪
+        </div>
+        <h1 className="text-xl font-bold tracking-tight">
+          {t("kicked_title")}
+        </h1>
+        <p className="mt-3 text-sm text-muted-foreground">{t("kicked_desc")}</p>
+        <Button onClick={onRejoin} className="mt-5 w-full font-semibold">
+          {t("kicked_rejoin")}
+        </Button>
       </div>
     </CenterFrame>
   );

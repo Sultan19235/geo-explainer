@@ -4,7 +4,7 @@
 // student cards stream in over SSE → leaderboard. Rendered standalone at
 // /play/<id>/host and embedded in the lesson page's quizzes tab.
 
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -252,6 +252,33 @@ export function PackConsoleClient({
     else void el.requestFullscreen().catch(() => {});
   };
 
+  // One live room per teacher: the server refused the create because another
+  // room of this teacher is still open (possibly a different quiz/device).
+  // Confirm ending it; on "yes" the hook ends the old room and replays this
+  // create. The ref stops re-renders from re-opening the blocking dialog.
+  const conflict = session.conflict;
+  const conflictPrompted = useRef(false);
+  useEffect(() => {
+    if (!conflict) {
+      conflictPrompted.current = false;
+      return;
+    }
+    if (conflictPrompted.current) return;
+    conflictPrompted.current = true;
+    const ok = window.confirm(
+      t("c_conflict_confirm")
+        .replace("{title}", conflict.title || quizTitle)
+        .replace("{code}", conflict.code),
+    );
+    void session.resolveConflict(ok);
+  }, [conflict, session, t, quizTitle]);
+
+  const kickWithConfirm = (s: LiveStudent) => {
+    if (window.confirm(t("c_kick_confirm").replace("{name}", s.name))) {
+      session.kick(s.studentId);
+    }
+  };
+
   // Reconnect to a room that survived a reload: put the console's setup back
   // to what that room was opened with (dropping ids the pack no longer has),
   // THEN resume — studentUrl and autosave derive from this state.
@@ -353,6 +380,7 @@ export function PackConsoleClient({
           students={session.students}
           onStart={() => void session.start()}
           onOpenQr={() => setQrOpen(true)}
+          onKick={kickWithConfirm}
         />
       )}
 
@@ -367,6 +395,7 @@ export function PackConsoleClient({
           }}
           onOpenQr={() => setQrOpen(true)}
           onFullscreen={toggleFullscreen}
+          onKick={kickWithConfirm}
         />
       )}
 
@@ -1459,17 +1488,20 @@ function LobbyScreen({
   students,
   onStart,
   onOpenQr,
+  onKick,
 }: {
   code: string;
   studentUrl: string;
   students: Map<string, LiveStudent>;
   onStart: () => void;
   onOpenQr: () => void;
+  onKick: (s: LiveStudent) => void;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
   const [copied, setCopied] = useState(false);
   const names = Array.from(students.values());
+  const here = names.filter((s) => s.connected !== false);
 
   const copyLink = async () => {
     try {
@@ -1497,6 +1529,9 @@ function LobbyScreen({
         <QrCode text={studentUrl} size={200} />
       </button>
       <p className="mt-3 text-sm text-muted-foreground">{t("c_scan_hint")}</p>
+      <p className="mt-0.5 text-xl font-bold tracking-tight text-primary sm:text-2xl">
+        {t("c_join_host")}
+      </p>
 
       <button
         type="button"
@@ -1514,7 +1549,7 @@ function LobbyScreen({
       <div className="mt-7 w-full rounded-2xl border border-border bg-card p-5 shadow-lg shadow-blue-950/5">
         <p className="flex items-center gap-2 text-sm font-bold">
           <Users className="size-4 text-primary" aria-hidden />
-          {t("c_students")}: {names.length}
+          {t("c_students")}: {here.length}
         </p>
         {names.length === 0 ? (
           <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
@@ -1526,7 +1561,10 @@ function LobbyScreen({
             {names.map((s) => (
               <span
                 key={s.studentId}
-                className="flex items-center gap-2 rounded-full border border-border bg-background py-1 pl-1 pr-3 text-sm font-semibold"
+                className={cn(
+                  "flex items-center gap-2 rounded-full border border-border bg-background py-1 pl-1 pr-1.5 text-sm font-semibold",
+                  s.connected === false && "opacity-45",
+                )}
               >
                 <span
                   className="grid size-6 place-items-center rounded-full text-[11px] font-bold text-white"
@@ -1535,6 +1573,20 @@ function LobbyScreen({
                   {s.name.slice(0, 1).toUpperCase()}
                 </span>
                 {s.name}
+                {s.connected === false && (
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                    {t("c_away_tag")}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onKick(s)}
+                  title={t("c_kick")}
+                  aria-label={t("c_kick")}
+                  className="grid size-5 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
+                >
+                  <X className="size-3.5" aria-hidden />
+                </button>
               </span>
             ))}
           </div>
@@ -1563,6 +1615,7 @@ function LiveScreen({
   onEnd,
   onOpenQr,
   onFullscreen,
+  onKick,
 }: {
   quizTitle: string;
   code: string;
@@ -1571,11 +1624,14 @@ function LiveScreen({
   onEnd: () => void;
   onOpenQr: () => void;
   onFullscreen: () => void;
+  onKick: (s: LiveStudent) => void;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
   const sorted = sortStudents(students);
-  const away = sorted.filter((s) => !s.focused).length;
+  const away = sorted.filter(
+    (s) => !s.focused && s.connected !== false,
+  ).length;
 
   return (
     <div className="w-full px-3 py-3 sm:px-4">
@@ -1640,7 +1696,12 @@ function LiveScreen({
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2.5">
           {sorted.map((s, i) => (
-            <StudentCard key={s.studentId} student={s} rank={i + 1} />
+            <StudentCard
+              key={s.studentId}
+              student={s}
+              rank={i + 1}
+              onKick={() => onKick(s)}
+            />
           ))}
         </div>
       )}
@@ -1660,14 +1721,17 @@ function fmtAway(seconds: number) {
 function StudentCard({
   student: s,
   rank,
+  onKick,
 }: {
   student: LiveStudent;
   rank: number;
+  onKick: () => void;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
   const pct = pctOf(s);
   const wrong = s.total - s.score;
+  const left = s.connected === false;
   const barColor =
     pct >= 70 ? "bg-emerald-500" : pct >= 40 ? "bg-amber-500" : "bg-red-500";
 
@@ -1682,6 +1746,8 @@ function StudentCard({
             : rank === 3
               ? "border-orange-300 bg-gradient-to-br from-orange-50 to-card"
               : "border-border",
+        s.finished && "border-emerald-300 bg-gradient-to-br from-emerald-50 to-card",
+        left && "opacity-55 saturate-50",
         s.flash === "ok" &&
           "border-emerald-400 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]",
         s.flash === "err" &&
@@ -1709,6 +1775,15 @@ function StudentCard({
         >
           {pct}%
         </span>
+        <button
+          type="button"
+          onClick={onKick}
+          title={t("c_kick")}
+          aria-label={t("c_kick")}
+          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-red-50 hover:text-red-600"
+        >
+          <X className="size-3.5" aria-hidden />
+        </button>
       </div>
 
       <div className="mt-2.5 grid grid-cols-3 gap-1">
@@ -1743,20 +1818,32 @@ function StudentCard({
         <span
           className={cn(
             "flex items-center gap-1.5 text-xs font-bold",
-            s.focused ? "text-emerald-700" : "text-red-600",
+            left
+              ? "text-muted-foreground"
+              : s.focused
+                ? "text-emerald-700"
+                : "text-red-600",
           )}
         >
           <span
             className={cn(
-              "size-2 animate-pulse rounded-full",
-              s.focused ? "bg-emerald-500" : "bg-red-500",
+              "size-2 rounded-full",
+              left
+                ? "bg-slate-400"
+                : s.focused
+                  ? "animate-pulse bg-emerald-500"
+                  : "animate-pulse bg-red-500",
             )}
             aria-hidden
           />
-          {s.focused ? t("c_on_screen") : t("c_off_screen")}
+          {left
+            ? t("c_away_tag")
+            : s.focused
+              ? t("c_on_screen")
+              : t("c_off_screen")}
         </span>
         {s.finished && (
-          <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600">
+          <span className="flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100/70 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
             <Flag className="size-3" aria-hidden />
             {t("c_finished_tag")}
           </span>
@@ -1954,6 +2041,9 @@ function QrOverlay({
       </p>
       <QrCode text={studentUrl} size={Math.min(420, typeof window !== "undefined" ? window.innerWidth - 80 : 420)} />
       <p className="text-base text-muted-foreground">{t("c_scan_hint")}</p>
+      <p className="-mt-4 text-2xl font-bold tracking-tight text-primary sm:text-3xl">
+        {t("c_join_host")}
+      </p>
     </div>
   );
 }

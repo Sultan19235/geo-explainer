@@ -4,7 +4,7 @@
 // student cards stream in over SSE → leaderboard. Kazakh-only like the
 // student page; the projected board is the audience.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
@@ -115,6 +115,30 @@ export function ConsoleClient() {
       ? ""
       : `${window.location.origin}${studentPath}&code=${session.code}`;
 
+  // One live room per teacher: the server refused the create — confirm ending
+  // the other room, then the hook replays this create. The ref keeps
+  // re-renders from re-opening the blocking dialog.
+  const conflict = session.conflict;
+  const conflictPrompted = useRef(false);
+  useEffect(() => {
+    if (!conflict) {
+      conflictPrompted.current = false;
+      return;
+    }
+    if (conflictPrompted.current) return;
+    conflictPrompted.current = true;
+    const ok = window.confirm(
+      `Сізде ашық тест бар: «${conflict.title || QUIZ_TITLE}» (коды ${conflict.code}). Оны аяқтап, жаңасын бастайсыз ба?`,
+    );
+    void session.resolveConflict(ok);
+  }, [conflict, session]);
+
+  const kickWithConfirm = (s: LiveStudent) => {
+    if (window.confirm(`${s.name} тесттен шығарылсын ба?`)) {
+      session.kick(s.studentId);
+    }
+  };
+
   return (
     <main className="quiz-grid-paper min-h-dvh text-foreground">
       {session.phase === "setup" && (
@@ -155,6 +179,7 @@ export function ConsoleClient() {
           onStart={session.start}
           onBack={session.reset}
           onOpenQr={() => setQrOpen(true)}
+          onKick={kickWithConfirm}
         />
       )}
       {session.phase === "live" && session.code && (
@@ -166,6 +191,7 @@ export function ConsoleClient() {
             if (window.confirm("Сабақты аяқтайсыз ба?")) void session.end();
           }}
           onOpenQr={() => setQrOpen(true)}
+          onKick={kickWithConfirm}
         />
       )}
       {session.phase === "results" && (
@@ -364,6 +390,7 @@ function LobbyScreen({
   onStart,
   onBack,
   onOpenQr,
+  onKick,
 }: {
   code: string;
   sections: Set<SectionId>;
@@ -372,8 +399,10 @@ function LobbyScreen({
   onStart: () => void;
   onBack: () => void;
   onOpenQr: () => void;
+  onKick: (s: LiveStudent) => void;
 }) {
   const joined = Array.from(students.values());
+  const here = joined.filter((s) => s.connected !== false);
   const sectionNames = SECTION_INFO.filter((s) => sections.has(s.id));
 
   return (
@@ -402,7 +431,10 @@ function LobbyScreen({
             {code}
           </p>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            Оқушылар QR кодты сканерлейді
+            Оқушылар QR кодты сканерлейді немесе мына сайтқа кіреді:
+          </p>
+          <p className="mt-0.5 text-lg font-bold tracking-tight text-primary">
+            join.matem.school
           </p>
           <CopyCodeButton code={code} />
         </div>
@@ -423,7 +455,7 @@ function LobbyScreen({
           </h2>
           <p className="mt-1 mb-2">
             <span className="font-mono text-3xl font-bold text-primary">
-              {joined.length}
+              {here.length}
             </span>
             <span className="ml-1.5 text-sm text-muted-foreground">дайын</span>
           </p>
@@ -437,16 +469,34 @@ function LobbyScreen({
               joined.map((s, i) => (
                 <div
                   key={s.studentId}
-                  className="flex items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2"
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2",
+                    s.connected === false && "opacity-45",
+                  )}
                 >
                   <Avatar name={s.name} index={i} size="sm" />
                   <span className="truncate text-sm font-semibold">
                     {s.name}
                   </span>
-                  <Check
-                    className="ml-auto size-4 shrink-0 text-emerald-600"
-                    aria-label="қосылды"
-                  />
+                  {s.connected === false ? (
+                    <span className="ml-auto shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                      шығып кетті
+                    </span>
+                  ) : (
+                    <Check
+                      className="ml-auto size-4 shrink-0 text-emerald-600"
+                      aria-label="қосылды"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onKick(s)}
+                    title="Оқушыны шығару"
+                    aria-label="Оқушыны шығару"
+                    className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
+                  >
+                    <X className="size-3.5" aria-hidden />
+                  </button>
                 </div>
               ))
             )}
@@ -525,12 +575,14 @@ function LiveScreen({
   timeLeft,
   onEnd,
   onOpenQr,
+  onKick,
 }: {
   code: string;
   students: Map<string, LiveStudent>;
   timeLeft: number;
   onEnd: () => void;
   onOpenQr: () => void;
+  onKick: (s: LiveStudent) => void;
 }) {
   const sorted = useMemo(() => sortStudents(students), [students]);
   const withScore = sorted.filter((s) => s.total > 0);
@@ -540,7 +592,9 @@ function LiveScreen({
           withScore.length,
       )
     : 0;
-  const away = sorted.filter((s) => !s.focused).length;
+  const away = sorted.filter(
+    (s) => !s.focused && s.connected !== false,
+  ).length;
 
   return (
     <div className="pb-8">
@@ -581,7 +635,12 @@ function LiveScreen({
       <div className="mx-auto max-w-6xl px-4 pt-4">
         <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-4">
           {sorted.map((s, i) => (
-            <StudentCard key={s.studentId} student={s} rank={i + 1} />
+            <StudentCard
+              key={s.studentId}
+              student={s}
+              rank={i + 1}
+              onKick={() => onKick(s)}
+            />
           ))}
         </div>
       </div>
@@ -592,12 +651,15 @@ function LiveScreen({
 function StudentCard({
   student: s,
   rank,
+  onKick,
 }: {
   student: LiveStudent;
   rank: number;
+  onKick: () => void;
 }) {
   const pct = pctOf(s);
   const wrong = s.total - s.score;
+  const left = s.connected === false;
   const barColor =
     pct >= 70 ? "bg-emerald-600" : pct >= 40 ? "bg-amber-500" : "bg-red-500";
 
@@ -616,6 +678,7 @@ function StudentCard({
                 : rank === 3
                   ? "border-orange-300 bg-gradient-to-br from-orange-50 to-card"
                   : "border-border",
+        left && "opacity-55 saturate-50",
       )}
     >
       <div className="mb-2.5 flex items-center gap-2">
@@ -629,6 +692,15 @@ function StudentCard({
         <span className={cn("font-mono text-base font-bold", pctColor(pct))}>
           {pct}%
         </span>
+        <button
+          type="button"
+          onClick={onKick}
+          title="Оқушыны шығару"
+          aria-label="Оқушыны шығару"
+          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-red-50 hover:text-red-600"
+        >
+          <X className="size-3.5" aria-hidden />
+        </button>
       </div>
 
       <div className="mb-2 grid grid-cols-3 gap-1">
@@ -648,17 +720,25 @@ function StudentCard({
         <span
           className={cn(
             "flex items-center gap-1.5 text-[0.68rem] font-semibold",
-            s.focused ? "text-muted-foreground" : "text-red-600",
+            left
+              ? "text-muted-foreground"
+              : s.focused
+                ? "text-muted-foreground"
+                : "text-red-600",
           )}
         >
           <span
             className={cn(
               "size-1.5 rounded-full",
-              s.focused ? "bg-emerald-500" : "animate-pulse bg-red-500",
+              left
+                ? "bg-slate-400"
+                : s.focused
+                  ? "bg-emerald-500"
+                  : "animate-pulse bg-red-500",
             )}
             aria-hidden
           />
-          {s.focused ? "Экранда" : "Сыртта"}
+          {left ? "Шығып кетті" : s.focused ? "Экранда" : "Сыртта"}
         </span>
         {s.tabSwitches > 0 && (
           <span className="flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-1.5 py-0.5 text-[0.6rem] font-bold text-red-700">
@@ -874,7 +954,10 @@ function QrOverlay({
           {code}
         </p>
         <p className="mt-2 text-sm text-slate-500">
-          QR кодты сканерлеп кіріңіз
+          QR кодты сканерлеңіз немесе мына сайтқа кіріңіз:
+        </p>
+        <p className="mt-1 text-xl font-bold tracking-tight text-primary">
+          join.matem.school
         </p>
       </div>
     </div>

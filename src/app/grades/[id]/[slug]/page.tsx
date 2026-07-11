@@ -24,20 +24,33 @@ export default async function LessonHubPage({
     );
   }
 
-  // Counts power the badges on the two hub cards. Quizzes mirror the filter used
-  // by the quizzes sub-page (ready + has a teacher file) so the badge matches
-  // what the teacher will actually see there.
-  const [{ count: problemCount }, { count: quizCount }] = await Promise.all([
-    supabase
-      .from("problems")
-      .select("id", { count: "exact", head: true })
-      .eq("topic_id", topic.id),
-    supabase
+  // Counts power the badges on the two hub cards. Quizzes mirror the filter
+  // used by the quizzes sub-page — ready + (teacher HTML file OR engine pack)
+  // — so the badge matches what the teacher will actually see there. Same
+  // legacy fallback as the sub-page for a database without pack_path yet.
+  const countQuizzes = async () => {
+    const withPack = await supabase
       .from("quizzes")
       .select("id", { count: "exact", head: true })
       .eq("topic_id", topic.id)
       .eq("is_ready", true)
-      .not("teacher_html_path", "is", null),
+      .or("teacher_html_path.not.is.null,pack_path.not.is.null");
+    if (!withPack.error) return withPack.count;
+    const legacy = await supabase
+      .from("quizzes")
+      .select("id", { count: "exact", head: true })
+      .eq("topic_id", topic.id)
+      .eq("is_ready", true)
+      .not("teacher_html_path", "is", null);
+    return legacy.count;
+  };
+
+  const [{ count: problemCount }, quizCount] = await Promise.all([
+    supabase
+      .from("problems")
+      .select("id", { count: "exact", head: true })
+      .eq("topic_id", topic.id),
+    countQuizzes(),
   ]);
 
   return (

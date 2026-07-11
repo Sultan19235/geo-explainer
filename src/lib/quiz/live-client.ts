@@ -13,6 +13,9 @@ export type SessionStatus = "waiting" | "active" | "ended" | "not_found";
 export type StatusResponse = {
   status: SessionStatus;
   timeLeft?: number; // seconds, present while a session exists
+  // v6: the teacher removed this student from the room. Rides /status (lobby
+  // polls) and /submit (heartbeats); old servers never send it.
+  kicked?: boolean;
 };
 
 // Per-question outcomes, question id -> 1 (correct) | 0 (wrong). Only quizzes
@@ -31,6 +34,9 @@ export type SubmitPayload = {
   tabSwitches: number;
   awaySeconds: number;
   answers?: AnswerMap;
+  // Deliberate (re-)join, not a passive heartbeat: clears a kick verdict and
+  // the server's sticky finished flag for a fresh run.
+  joining?: boolean;
 };
 
 // "not_found" is a load-bearing verdict: the teacher hook deletes its
@@ -43,13 +49,18 @@ function parseStatus(data: Partial<StatusResponse>, httpStatus: number) {
   if (s !== "waiting" && s !== "active" && s !== "ended" && s !== "not_found") {
     throw new Error(`quiz backend: unexpected status response (${httpStatus})`);
   }
-  return { status: s, timeLeft: data.timeLeft };
+  return { status: s, timeLeft: data.timeLeft, kicked: data.kicked === true };
 }
 
-export async function fetchStatus(code: string): Promise<StatusResponse> {
-  const res = await fetch(
-    `${BACKEND}/status?code=${encodeURIComponent(code)}`,
-  );
+// studentId lets the server attach the kicked verdict — the lobby's only
+// channel for it, since waiting students poll here and never /submit.
+export async function fetchStatus(
+  code: string,
+  studentId?: string,
+): Promise<StatusResponse> {
+  const params = new URLSearchParams({ code });
+  if (studentId) params.set("studentId", studentId);
+  const res = await fetch(`${BACKEND}/status?${params.toString()}`);
   // The server 404s unknown codes but still sends { status: "not_found" }.
   return parseStatus((await res.json()) as Partial<StatusResponse>, res.status);
 }
@@ -99,6 +110,34 @@ export async function resolveCode(code: string): Promise<ResolveResult> {
   }
 }
 
+// The student page is closing (browser back, tab close): one best-effort
+// parting shot so the teacher's board flips to "left" instantly instead of
+// waiting out the server's 45s staleness sweep. text/plain on purpose — a
+// cross-origin application/json beacon needs a preflight sendBeacon can't do.
+export function sendLeaveBeacon(code: string, studentId: string): void {
+  const body = JSON.stringify({ code, studentId });
+  try {
+    if (
+      typeof navigator.sendBeacon === "function" &&
+      navigator.sendBeacon(`${BACKEND}/leave`, new Blob([body], { type: "text/plain" }))
+    ) {
+      return;
+    }
+  } catch {
+    // sendBeacon unavailable/refused — fall through to keepalive fetch
+  }
+  try {
+    void fetch(`${BACKEND}/leave`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body,
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // page is going away — nothing else to try
+  }
+}
+
 // ─── Teacher side ───────────────────────────────────────────────────────────
 
 // One student row as the /live SSE stream reports it.
@@ -113,6 +152,9 @@ export type StudentRecord = {
   awaySeconds: number;
   answers?: AnswerMap;
   updatedAt: number;
+  // v6: false once the student's page is gone (leave beacon or >45s of
+  // heartbeat silence). Absent on old servers — treat as connected.
+  connected?: boolean;
 };
 
 export type LiveEvent =
@@ -123,8 +165,16 @@ export type LiveEvent =
       timeLeft: number;
     }
   | ({ type: "update" } & StudentRecord)
+  | { type: "kicked"; studentId: string }
   | { type: "started"; startedAt: number }
   | { type: "ended"; reason: "teacher" | "timeout" };
+
+// The teacher already has a live room; the server refused to open a second.
+export type ActiveRoomConflict = {
+  code: string;
+  title: string;
+  status: "waiting" | "active";
+};
 
 // Opens a room. Fetches the site's short-lived auth token first (same-origin;
 // returns token:null while the gate is dormant) and passes it to /session.
@@ -139,15 +189,11 @@ export async function createSession(
   // exact quiz; older servers simply ignore the field.
   studentPath?: string,
 ): Promise<
-  { code: string; hostSecret: string | null } | { error: "unauthorized" | "network" }
+  | { code: string; hostSecret: string | null }
+  | { error: "unauthorized" | "network" }
+  | { error: "active_room"; room: ActiveRoomConflict }
 > {
-  let token: string | null = null;
-  try {
-    const res = await fetch("/api/quiz-token");
-    if (res.ok) token = ((await res.json()) as { token: string | null }).token;
-  } catch {
-    // gate dormant or endpoint unreachable — the server decides
-  }
+  const token = await fetchOwnerToken();
   try {
     const res = await fetch(`${BACKEND}/session`, {
       method: "POST",
@@ -155,12 +201,44 @@ export async function createSession(
       body: JSON.stringify({ title, token, studentPath }),
     });
     if (res.status === 401) return { error: "unauthorized" };
+    if (res.status === 409) {
+      // v6 one-room-per-teacher rule: the server names the live room so the
+      // console can offer "end it and start the new one".
+      const data = (await res.json()) as {
+        code?: string;
+        title?: string;
+        status?: string;
+      };
+      if (data.code) {
+        return {
+          error: "active_room",
+          room: {
+            code: data.code,
+            title: data.title ?? "",
+            status: data.status === "active" ? "active" : "waiting",
+          },
+        };
+      }
+      return { error: "network" };
+    }
     const data = (await res.json()) as { code?: string; hostSecret?: string };
     if (!data.code) return { error: "network" };
     return { code: data.code, hostSecret: data.hostSecret ?? null };
   } catch {
     return { error: "network" };
   }
+}
+
+// The site-issued teacher token (null while the gate is dormant). Fetched
+// same-origin so it carries the auth cookies.
+async function fetchOwnerToken(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/quiz-token");
+    if (res.ok) return ((await res.json()) as { token: string | null }).token;
+  } catch {
+    // gate dormant or endpoint unreachable — the server decides
+  }
+  return null;
 }
 
 // The teacher SSE stream URL, carrying the hostSecret in the query string
@@ -190,5 +268,32 @@ export async function endSession(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code, hostSecret }),
+  });
+}
+
+// End a room this console does NOT hold the hostSecret for (it lives in
+// another tab or device) by proving ownership with a fresh teacher token —
+// the resolution path for an active_room conflict.
+export async function endSessionAsOwner(code: string): Promise<void> {
+  const token = await fetchOwnerToken();
+  await fetch(`${BACKEND}/end`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, token }),
+  });
+}
+
+// Teacher removes one student from the room (v6). The SSE 'kicked' event
+// echoes back to every console tab, so the caller may also drop the card
+// optimistically.
+export async function kickStudent(
+  code: string,
+  hostSecret: string | null,
+  studentId: string,
+): Promise<void> {
+  await fetch(`${BACKEND}/kick`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, hostSecret, studentId }),
   });
 }

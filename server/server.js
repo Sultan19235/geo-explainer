@@ -1,5 +1,5 @@
 /**
- * MathSabaq Live Score Server — v5
+ * MathSabaq Live Score Server — v6
  * Hetzner Node.js backend — HTTP POST + SSE
  * No Socket.io. Pure HTTP. Sessions live in memory ONLY. This server never
  * writes results anywhere — since 2026-07-10 the teacher's CONSOLE saves the
@@ -10,11 +10,31 @@
  *   POST /session   → creates session (status: waiting)      [token-gated*]
  *   POST /start     → teacher starts quiz (status: active, starts 45-min timer)
  *   POST /end       → teacher ends quiz   (status: ended)
- *   GET  /status    → students poll session state
+ *   POST /kick      → teacher removes one student from the room
+ *   GET  /status    → students poll session state (+kicked verdict via studentId)
  *   GET  /resolve   → room code → student join path (universal /join page)
  *   POST /submit    → student sends score (response includes status + timeLeft)
+ *   POST /leave     → student's pagehide beacon (text/plain) → connected:false
  *   GET  /live      → teacher SSE stream
  *   GET  /health    → sessions/students counts + enabled features
+ *
+ * v6 over v5: honest presence + classroom moderation.
+ *   - one live room per teacher: /session remembers the verified token uid as
+ *     ownerUid; a second create while a room is live returns 409
+ *     {error:'active_room', code, title, status}. /end additionally accepts a
+ *     valid owner token in place of the hostSecret, so the console that hit
+ *     the 409 can close the old room and retry. Only enforceable when
+ *     QUIZ_TOKEN_SECRET is set (no uid otherwise).
+ *   - POST /kick: removes a student and blocks their passive heartbeats from
+ *     re-registering; an explicit re-join (/submit with joining:true) is
+ *     allowed by design — the teacher can always kick again.
+ *   - presence: student records carry connected:true; POST /leave (a
+ *     sendBeacon fired on the student page's pagehide) flips it immediately,
+ *     and a 15s sweep marks anyone silent >45s in an ACTIVE room as
+ *     disconnected (lobby students poll /status, not /submit, so waiting
+ *     rooms are exempt). The teacher console renders connected:false as
+ *     "left".
+ *   - finished is sticky: a later heartbeat can't un-finish a student.
  *
  * v5 over v4: kahoot-style universal entrance. /session stores the console's
  * `studentPath` (the room's site-relative join link) and public
@@ -229,10 +249,13 @@ function broadcast(session, payload) {
 // Token format: base64url(JSON {uid, exp}) + '.' + base64url(HMAC-SHA256).
 // Issued by the website's /api/quiz-token for signed-in teachers; verified
 // here with the shared secret. No secret configured → gate is open (v1
-// behavior) so already-uploaded consoles keep working.
-function verifyQuizToken(token) {
-  if (!AUTH_ENFORCED) return true;
-  if (typeof token !== 'string' || !token.includes('.')) return false;
+// behavior) so already-uploaded consoles keep working — and no uid can be
+// trusted, so the one-room-per-teacher rule stays dormant with it.
+// Returns { ok, uid }: ok=false only when the gate is ENFORCED and the token
+// is missing/invalid; uid is non-null only for a signature-verified token.
+function parseQuizToken(token) {
+  if (!AUTH_ENFORCED) return { ok: true, uid: null };
+  if (typeof token !== 'string' || !token.includes('.')) return { ok: false, uid: null };
   const [payloadB64, sig] = token.split('.');
   try {
     const expected = crypto
@@ -241,12 +264,26 @@ function verifyQuizToken(token) {
       .digest('base64url');
     const a = Buffer.from(sig);
     const b = Buffer.from(expected);
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return { ok: false, uid: null };
+    }
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-    return Boolean(payload.exp && payload.exp >= Math.floor(Date.now() / 1000));
+    if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) {
+      return { ok: false, uid: null };
+    }
+    return { ok: true, uid: typeof payload.uid === 'string' ? payload.uid : null };
   } catch (_) {
-    return false;
+    return { ok: false, uid: null };
   }
+}
+
+// "The teacher who owns this room is asking": a verified token whose uid
+// matches the room's creator. Lets the console end its owner's OTHER room
+// (whose hostSecret lives in a different tab/device) after an active_room 409.
+function isOwnerToken(session, token) {
+  if (!session.ownerUid) return false;
+  const auth = parseQuizToken(token);
+  return auth.ok && auth.uid !== null && auth.uid === session.ownerUid;
 }
 
 // Check if session should auto-end (45 min elapsed)
@@ -299,8 +336,27 @@ setInterval(() => {
 // still work while the gate is open. (quizId from older v2 consoles is
 // ignored; v5 consoles send studentPath for the universal /join page.)
 app.post('/session', (req, res) => {
-  if (!verifyQuizToken(req.body.token)) {
+  const auth = parseQuizToken(req.body.token);
+  if (!auth.ok) {
     return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  // One live room per teacher (only when the auth gate gives us a verified
+  // uid). The linear scan is fine: creates are rare and the map is small
+  // relative to a single-core box's real limits.
+  if (auth.uid) {
+    for (const existing of sessions.values()) {
+      if (existing.ownerUid !== auth.uid) continue;
+      checkAutoEnd(existing);
+      if (existing.status !== 'ended') {
+        return res.status(409).json({
+          error: 'active_room',
+          code: existing.code,
+          title: existing.title,
+          status: existing.status
+        });
+      }
+    }
   }
 
   if (sessions.size >= MAX_SESSIONS) {
@@ -314,12 +370,14 @@ app.post('/session', (req, res) => {
   sessions.set(code, {
     code,
     hostSecret,
+    ownerUid: auth.uid,
     createdAt: Date.now(),
     title: String(req.body.title || 'Math Quiz').slice(0, 200),
     studentPath: sanitizeStudentPath(req.body.studentPath),
     status: 'waiting',
     startedAt: null,
     students: new Map(),
+    kicked: new Set(),
     teachers: new Set()
   });
   // hostSecret goes ONLY to the creator here; students never receive it.
@@ -346,14 +404,19 @@ app.post('/start', (req, res) => {
   res.json({ ok: true, startedAt: session.startedAt });
 });
 
-// Teacher ends the quiz (active → ended)
+// Teacher ends the quiz (active → ended). Accepts the room's hostSecret OR a
+// verified owner token — the latter is how a console resolves an active_room
+// 409 for a room whose hostSecret lives in another tab or device.
 app.post('/end', (req, res) => {
   const { code } = req.body;
   if (!code) return res.status(400).json({ error: 'Missing code' });
 
   const session = sessions.get(code);
   if (!session) return res.status(404).json({ error: 'Session not found' });
-  if (!verifyHostSecret(session, req.body.hostSecret)) {
+  if (
+    !verifyHostSecret(session, req.body.hostSecret) &&
+    !isOwnerToken(session, req.body.token)
+  ) {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
@@ -365,17 +428,46 @@ app.post('/end', (req, res) => {
   res.json({ ok: true });
 });
 
-// Student polls session status (used while waiting + to check if ended)
+// Teacher removes one student from the room. The record disappears from the
+// board at once (broadcast below); the student's page learns on its next poll
+// or heartbeat. Passive heartbeats can't re-register a kicked studentId, but
+// an explicit re-join (/submit with joining:true) is allowed by design — the
+// teacher can always kick again.
+app.post('/kick', (req, res) => {
+  const { code, studentId } = req.body;
+  if (!code || !studentId) return res.status(400).json({ error: 'Missing fields' });
+
+  const session = sessions.get(code);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!verifyHostSecret(session, req.body.hostSecret)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  if (!session.kicked) session.kicked = new Set(); // pre-v6 session in memory
+  session.kicked.add(String(studentId));
+  const removed = session.students.delete(studentId);
+  broadcast(session, { type: 'kicked', studentId });
+
+  res.json({ ok: true, removed });
+});
+
+// Student polls session status (used while waiting + to check if ended).
+// With a studentId the response also carries the kicked verdict — lobby
+// students only ever poll here, so it's their one channel to learn it.
 app.get('/status', (req, res) => {
-  const { code } = req.query;
+  const { code, studentId } = req.query;
   const session = sessions.get(code);
   if (!session) return res.status(404).json({ error: 'Session not found', status: 'not_found' });
 
   checkAutoEnd(session);
 
+  const kicked = Boolean(
+    studentId && session.kicked && session.kicked.has(String(studentId)),
+  );
   res.json({
     status: session.status,
-    timeLeft: getTimeLeft(session)
+    timeLeft: getTimeLeft(session),
+    ...(kicked ? { kicked: true } : {})
   });
 });
 
@@ -401,10 +493,13 @@ app.get('/resolve', (req, res) => {
   });
 });
 
-// Student submits score (heartbeat + on every answer / focus change)
+// Student submits score (heartbeat + on every answer / focus change).
+// joining:true marks a deliberate (re-)join, which clears a kick verdict and
+// resets the sticky finished flag for a fresh run.
 app.post('/submit', (req, res) => {
   const { code, studentId, name, score, total, finished,
           focused, tabSwitches, awaySeconds, answers } = req.body;
+  const joining = req.body.joining === true;
 
   if (!code || !studentId) return res.status(400).json({ error: 'Missing fields' });
 
@@ -412,6 +507,20 @@ app.post('/submit', (req, res) => {
   if (!session) return res.status(404).json({ error: 'Session not found', status: 'not_found' });
 
   checkAutoEnd(session);
+
+  if (session.kicked && session.kicked.has(String(studentId))) {
+    if (joining) {
+      session.kicked.delete(String(studentId));
+    } else {
+      // A kicked student's passive heartbeat must not re-register them.
+      return res.json({
+        ok: false,
+        kicked: true,
+        status: session.status,
+        timeLeft: getTimeLeft(session)
+      });
+    }
+  }
 
   const prev = session.students.get(studentId);
   if (!prev && session.students.size >= MAX_STUDENTS_PER_SESSION) {
@@ -422,10 +531,14 @@ app.post('/submit', (req, res) => {
     name:        String(name || 'Student').slice(0, MAX_NAME_LENGTH),
     score:       score       || 0,
     total:       total       || 0,
-    finished:    finished    || false,
+    // Sticky: once a student reported finished, a later heartbeat (which
+    // defaults the field to false) can't silently un-finish them.
+    finished:    Boolean(finished) || Boolean(prev && !joining && prev.finished),
     focused:     focused     !== undefined ? focused     : true,
     tabSwitches: tabSwitches !== undefined ? tabSwitches : 0,
     awaySeconds: awaySeconds !== undefined ? awaySeconds : 0,
+    // Any real submit proves the page is open — clears a leave/staleness mark.
+    connected:   true,
     // Keep the last known map when a heartbeat omits/garbles the field, so a
     // brief bad submit can't wipe detail the console already relies on.
     answers:     cleanAnswers(answers) || (prev ? prev.answers : undefined),
@@ -442,6 +555,7 @@ app.post('/submit', (req, res) => {
     || prev.total !== student.total
     || prev.finished !== student.finished
     || prev.focused !== student.focused
+    || prev.connected !== student.connected
     || prev.tabSwitches !== student.tabSwitches
     || Math.abs(student.awaySeconds - prev.awaySeconds) >= 15;
 
@@ -459,6 +573,48 @@ app.post('/submit', (req, res) => {
     timeLeft: getTimeLeft(session)
   });
 });
+
+// Student's parting beacon (navigator.sendBeacon on pagehide). text/plain on
+// purpose: a cross-origin application/json beacon needs a CORS preflight that
+// sendBeacon can't perform, while text/plain is a "simple request" that always
+// goes through. The beacon never reads the response, so CORS visibility is
+// irrelevant. Always answers 200 — a leave for a vanished room means nothing.
+app.post('/leave', express.text({ type: '*/*' }), (req, res) => {
+  let data = req.body;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch (_) { data = null; }
+  }
+  const code = data && data.code;
+  const studentId = data && data.studentId;
+  if (code && studentId) {
+    const session = sessions.get(code);
+    const student = session && session.students.get(studentId);
+    if (student && student.connected !== false) {
+      student.connected = false;
+      student.updatedAt = Date.now();
+      broadcast(session, { type: 'update', studentId, ...student });
+    }
+  }
+  res.json({ ok: true });
+});
+
+// Presence sweep: a student in an ACTIVE room heartbeats /submit every 15s,
+// so >45s of silence means the page is gone (closed tab, crashed browser,
+// dead battery) even when the pagehide beacon never fired. Waiting rooms are
+// exempt — lobby students poll /status and legitimately never /submit.
+const PRESENCE_STALE_MS = 45 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const session of sessions.values()) {
+    if (session.status !== 'active') continue;
+    for (const [studentId, student] of session.students.entries()) {
+      if (student.connected !== false && now - student.updatedAt > PRESENCE_STALE_MS) {
+        student.connected = false;
+        broadcast(session, { type: 'update', studentId, ...student });
+      }
+    }
+  }
+}, 15 * 1000);
 
 // Teacher opens SSE stream → receives live updates
 app.get('/live', (req, res) => {
@@ -522,7 +678,7 @@ app.get('/live', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     ok: true,
-    version: 5,
+    version: 6,
     sessions: sessions.size,
     students: Array.from(sessions.values()).reduce((n, s) => n + s.students.size, 0),
     authGate: AUTH_ENFORCED,
@@ -533,7 +689,7 @@ app.get('/health', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ MathSabaq server v5 running on port ${PORT}`);
+  console.log(`✅ MathSabaq server v6 running on port ${PORT}`);
   console.log(`   class history: not saved HERE — the teacher console saves to Supabase`);
   console.log(`   /session auth gate: ${AUTH_ENFORCED ? 'ENFORCED' : 'OPEN — set QUIZ_TOKEN_SECRET to enforce'}`);
   console.log(`   host-secret gate:   ${HOST_SECRET_ENFORCED ? 'ENFORCED' : 'DORMANT — set LIVE_HOST_SECRET_ENFORCED to enforce'}`);

@@ -41,6 +41,9 @@ export const ENGINE_STRINGS = {
     done_desc: "Нәтижең мұғалімнің экранында. Сабақ аяқталғанша күте тұр.",
     ended_title: "Сабақ аяқталды",
     ended_desc: "Мұғалім тестті аяқтады. Жарайсың!",
+    kicked_title: "Мұғалім сені тесттен шығарды",
+    kicked_desc: "Егер бұл қателік болса — қайта қосыла аласың.",
+    kicked_rejoin: "Қайта қосылу",
     result_label: "Нәтижең",
     close_button: "Жабу",
     preview_badge: "АЛДЫН АЛА ҚАРАУ",
@@ -107,7 +110,8 @@ export const ENGINE_STRINGS = {
     c_saved_missing: "{n} сұрақ жинақта енді жоқ — тізімнен алынды. Сақтасаңыз, тест осы күйде жаңарады.",
     // console — lobby
     c_room_code: "Бөлме коды",
-    c_scan_hint: "Оқушылар QR-кодты сканерлейді немесе кодты енгізеді",
+    c_scan_hint: "Оқушылар QR-кодты сканерлейді немесе мына сайтқа кіреді:",
+    c_join_host: "join.matem.school",
     c_students: "Оқушылар",
     c_waiting_students: "Оқушылардың қосылуын күтеміз...",
     c_start: "Тестті бастау",
@@ -115,6 +119,12 @@ export const ENGINE_STRINGS = {
     c_show_qr: "QR үлкейту",
     c_copy_link: "Сілтемені көшіру",
     c_copied: "Көшірілді!",
+    // console — one live room per teacher
+    c_conflict_confirm:
+      "Сізде ашық тест бар: «{title}» (коды {code}). Оны аяқтап, жаңасын бастайсыз ба?",
+    // console — remove a student
+    c_kick: "Оқушыны шығару",
+    c_kick_confirm: "{name} тесттен шығарылсын ба?",
     // console — live
     c_end: "Аяқтау",
     c_end_confirm: "Тестті аяқтайсыз ба?",
@@ -175,6 +185,9 @@ export const ENGINE_STRINGS = {
     done_desc: "Твой результат на экране учителя. Подожди окончания урока.",
     ended_title: "Урок завершён",
     ended_desc: "Учитель завершил тест. Молодец!",
+    kicked_title: "Учитель удалил тебя из теста",
+    kicked_desc: "Если это ошибка — можно присоединиться снова.",
+    kicked_rejoin: "Присоединиться снова",
     result_label: "Твой результат",
     close_button: "Закрыть",
     preview_badge: "ПРЕДПРОСМОТР",
@@ -241,7 +254,8 @@ export const ENGINE_STRINGS = {
     c_saved_missing: "{n} вопрос(а/ов) больше нет в наборе — они убраны из списка. При сохранении тест обновится.",
     // console — lobby
     c_room_code: "Код комнаты",
-    c_scan_hint: "Ученики сканируют QR-код или вводят код",
+    c_scan_hint: "Ученики сканируют QR-код или заходят на сайт:",
+    c_join_host: "join.matem.school",
     c_students: "Ученики",
     c_waiting_students: "Ждём подключения учеников...",
     c_start: "Начать тест",
@@ -249,6 +263,12 @@ export const ENGINE_STRINGS = {
     c_show_qr: "Увеличить QR",
     c_copy_link: "Скопировать ссылку",
     c_copied: "Скопировано!",
+    // console — one live room per teacher
+    c_conflict_confirm:
+      "У вас уже открыт тест «{title}» (код {code}). Завершить его и начать новый?",
+    // console — remove a student
+    c_kick: "Убрать ученика",
+    c_kick_confirm: "Убрать {name} из теста?",
     // console — live
     c_end: "Завершить",
     c_end_confirm: "Завершить тест?",

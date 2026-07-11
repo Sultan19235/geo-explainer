@@ -10,12 +10,14 @@ written to any database.
 
 | Endpoint | Who | What |
 |---|---|---|
-| `POST /session` | teacher console | create room → `{code}` (token-gated when `QUIZ_TOKEN_SECRET` is set) |
-| `POST /start` / `POST /end` | teacher console | waiting → active → ended |
-| `GET /status?code=` | student page | poll state while waiting / after |
+| `POST /session` | teacher console | create room → `{code}` (token-gated when `QUIZ_TOKEN_SECRET` is set; 409 `active_room` if this teacher already has a live room — needs the token's uid) |
+| `POST /start` / `POST /end` | teacher console | waiting → active → ended (`/end` also accepts an owner token instead of the hostSecret) |
+| `POST /kick` | teacher console | remove one student; passive heartbeats can't re-register them, an explicit re-join can |
+| `GET /status?code=&studentId=` | student page | poll state while waiting / after (+`kicked` verdict when studentId sent) |
 | `GET /resolve?code=` | /join page | room code → `{status, title, studentPath}` (universal entrance) |
-| `POST /submit` | student page | score heartbeat (15s) + immediate on answer/focus change |
-| `GET /live?code=` | teacher console | SSE stream: `snapshot`, `update`, `started`, `ended` |
+| `POST /submit` | student page | score heartbeat (15s) + immediate on answer/focus change; `joining:true` = deliberate (re-)join |
+| `POST /leave` | student page | pagehide beacon (text/plain JSON) → student shows as "left"; a >45s-silent student in an active room is swept to "left" automatically |
+| `GET /live?code=` | teacher console | SSE stream: `snapshot`, `update`, `kicked`, `started`, `ended` |
 | `GET /health` | anyone | counts + which features are enabled |
 
 ## Config
@@ -38,10 +40,18 @@ service-role key has no business sitting on a box that doesn't use it).
 ssh root@89.167.9.192 'cp /root/server.js /root/server.js.bak'   # rollback copy
 scp server/server.js root@89.167.9.192:/root/server.js
 ssh root@89.167.9.192 'pm2 restart mathsabaq-live && pm2 save'
-curl -s https://mathsabaq.online/health                          # expect "version":5
+curl -s https://mathsabaq.online/health                          # expect "version":6
 ```
 
 Rollback: `ssh root@89.167.9.192 'cp /root/server.js.bak /root/server.js && pm2 restart mathsabaq-live'`
+
+**v6 deploy also needs nginx:** the box's nginx only proxies KNOWN paths to
+:3001 (see gotcha in memory / the /resolve incident) — add the new `/kick`
+and `/leave` paths to the same allowlist that already carries `/submit`,
+`/resolve` etc., then `nginx -t && systemctl reload nginx`. Without this the
+new endpoints 502 in prod while working locally. Verify with:
+`curl -s -X POST https://mathsabaq.online/leave -H 'Content-Type: text/plain' -d '{}'`
+→ expect `{"ok":true}` (nginx 502 HTML = allowlist entry missing).
 
 First deploy on a fresh box also needs:
 

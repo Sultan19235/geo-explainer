@@ -15,9 +15,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createSession,
   endSession,
+  endSessionAsOwner,
   fetchStatus,
+  kickStudent,
   liveStreamUrl,
   startSession,
+  type ActiveRoomConflict,
   type LiveEvent,
   type StudentRecord,
 } from "./live-client";
@@ -133,6 +136,14 @@ export function useTeacherSession(options?: { persistKey?: string }) {
   >(null);
   const [timeLeft, setTimeLeft] = useState(SESSION_SECONDS);
   const [resumable, setResumable] = useState<ResumableRoom | null>(null);
+  // v6 one-room-per-teacher: the server refused to open a room because this
+  // teacher already has a live one. The console asks "end it and start new?"
+  // and answers through resolveConflict.
+  const [conflict, setConflict] = useState<ActiveRoomConflict | null>(null);
+  // The arguments of the create that hit the conflict, replayed on "yes".
+  const conflictRetryRef = useRef<
+    [string, string | undefined, unknown] | null
+  >(null);
 
   const phaseRef = useRef<TeacherPhase>("setup");
   // Per-session teacher credential from /session; required by /start, /end and
@@ -286,6 +297,22 @@ export function useTeacherSession(options?: { persistKey?: string }) {
         return;
       }
 
+      if (event.type === "kicked") {
+        // Echo of a /kick (possibly from another console tab): drop the card.
+        setStudents((prev) => {
+          if (!prev.has(event.studentId)) return prev;
+          const next = new Map(prev);
+          next.delete(event.studentId);
+          return next;
+        });
+        const timer = flashTimers.current.get(event.studentId);
+        if (timer) {
+          clearTimeout(timer);
+          flashTimers.current.delete(event.studentId);
+        }
+        return;
+      }
+
       if (event.type === "started") {
         setTimeLeft(SESSION_SECONDS);
         if (phaseRef.current === "lobby") setPhaseBoth("live");
@@ -360,7 +387,14 @@ export function useTeacherSession(options?: { persistKey?: string }) {
       const res = await createSession(title, studentPath);
       setCreating(false);
       if ("error" in res) {
-        setCreateError(res.error);
+        if (res.error === "active_room") {
+          // This teacher already has a live room (v6 rule). Hold the create's
+          // arguments; the console confirms and calls resolveConflict.
+          conflictRetryRef.current = [title, studentPath, ctx];
+          setConflict(res.room);
+        } else {
+          setCreateError(res.error);
+        }
         return;
       }
       // Opening a fresh room supersedes a leftover one (an ignored resume
@@ -394,6 +428,42 @@ export function useTeacherSession(options?: { persistKey?: string }) {
       connectStream(res.code);
     },
     [connectStream, persistRoom, storageKey],
+  );
+
+  // Answer to the active-room conflict: end the old room and replay the
+  // create that was refused, or just dismiss.
+  const resolveConflict = useCallback(
+    async (endOldAndCreate: boolean) => {
+      const c = conflict;
+      const args = conflictRetryRef.current;
+      setConflict(null);
+      conflictRetryRef.current = null;
+      if (!endOldAndCreate || !c) return;
+      try {
+        await endSessionAsOwner(c.code);
+      } catch {
+        // ending failed (offline?) — the retried create will 409 again and
+        // re-surface the conflict rather than silently doing nothing
+      }
+      if (args) await createRoom(...args);
+    },
+    [conflict, createRoom],
+  );
+
+  // Remove one student from the room. Optimistic: the card disappears now;
+  // the server's 'kicked' broadcast keeps other console tabs in sync.
+  const kick = useCallback(
+    (studentId: string) => {
+      if (!code) return;
+      void kickStudent(code, hostSecretRef.current, studentId).catch(() => {});
+      setStudents((prev) => {
+        if (!prev.has(studentId)) return prev;
+        const next = new Map(prev);
+        next.delete(studentId);
+        return next;
+      });
+    },
+    [code],
   );
 
   const start = useCallback(async () => {
@@ -614,6 +684,9 @@ export function useTeacherSession(options?: { persistKey?: string }) {
     createError,
     timeLeft,
     resumable,
+    conflict,
+    resolveConflict,
+    kick,
     createRoom,
     start,
     end,

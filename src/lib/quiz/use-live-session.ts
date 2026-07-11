@@ -12,13 +12,25 @@
 // uploaded pages' localStorage schema (sections at top level) stays readable.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchStatus, submitScore, type AnswerMap } from "./live-client";
+import {
+  fetchStatus,
+  sendLeaveBeacon,
+  submitScore,
+  type AnswerMap,
+} from "./live-client";
 
 const STATE_TTL = 3 * 60 * 60 * 1000; // saved progress expires after 3h
 const HEARTBEAT_MS = 15_000;
 const LOBBY_POLL_MS = 2_000;
 
-export type QuizPhase = "checking" | "join" | "waiting" | "active" | "ended";
+// "kicked": the teacher removed this student; a deliberate re-join is allowed.
+export type QuizPhase =
+  | "checking"
+  | "join"
+  | "waiting"
+  | "active"
+  | "ended"
+  | "kicked";
 
 export type QuizStats = { correct: number; wrong: number; streak: number };
 
@@ -33,6 +45,7 @@ type SavedBase = {
   tabSwitches: number;
   awaySeconds: number;
   answers?: AnswerMap;
+  finished?: boolean;
   ts: number;
 };
 
@@ -89,6 +102,9 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     extra: opts.defaultExtra,
     stats: { correct: 0, wrong: 0, streak: 0 },
     answers: {} as AnswerMap,
+    // Sticky "answered everything" flag: every heartbeat re-reports it, so a
+    // 15s beat can't silently un-finish the student on the teacher's board.
+    finished: false,
     focused: true,
     tabSwitches: 0,
     awaySeconds: 0,
@@ -111,6 +127,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         tabSwitches: s.tabSwitches,
         awaySeconds: away,
         answers: s.answers,
+        finished: s.finished,
         ts: Date.now(),
       };
       localStorage.setItem(
@@ -149,8 +166,18 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     clearSaved();
   }, [clearSaved]);
 
+  // The teacher removed this student. Saved progress is cleared (a re-join is
+  // a fresh run) but the name is kept for the pre-filled join form.
+  const kickedOut = useCallback(() => {
+    const s = session.current;
+    if (s.phase === "kicked" || s.phase === "ended") return;
+    clearSaved();
+    s.phase = "kicked";
+    setPhase("kicked");
+  }, [clearSaved]);
+
   const sendScore = useCallback(
-    async (finished = false) => {
+    async (opts?: { joining?: boolean }) => {
       const s = session.current;
       if (!s.code || !s.name) return;
       let away = s.awaySeconds;
@@ -162,19 +189,21 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
           name: s.name,
           score: s.stats.correct,
           total: s.stats.correct + s.stats.wrong,
-          finished,
+          finished: s.finished,
           focused: s.focused,
           tabSwitches: s.tabSwitches,
           awaySeconds: away,
           answers: Object.keys(s.answers).length > 0 ? s.answers : undefined,
+          joining: opts?.joining || undefined,
         });
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
-        if (res.status === "ended" || res.status === "not_found") endQuiz();
+        if (res.kicked) kickedOut();
+        else if (res.status === "ended" || res.status === "not_found") endQuiz();
       } catch {
         // offline blip — the next heartbeat retries
       }
     },
-    [endQuiz],
+    [endQuiz, kickedOut],
   );
 
   const startQuiz = useCallback(() => {
@@ -229,6 +258,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         s.tabSwitches = restored.tabSwitches || 0;
         s.awaySeconds = restored.awaySeconds || 0;
         s.answers = sanitizeAnswers(restored.answers);
+        s.finished = restored.finished === true;
         s.extra = opts.sanitizeExtra(restored) ?? opts.defaultExtra;
         setExtraState(s.extra);
         setStats(s.stats);
@@ -238,12 +268,16 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         else {
           s.phase = "waiting";
           setPhase("waiting");
+          // Re-register presence: the pagehide beacon of the load we're
+          // recovering from marked this student as "left" on the teacher's
+          // board — one submit flips them back. (startQuiz sends its own.)
+          void sendScore();
         }
       } catch {
         setPhase("join"); // server unreachable — fresh join screen
       }
     })();
-  }, [urlCode, startQuiz, opts]);
+  }, [urlCode, startQuiz, sendScore, opts]);
 
   // ── Join ─────────────────────────────────────────────────────────────────
   const join = useCallback(
@@ -267,6 +301,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
       s.studentId = "stu_" + Math.random().toString(36).slice(2, 11);
       s.stats = { correct: 0, wrong: 0, streak: 0 };
       s.answers = {};
+      s.finished = false;
       setStats(s.stats);
       setStudentName(trimmed);
 
@@ -280,7 +315,9 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
           setJoinError("ended");
           return;
         }
-        await sendScore(); // registers the student on the teacher's screen
+        // Registers the student on the teacher's screen. joining marks this
+        // as deliberate, so it also clears a previous kick verdict.
+        await sendScore({ joining: true });
         saveState();
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
         if (res.status === "active") startQuiz();
@@ -337,16 +374,20 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     if (phase !== "waiting") return;
     const id = setInterval(async () => {
       try {
-        const res = await fetchStatus(session.current.code);
+        const res = await fetchStatus(
+          session.current.code,
+          session.current.studentId,
+        );
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
-        if (res.status === "active") startQuiz();
+        if (res.kicked) kickedOut();
+        else if (res.status === "active") startQuiz();
         else if (res.status === "ended" || res.status === "not_found") {
           endQuiz();
         }
       } catch {}
     }, LOBBY_POLL_MS);
     return () => clearInterval(id);
-  }, [phase, startQuiz, endQuiz]);
+  }, [phase, startQuiz, endQuiz, kickedOut]);
 
   // ── Active: presence heartbeat + local countdown ─────────────────────────
   useEffect(() => {
@@ -395,10 +436,49 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
   );
 
   // Reports the "finished" flag (student answered everything) — the teacher
-  // console shows the card as done.
+  // console shows the card as done. Sticky in the session ref, so every later
+  // heartbeat keeps re-reporting it.
   const markFinished = useCallback(() => {
+    session.current.finished = true;
     saveState();
-    void sendScore(true);
+    void sendScore();
+  }, [saveState, sendScore]);
+
+  // After a kick: back to the join form (name pre-filled by the quiz UI).
+  // join() mints a fresh studentId and sends joining:true, which lifts the
+  // kick verdict server-side.
+  const rejoin = useCallback(() => {
+    const s = session.current;
+    if (s.phase !== "kicked") return;
+    s.phase = "join";
+    setJoinError(null);
+    setPhase("join");
+  }, []);
+
+  // ── Leaving: tell the teacher's board instead of silently freezing ───────
+  // pagehide covers browser-back, tab close and reloads; the beacon flips the
+  // card to "left" instantly (the server's 45s sweep is the fallback). On a
+  // bfcache restore (back INTO the page) one heartbeat flips it back.
+  useEffect(() => {
+    const onHide = () => {
+      const s = session.current;
+      if (!s.code || !s.studentId) return;
+      if (s.phase !== "active" && s.phase !== "waiting") return;
+      saveState(); // a reload/return resumes exactly here
+      sendLeaveBeacon(s.code, s.studentId);
+    };
+    const onShow = (e: PageTransitionEvent) => {
+      const s = session.current;
+      if (!e.persisted || !s.code) return;
+      if (s.phase !== "active" && s.phase !== "waiting") return;
+      void sendScore();
+    };
+    window.addEventListener("pagehide", onHide);
+    window.addEventListener("pageshow", onShow);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("pageshow", onShow);
+    };
   }, [saveState, sendScore]);
 
   return {
@@ -411,6 +491,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     timeLeft,
     recordAnswer,
     markFinished,
+    rejoin,
     extra,
     updateExtra,
     needsCodeInput: !urlCode,

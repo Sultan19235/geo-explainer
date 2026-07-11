@@ -74,6 +74,7 @@ export function QuizClient() {
           error={session.joinError}
           pending={session.joinPending}
           needsCode={session.needsCodeInput}
+          initialName={session.studentName}
         />
       )}
       {session.phase === "waiting" && (
@@ -88,7 +89,33 @@ export function QuizClient() {
         />
       )}
       {session.phase === "ended" && <ResultsScreen stats={session.stats} />}
+      {session.phase === "kicked" && (
+        <KickedScreen onRejoin={session.rejoin} />
+      )}
     </main>
+  );
+}
+
+// The teacher removed this student. Re-joining is allowed by design — the
+// teacher can always kick again.
+function KickedScreen({ onRejoin }: { onRejoin: () => void }) {
+  return (
+    <CenterFrame>
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-7 text-center shadow-lg shadow-blue-950/5">
+        <div className="mx-auto mb-3 grid size-12 place-items-center rounded-xl bg-red-50 text-2xl">
+          🚪
+        </div>
+        <h1 className="text-xl font-bold tracking-tight">
+          Мұғалім сені тесттен шығарды
+        </h1>
+        <p className="mt-3 text-sm text-muted-foreground">
+          Егер бұл қателік болса — қайта қосыла аласың.
+        </p>
+        <Button onClick={onRejoin} className="mt-5 w-full font-semibold">
+          Қайта қосылу
+        </Button>
+      </div>
+    </CenterFrame>
   );
 }
 
@@ -107,13 +134,16 @@ function JoinScreen({
   error,
   pending,
   needsCode,
+  initialName = "",
 }: {
   onJoin: (name: string, code: string) => void;
   error: JoinError | null;
   pending: boolean;
   needsCode: boolean;
+  // Pre-filled after a kick→rejoin round-trip, empty on a fresh visit.
+  initialName?: string;
 }) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
   const [code, setCode] = useState("");
 
   return (
