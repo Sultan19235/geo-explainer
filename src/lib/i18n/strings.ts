@@ -136,7 +136,6 @@ export const STRINGS = {
     join_error_ended: "Бұл сабақ аяқталды.",
     join_error_no_link: "Бұл бөлмеге QR код арқылы кіру керек — мұғалімнен сұраңыз.",
     join_error_network: "Байланыс қатесі. Интернетті тексеріп, қайта көріңіз.",
-    home_join_hint: "Оқушыларға: мұғалім берген кодты енгізіңіз",
 
     // Dashboard
     dashboard_greeting: "Сәлеметсіз бе",
@@ -555,7 +554,6 @@ export const STRINGS = {
     join_error_ended: "Этот урок уже завершён.",
     join_error_no_link: "В эту комнату входят по QR-коду — спросите учителя.",
     join_error_network: "Ошибка сети. Проверьте интернет и попробуйте ещё раз.",
-    home_join_hint: "Ученикам: введите код от учителя",
 
     // Dashboard
     dashboard_greeting: "Здравствуйте",

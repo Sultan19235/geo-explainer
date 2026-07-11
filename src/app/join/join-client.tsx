@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { SiteHeader } from "@/components/site-header";
+import { LanguageToggle } from "@/components/language-toggle";
 import {
   JoinCodeForm,
   ROOM_CODE_LENGTH,
@@ -103,7 +103,17 @@ export function JoinClient() {
 
   return (
     <div className="flex min-h-dvh flex-col bg-background">
-      <SiteHeader />
+      {/* Deliberately NOT the site header: this is the students' door,
+          kahoot-style. Brand as plain text (no link leading away), language
+          switch, nothing else — no profile even for signed-in teachers. */}
+      <header className="border-b border-border/60">
+        <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
+          <span className="font-heading text-base font-bold tracking-tight text-primary">
+            {t("brand")}
+          </span>
+          <LanguageToggle />
+        </div>
+      </header>
       <main className="flex flex-1 items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm text-center">
           <h1 className="text-2xl font-semibold tracking-tight">

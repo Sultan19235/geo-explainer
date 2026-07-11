@@ -9,7 +9,6 @@ import {
   PresentationIcon,
 } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
-import { JoinCodeForm } from "@/components/quiz/join-code-form";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -75,15 +74,6 @@ export default function HomePage() {
                 >
                   {t("hero_cta_primary")}
                 </Link>
-              </div>
-              {/* Universal quiz entrance: students land on matem.school and
-                  type the room code from the board — so the box sits right
-                  under the pitch, first thing on a phone. */}
-              <div className="mt-10 w-full max-w-sm rounded-xl border border-border bg-card/85 p-4 shadow-sm backdrop-blur">
-                <p className="mb-2.5 text-sm font-medium text-muted-foreground">
-                  {t("home_join_hint")}
-                </p>
-                <JoinCodeForm />
               </div>
             </div>
             <div className="relative mx-auto w-full max-w-[520px]">
