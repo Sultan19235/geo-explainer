@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ActivitySparkline } from "@/components/admin/activity-sparkline";
+import { ActivityBarChart } from "@/components/admin/activity-bar-chart";
 import { useT } from "@/lib/i18n/context";
 import {
   almatyDayKey,
@@ -97,7 +97,9 @@ export function UserDetailClient({
         ? t("ua_method_oauth")
         : m === "signup"
           ? t("ua_method_signup")
-          : "—";
+          : m === "resumed"
+            ? t("ua_method_resumed")
+            : "—";
 
   const deviceLabel = (s: SessionRow) =>
     [s.browser, s.os, s.device_type].filter(Boolean).join(" · ") || "—";
@@ -269,11 +271,8 @@ export function UserDetailClient({
         ))}
       </div>
 
-      <div className="mb-8 rounded-lg border p-3">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">
-          {t("ua_activity_30d")}
-        </div>
-        <ActivitySparkline points={dailyActivity} className="mt-2" />
+      <div className="mb-8 rounded-lg border p-4">
+        <ActivityBarChart points={dailyActivity} />
       </div>
 
       <h2 className="mb-3 text-lg font-medium">{t("ua_quiz_sessions_title")}</h2>

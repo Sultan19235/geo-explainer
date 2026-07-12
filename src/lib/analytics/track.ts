@@ -13,7 +13,9 @@ import { getRequestInfo } from "./request-info";
 export const SESSION_COOKIE = "geo_ls";
 const SESSION_MAX_AGE = 60 * 60 * 12; // 12h — matches a realistic working day.
 
-export type LoginMethod = "password" | "oauth" | "signup";
+// "resumed" = a session re-minted by the heartbeat after the previous tracking
+// cookie aged out (Supabase auth outlives the 12h analytics cookie).
+export type LoginMethod = "password" | "oauth" | "signup" | "resumed";
 export type ActivityType = "view_grade" | "view_lesson" | "open_quiz";
 
 // Creates a login_sessions row, stores its id in an httpOnly cookie, and
@@ -87,19 +89,26 @@ export async function endLoginSession(reason = "logout"): Promise<void> {
 
 // Heartbeat write: bumps last_seen_at and, if provided and not yet stored,
 // records the client device fingerprint. Called from the heartbeat route.
-export async function touchSession(fingerprint?: string | null): Promise<void> {
+// Returns false when no live session matched the cookie (missing, expired, or
+// already ended) — the route then re-mints a session so "last activity" keeps
+// tracking users whose Supabase auth outlives the 12h analytics cookie.
+export async function touchSession(
+  fingerprint?: string | null,
+): Promise<boolean> {
   try {
     const id = await getSessionId();
-    if (!id) return;
+    if (!id) return false;
 
     const admin = createAdminClient();
     // Live sessions only: a stale or replayed cookie must not resurrect a
     // session that already ended.
-    await admin
+    const { data, error } = await admin
       .from("login_sessions")
       .update({ last_seen_at: new Date().toISOString() })
       .eq("id", id)
-      .is("ended_at", null);
+      .is("ended_at", null)
+      .select("id");
+    if (error || !data || data.length === 0) return false;
 
     // Fingerprint is write-once: the first device to report one wins, so a
     // later heartbeat (or a forged request) can't rewrite the recorded device
@@ -112,8 +121,9 @@ export async function touchSession(fingerprint?: string | null): Promise<void> {
         .is("ended_at", null)
         .is("fingerprint", null);
     }
+    return true;
   } catch {
-    // ignore
+    return false;
   }
 }
 

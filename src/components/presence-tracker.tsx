@@ -17,8 +17,11 @@ export function PresenceTracker() {
     if (!userId) return;
 
     let stopped = false;
-    // Sent only on the first successful heartbeat, then cleared — the
-    // fingerprint is stable, no need to recompute or resend it every tick.
+    // Sent on the first successful heartbeat, then cleared — the fingerprint
+    // is stable, no need to resend it every tick. Kept around so it can be
+    // re-queued when the server re-mints the session (fresh row, no
+    // fingerprint yet).
+    let fingerprint: string | null = null;
     let pendingFingerprint: string | null = null;
 
     const send = () => {
@@ -32,8 +35,9 @@ export function PresenceTracker() {
         body,
         keepalive: true,
       })
-        .then(() => {
-          pendingFingerprint = null;
+        .then((res) => res.json().catch(() => null))
+        .then((data) => {
+          pendingFingerprint = data?.resumed ? fingerprint : null;
         })
         .catch(() => {
           // network blip — the next tick retries
@@ -42,6 +46,7 @@ export function PresenceTracker() {
 
     computeFingerprint()
       .then((fp) => {
+        fingerprint = fp;
         pendingFingerprint = fp;
         send();
       })

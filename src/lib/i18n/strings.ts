@@ -269,6 +269,8 @@ export const STRINGS = {
     admin_nav_lessons: "Сабақтар",
     admin_nav_teachers: "Мұғалімдер",
     admin_back_home: "← Басты бет",
+    admin_nav_collapse: "Мәзірді жинау",
+    admin_nav_expand: "Мәзірді ашу",
 
     // User analytics
     ua_title: "Мұғалімдер белсенділігі",
@@ -298,6 +300,7 @@ export const STRINGS = {
     ua_method_password: "Құпиясөз",
     ua_method_oauth: "Google",
     ua_method_signup: "Тіркелу",
+    ua_method_resumed: "Қайта оралу",
     ua_event_view_grade: (g: number) => `${g}-сынып ашылды`,
     ua_event_view_lesson: "Сабақ ашылды",
     ua_event_open_quiz: "Тест ашылды",
@@ -318,6 +321,11 @@ export const STRINGS = {
     ua_col_quiz_runs: "Өткізілген тесттер",
     ua_col_students_reached: "Оқушылар",
     ua_col_trend: "14 күн",
+    ua_col_count: "Саны",
+    ua_group_activity: "Белсенділік",
+    ua_group_content: "Ашылған материалдар",
+    ua_group_live: "Өткізілген тесттер",
+    ua_chart_total: (n: number) => `${n} әрекет`,
     ua_quiz_sessions_title: "Өткізілген тесттер",
     ua_qs_col_quiz: "Тест",
     ua_qs_col_students: "Оқушылар",
@@ -376,6 +384,8 @@ export const STRINGS = {
     ua_enr_status_revoked: "Тоқтатылған",
     ua_revoke: "Тоқтату",
     ua_revoke_confirm: "Осы қолжетімділікті тоқтатасыз ба?",
+    ua_revoke_group_confirm: (n: number) =>
+      `Осы пакеттегі ${n} сыныптың қолжетімділігін тоқтатасыз ба?`,
 
     // Admin: topics list
     topics_title: "Тақырыптар",
@@ -724,6 +734,8 @@ export const STRINGS = {
     admin_nav_lessons: "Уроки",
     admin_nav_teachers: "Учителя",
     admin_back_home: "← Главная",
+    admin_nav_collapse: "Свернуть меню",
+    admin_nav_expand: "Развернуть меню",
 
     // User analytics
     ua_title: "Активность учителей",
@@ -753,6 +765,7 @@ export const STRINGS = {
     ua_method_password: "Пароль",
     ua_method_oauth: "Google",
     ua_method_signup: "Регистрация",
+    ua_method_resumed: "Возврат",
     ua_event_view_grade: (g: number) => `Открыт ${g} класс`,
     ua_event_view_lesson: "Открыт урок",
     ua_event_open_quiz: "Открыт тест",
@@ -773,6 +786,12 @@ export const STRINGS = {
     ua_col_quiz_runs: "Проведено тестов",
     ua_col_students_reached: "Ученики",
     ua_col_trend: "14 дней",
+    ua_col_count: "Кол-во",
+    ua_group_activity: "Активность",
+    ua_group_content: "Открытые материалы",
+    ua_group_live: "Проведённые тесты",
+    ua_chart_total: (n: number) =>
+      `${n} ${ruPlural(n, "действие", "действия", "действий")}`,
     ua_quiz_sessions_title: "Проведённые тесты",
     ua_qs_col_quiz: "Тест",
     ua_qs_col_students: "Ученики",
@@ -831,6 +850,8 @@ export const STRINGS = {
     ua_enr_status_revoked: "Отозван",
     ua_revoke: "Отозвать",
     ua_revoke_confirm: "Отозвать этот доступ?",
+    ua_revoke_group_confirm: (n: number) =>
+      `Отозвать доступ ко всем ${n} классам этой записи?`,
 
     // Admin: topics list
     topics_title: "Темы",

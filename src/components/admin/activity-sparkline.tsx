@@ -10,14 +10,14 @@ import { formatDayLabel } from "@/lib/analytics/format";
 import { useT } from "@/lib/i18n/context";
 import type { DailyActivityPoint } from "@/lib/analytics/types";
 
-const BAR_WIDTH = 5;
+const BAR_WIDTH = 6;
 const BAR_GAP = 2;
-const HEIGHT = 22;
+const HEIGHT = 26;
 // Days with zero events still get a stub so the timeline keeps its rhythm and
 // gaps read as "quiet day", not "missing data".
 const STUB_HEIGHT = 2;
 
-const PAST_FILL = "#cbd5e1"; // slate-300 — de-emphasis
+const PAST_FILL = "#94a3b8"; // slate-400 — visible against white, still quieter than today
 const TODAY_FILL = "#2563eb"; // blue-600 — accent, matches admin link color
 
 export function ActivitySparkline({

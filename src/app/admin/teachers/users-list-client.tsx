@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   Table,
@@ -104,6 +105,7 @@ export function UsersListClient({
   serverNow: number;
 }) {
   const { t, lang } = useT();
+  const router = useRouter();
 
   // null until mounted so SSR and first client render agree; then ticks so
   // "last active" relative labels stay fresh.
@@ -175,11 +177,22 @@ export function UsersListClient({
         : { key, dir: "desc" },
     );
 
-  const sortableHead = (key: SortKey, label: string, alignRight = false) => {
+  const sortableHead = (
+    key: SortKey,
+    label: string,
+    alignRight = false,
+    className?: string,
+    rowSpan?: number,
+  ) => {
     const active = sort.key === key;
     return (
       <TableHead
-        className={cn("cursor-pointer select-none", alignRight && "text-right")}
+        rowSpan={rowSpan}
+        className={cn(
+          "cursor-pointer select-none",
+          alignRight && "text-right",
+          className,
+        )}
         aria-sort={
           active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined
         }
@@ -194,6 +207,12 @@ export function UsersListClient({
       </TableHead>
     );
   };
+
+  // Left border marking the start of each column group, so a value is easy to
+  // trace back to its group even far from the header.
+  const groupStart = "border-l";
+  const groupHead =
+    "border-l border-b text-center text-[11px] uppercase tracking-wide text-muted-foreground h-8";
 
   return (
     <div>
@@ -217,23 +236,48 @@ export function UsersListClient({
       ) : (
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>{t("ua_col_user")}</TableHead>
-              {sortableHead("last_seen", t("ua_col_last_seen"))}
+            {/* Tier 1: column groups — every value below traces up to one of
+                these, separated by vertical borders. */}
+            <TableRow className="hover:bg-transparent">
+              <TableHead rowSpan={2}>{t("ua_col_user")}</TableHead>
+              <TableHead colSpan={3} className={groupHead}>
+                {t("ua_group_activity")}
+              </TableHead>
+              {sortableHead(
+                "access",
+                t("ua_access_col"),
+                false,
+                groupStart,
+                2,
+              )}
+              <TableHead colSpan={3} className={groupHead}>
+                {t("ua_group_content")}
+              </TableHead>
+              <TableHead colSpan={2} className={groupHead}>
+                {t("ua_group_live")}
+              </TableHead>
+              {sortableHead(
+                "devices",
+                t("ua_col_devices"),
+                true,
+                groupStart,
+                2,
+              )}
+              <TableHead rowSpan={2} className="w-24" />
+            </TableRow>
+            <TableRow className="hover:bg-transparent">
+              {sortableHead("last_seen", t("ua_col_last_seen"), false, groupStart)}
               {sortableHead("sessions", t("ua_col_sessions"), true)}
-              <TableHead>{t("ua_col_grades")}</TableHead>
-              {sortableHead("access", t("ua_access_col"))}
+              <TableHead>{t("ua_col_trend")}</TableHead>
+              <TableHead className={groupStart}>{t("ua_col_grades")}</TableHead>
               {sortableHead("lessons", t("ua_col_lessons"), true)}
               {sortableHead("quizzes", t("ua_col_quizzes"), true)}
-              {sortableHead("quiz_runs", t("ua_col_quiz_runs"), true)}
+              {sortableHead("quiz_runs", t("ua_col_count"), true, groupStart)}
               {sortableHead(
                 "students_reached",
                 t("ua_col_students_reached"),
                 true,
               )}
-              <TableHead>{t("ua_col_trend")}</TableHead>
-              {sortableHead("devices", t("ua_col_devices"), true)}
-              <TableHead className="w-24" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -243,7 +287,11 @@ export function UsersListClient({
               const online = isOnline(r.last_seen_at, nowMs);
               const agg = quizAgg?.[r.user_id];
               return (
-                <TableRow key={r.user_id}>
+                <TableRow
+                  key={r.user_id}
+                  className="cursor-pointer even:bg-muted/20"
+                  onClick={() => router.push(`/admin/teachers/${r.user_id}`)}
+                >
                   <TableCell>
                     <div className="font-medium">
                       {online && (
@@ -265,7 +313,7 @@ export function UsersListClient({
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="text-sm">
+                  <TableCell className={cn("text-sm", groupStart)}>
                     {online ? (
                       <span className="font-medium text-green-600">
                         {t("ua_online_now")}
@@ -279,10 +327,12 @@ export function UsersListClient({
                   <TableCell className="text-right tabular-nums">
                     {r.session_count}
                   </TableCell>
-                  <TableCell className="text-sm">
-                    {grades.length ? grades.join(", ") : "—"}
+                  <TableCell>
+                    <ActivitySparkline
+                      points={sparklines[r.user_id] ?? zeroPoints}
+                    />
                   </TableCell>
-                  <TableCell className="whitespace-nowrap text-sm">
+                  <TableCell className={cn("whitespace-nowrap text-sm", groupStart)}>
                     {(() => {
                       const cell = access?.[r.user_id];
                       if (!cell) {
@@ -307,26 +357,25 @@ export function UsersListClient({
                       );
                     })()}
                   </TableCell>
+                  <TableCell className={cn("text-sm", groupStart)}>
+                    {grades.length ? grades.join(", ") : "—"}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {r.lesson_count}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {r.quiz_count}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell className={cn("text-right tabular-nums", groupStart)}>
                     {quizAgg === null ? "—" : (agg?.runs ?? 0)}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {quizAgg === null ? "—" : (agg?.students ?? 0)}
                   </TableCell>
-                  <TableCell>
-                    <ActivitySparkline
-                      points={sparklines[r.user_id] ?? zeroPoints}
-                    />
-                  </TableCell>
                   <TableCell
                     className={cn(
                       "text-right tabular-nums",
+                      groupStart,
                       shared && "font-semibold text-amber-600",
                     )}
                   >
@@ -336,6 +385,7 @@ export function UsersListClient({
                     <Link
                       href={`/admin/teachers/${r.user_id}`}
                       className="text-sm text-blue-600 hover:underline"
+                      onClick={(e) => e.stopPropagation()}
                     >
                       {t("ua_view")}
                     </Link>

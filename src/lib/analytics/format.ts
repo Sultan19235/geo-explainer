@@ -42,30 +42,106 @@ export function isOnline(lastSeenIso: string | null, now: number): boolean {
 // React hydration mismatch on the SSR'd analytics timestamps.
 const APP_TIME_ZONE = "Asia/Almaty";
 
+// Kazakh month/weekday names, spelled out by hand: many ICU builds (Node on
+// Vercel, even some Chromes) ship without kk locale data, and Intl then falls
+// back to "2026 M07 13"-style output — ugly AND different between server and
+// client, which breaks hydration. Numeric parts are safe everywhere; names
+// come from these tables.
+const KZ_MONTHS_SHORT = [
+  "қаң",
+  "ақп",
+  "нау",
+  "сәу",
+  "мам",
+  "мау",
+  "шіл",
+  "там",
+  "қыр",
+  "қаз",
+  "қар",
+  "жел",
+];
+const KZ_WEEKDAYS = [
+  "жексенбі",
+  "дүйсенбі",
+  "сейсенбі",
+  "сәрсенбі",
+  "бейсенбі",
+  "жұма",
+  "сенбі",
+];
+
+// The instant's calendar parts in the app time zone, via locale-independent
+// numeric formatting (supported by every ICU build).
+function almatyParts(date: Date): {
+  year: number;
+  month: number; // 1-12
+  day: number;
+  hour: string;
+  minute: string;
+  weekday: number; // 0 = Sunday, matches Date#getDay
+} {
+  const get = (options: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: APP_TIME_ZONE,
+      ...options,
+    }).format(date);
+  const [month, day, year] = get({
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).split("/");
+  const [hour, minute] = get({
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).split(":");
+  const weekday =
+    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(
+      get({ weekday: "short" }),
+    ) % 7;
+  return {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+    hour,
+    minute,
+    weekday: Math.max(0, weekday),
+  };
+}
+
 export function formatDateTime(iso: string, lang: Lang): string {
   try {
-    return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "kk-KZ", {
-      timeZone: APP_TIME_ZONE,
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(iso));
+    if (lang === "ru") {
+      return new Intl.DateTimeFormat("ru-RU", {
+        timeZone: APP_TIME_ZONE,
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(iso));
+    }
+    const p = almatyParts(new Date(iso));
+    return `${p.day} ${KZ_MONTHS_SHORT[p.month - 1]}, ${p.hour}:${p.minute}`;
   } catch {
     return new Date(iso).toISOString();
   }
 }
 
-// Date only ("11 июл 2027 г." / "11 шіл 2027 ж."), for access periods where
+// Date only ("11 июл 2027 г." / "11 шіл 2027"), for access periods where
 // the time of day is noise.
 export function formatDate(iso: string, lang: Lang): string {
   try {
-    return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "kk-KZ", {
-      timeZone: APP_TIME_ZONE,
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(iso));
+    if (lang === "ru") {
+      return new Intl.DateTimeFormat("ru-RU", {
+        timeZone: APP_TIME_ZONE,
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }).format(new Date(iso));
+    }
+    const p = almatyParts(new Date(iso));
+    return `${p.day} ${KZ_MONTHS_SHORT[p.month - 1]} ${p.year}`;
   } catch {
     return iso.slice(0, 10);
   }
@@ -109,14 +185,36 @@ export function formatDayLabel(dayKey: string, lang: Lang): string {
     // Anchor to noon UTC so the label never slides to a neighbor day when the
     // date-only string is re-interpreted in APP_TIME_ZONE (UTC+5).
     const date = new Date(`${dayKey}T12:00:00Z`);
-    return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "kk-KZ", {
-      timeZone: APP_TIME_ZONE,
-      day: "numeric",
-      month: "short",
-      weekday: "long",
-    }).format(date);
+    if (lang === "ru") {
+      return new Intl.DateTimeFormat("ru-RU", {
+        timeZone: APP_TIME_ZONE,
+        day: "numeric",
+        month: "short",
+        weekday: "long",
+      }).format(date);
+    }
+    const p = almatyParts(date);
+    return `${p.day} ${KZ_MONTHS_SHORT[p.month - 1]}, ${KZ_WEEKDAYS[p.weekday]}`;
   } catch {
     return dayKey;
+  }
+}
+
+// "11 шіл" / "11 июл" — compact axis tick.
+export function formatDayShort(dayKey: string, lang: Lang): string {
+  try {
+    const date = new Date(`${dayKey}T12:00:00Z`);
+    if (lang === "ru") {
+      return new Intl.DateTimeFormat("ru-RU", {
+        timeZone: APP_TIME_ZONE,
+        day: "numeric",
+        month: "short",
+      }).format(date);
+    }
+    const p = almatyParts(date);
+    return `${p.day} ${KZ_MONTHS_SHORT[p.month - 1]}`;
+  } catch {
+    return dayKey.slice(5);
   }
 }
 

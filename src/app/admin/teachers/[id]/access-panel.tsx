@@ -124,18 +124,68 @@ export function AccessPanel({
     });
   };
 
-  const revoke = (enrollmentId: string) => {
-    if (!window.confirm(t("ua_revoke_confirm"))) return;
+  const revoke = (enrollmentIds: string[]) => {
+    const confirmText =
+      enrollmentIds.length === 1
+        ? t("ua_revoke_confirm")
+        : t("ua_revoke_group_confirm")(enrollmentIds.length);
+    if (!window.confirm(confirmText)) return;
     setError(null);
     startTransition(async () => {
-      const result = await revokeEnrollmentAction({ enrollmentId, teacherId });
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      for (const enrollmentId of enrollmentIds) {
+        const result = await revokeEnrollmentAction({
+          enrollmentId,
+          teacherId,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          router.refresh(); // show whatever part did get revoked
+          return;
+        }
       }
       router.refresh();
     });
   };
+
+  // One history row per *grant*, not per enrollment row: enrolling a package
+  // inserts one row per grade with identical period/label/created_at (the
+  // backfill migration did the same), which used to render as a wall of
+  // near-duplicate lines. Rows are already ordered newest-first; grouping by
+  // the grant fields (plus revocation state, so a partially revoked package
+  // splits) keeps that order.
+  const historyGroups = (() => {
+    const byKey = new Map<
+      string,
+      { grades: number[]; ids: string[]; row: AdminEnrollmentRow }
+    >();
+    const groups: Array<{
+      grades: number[];
+      ids: string[];
+      row: AdminEnrollmentRow;
+    }> = [];
+    for (const e of enrollments) {
+      const key = [
+        e.created_at,
+        e.starts_at,
+        e.expires_at ?? "",
+        e.package_label ?? "",
+        e.revoked_at ?? "",
+      ].join("|");
+      let group = byKey.get(key);
+      if (!group) {
+        group = { grades: [], ids: [], row: e };
+        byKey.set(key, group);
+        groups.push(group);
+      }
+      group.grades.push(e.grade_id);
+      group.ids.push(e.id);
+    }
+    for (const g of groups) g.grades.sort((a, b) => a - b);
+    return groups;
+  })();
+
+  const gradesLabel = (grades: number[]) =>
+    grades.length === 1 ? t("grade_badge")(grades[0]) : grades.join(", ");
 
   const statusOf = (e: AdminEnrollmentRow) => {
     if (e.revoked_at) {
@@ -289,7 +339,7 @@ export function AccessPanel({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t("ua_history_col_grade")}</TableHead>
+                <TableHead>{t("ua_enroll_grades")}</TableHead>
                 <TableHead>{t("ua_history_col_period")}</TableHead>
                 <TableHead>{t("ua_history_col_status")}</TableHead>
                 <TableHead>{t("ua_history_col_label")}</TableHead>
@@ -298,13 +348,14 @@ export function AccessPanel({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {enrollments.map((e) => {
+              {historyGroups.map((g) => {
+                const e = g.row;
                 const status = statusOf(e);
                 const canRevoke = !e.revoked_at && enrollmentIsActive(e, now);
                 return (
-                  <TableRow key={e.id}>
+                  <TableRow key={g.ids[0]}>
                     <TableCell className="text-sm tabular-nums">
-                      {t("grade_badge")(e.grade_id)}
+                      {gradesLabel(g.grades)}
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-sm">
                       {formatDate(e.starts_at, lang)}
@@ -333,7 +384,7 @@ export function AccessPanel({
                       {canRevoke && (
                         <button
                           type="button"
-                          onClick={() => revoke(e.id)}
+                          onClick={() => revoke(g.ids)}
                           disabled={isPending}
                           className="whitespace-nowrap text-xs text-red-600 hover:underline disabled:opacity-50"
                         >

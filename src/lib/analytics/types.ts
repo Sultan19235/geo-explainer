@@ -23,7 +23,7 @@ export type SessionRow = {
   last_seen_at: string;
   ended_at: string | null;
   end_reason: string | null;
-  login_method: "password" | "oauth" | "signup" | null;
+  login_method: "password" | "oauth" | "signup" | "resumed" | null;
   ip: string | null;
   browser: string | null;
   os: string | null;
