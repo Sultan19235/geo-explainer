@@ -178,6 +178,21 @@ function cleanAnswers(raw) {
   return n > 0 ? out : undefined;
 }
 
+// Client-reported numbers (score, counters) are trusted for display but not to
+// be sane: a hostile or buggy page can send a string, an object, NaN, Infinity
+// or a negative. Coerce to a finite value in [0, max] so garbage can't be
+// stored and broadcast to every teacher stream. Absurd input degrades to 0.
+function cleanNumber(value, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n > max ? max : n;
+}
+
+// Generous ceilings vs. any real quiz — high enough never to clip a legitimate
+// score, low enough to keep the scoreboard readable and bound the field.
+const MAX_SCORE_VALUE = 10_000_000;   // score / total
+const MAX_TELEMETRY_VALUE = 1_000_000; // tabSwitches / awaySeconds
+
 // ─── In-memory session store ───────────────────────────────────────────────
 const sessions = new Map();
 
@@ -529,14 +544,14 @@ app.post('/submit', (req, res) => {
 
   const student = {
     name:        String(name || 'Student').slice(0, MAX_NAME_LENGTH),
-    score:       score       || 0,
-    total:       total       || 0,
+    score:       cleanNumber(score, MAX_SCORE_VALUE),
+    total:       cleanNumber(total, MAX_SCORE_VALUE),
     // Sticky: once a student reported finished, a later heartbeat (which
     // defaults the field to false) can't silently un-finish them.
     finished:    Boolean(finished) || Boolean(prev && !joining && prev.finished),
     focused:     focused     !== undefined ? focused     : true,
-    tabSwitches: tabSwitches !== undefined ? tabSwitches : 0,
-    awaySeconds: awaySeconds !== undefined ? awaySeconds : 0,
+    tabSwitches: cleanNumber(tabSwitches, MAX_TELEMETRY_VALUE),
+    awaySeconds: cleanNumber(awaySeconds, MAX_TELEMETRY_VALUE),
     // Any real submit proves the page is open — clears a leave/staleness mark.
     connected:   true,
     // Keep the last known map when a heartbeat omits/garbles the field, so a
@@ -674,17 +689,22 @@ app.get('/live', (req, res) => {
   });
 });
 
-// Quick health check
+// Quick health check. Public response is liveness only — `version` is what the
+// deploy step verifies. The live counts and which security gates are on are a
+// reconnaissance aid (they tell an attacker exactly what's off), so they're
+// disclosed only to a request carrying the operator key. With LIVE_STATUS_KEY
+// unset the detail is unavailable to everyone, which is the safe default.
 app.get('/health', (req, res) => {
-  res.json({
-    ok: true,
-    version: 6,
-    sessions: sessions.size,
-    students: Array.from(sessions.values()).reduce((n, s) => n + s.students.size, 0),
-    authGate: AUTH_ENFORCED,
-    hostSecretGate: HOST_SECRET_ENFORCED,
-    corsLocked: CORS_LOCKED
-  });
+  const body = { ok: true, version: 6 };
+  const statusKey = process.env.LIVE_STATUS_KEY;
+  if (statusKey && req.query.key === statusKey) {
+    body.sessions = sessions.size;
+    body.students = Array.from(sessions.values()).reduce((n, s) => n + s.students.size, 0);
+    body.authGate = AUTH_ENFORCED;
+    body.hostSecretGate = HOST_SECRET_ENFORCED;
+    body.corsLocked = CORS_LOCKED;
+  }
+  res.json(body);
 });
 
 const PORT = process.env.PORT || 3000;
