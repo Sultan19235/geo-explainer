@@ -6,6 +6,7 @@ import { AuthProvider, type AuthUser } from "@/lib/auth/context";
 import { parseGender } from "@/lib/auth/gender";
 import { PresenceTracker } from "@/components/presence-tracker";
 import { createClient } from "@/lib/supabase/server";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const ibmPlexSans = IBM_Plex_Sans({
   variable: "--font-sans",
@@ -63,6 +64,7 @@ export default async function RootLayout({
           <LanguageProvider>{children}</LanguageProvider>
           <PresenceTracker />
         </AuthProvider>
+        <SpeedInsights />
       </body>
     </html>
   );
