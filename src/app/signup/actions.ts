@@ -39,7 +39,9 @@ export async function signup(
     return { error: "Жарамды электрондық пошта енгізіңіз." };
   }
   if (password.length < MIN_PASSWORD_LENGTH) {
-    return { error: "Құпиясөз кемінде 6 таңбадан тұруы керек." };
+    return {
+      error: `Құпиясөз кемінде ${MIN_PASSWORD_LENGTH} таңбадан тұруы керек.`,
+    };
   }
   if (password !== confirm) {
     return { error: "Құпиясөздер сәйкес келмейді." };

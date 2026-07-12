@@ -49,7 +49,9 @@ export async function resetPassword(
     return { error: "Код қате немесе мерзімі өтіп кеткен." };
   }
   if (password.length < MIN_PASSWORD_LENGTH) {
-    return { error: "Құпиясөз кемінде 6 таңбадан тұруы керек." };
+    return {
+      error: `Құпиясөз кемінде ${MIN_PASSWORD_LENGTH} таңбадан тұруы керек.`,
+    };
   }
   if (password !== confirm) {
     return { error: "Құпиясөздер сәйкес келмейді." };

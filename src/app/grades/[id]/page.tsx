@@ -2,10 +2,7 @@ import { notFound } from "next/navigation";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isPrefetchRequest, logActivity } from "@/lib/analytics/track";
-import {
-  teacherHasGradeAccess,
-  type TeacherAccessRow,
-} from "@/lib/teacher-access";
+import { hasGradeAccess, loadTeacherAccess } from "@/lib/teacher-access";
 import { GRADES } from "@/lib/grades";
 import { GradeDetailClient } from "./grade-detail-client";
 import type { GradeTopicListItem } from "./topic-list-client";
@@ -42,7 +39,7 @@ export default async function GradeTopicsPage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: topics, error }, { data: teacher }] = await Promise.all([
+  const [{ data: topics, error }, access] = await Promise.all([
     supabase
       .from("topics")
       .select(
@@ -53,13 +50,7 @@ export default async function GradeTopicsPage({
       .order("display_order", { ascending: true })
       .order("name_kz", { ascending: true })
       .returns<TopicRow[]>(),
-    user
-      ? supabase
-          .from("teachers")
-          .select("granted_grades, access_expires_at")
-          .eq("id", user.id)
-          .maybeSingle<TeacherAccessRow>()
-      : Promise.resolve({ data: null }),
+    user ? loadTeacherAccess(supabase, user.id) : Promise.resolve(null),
   ]);
 
   // Track that a signed-in teacher opened this grade. Runs after the response
@@ -74,7 +65,7 @@ export default async function GradeTopicsPage({
     );
   }
 
-  const hasGradeAccess = teacherHasGradeAccess(teacher, gradeId);
+  const canAccessGrade = hasGradeAccess(access, gradeId);
   const items: GradeTopicListItem[] = (topics ?? []).map((topic) => ({
     id: topic.id,
     gradeId,
@@ -84,7 +75,7 @@ export default async function GradeTopicsPage({
     description_kz: topic.description_kz,
     description_ru: topic.description_ru,
     is_free_sample: topic.is_free_sample,
-    isAccessible: topic.is_free_sample || hasGradeAccess,
+    isAccessible: topic.is_free_sample || canAccessGrade,
   }));
 
   return (

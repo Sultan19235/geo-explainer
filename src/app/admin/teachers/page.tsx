@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { almatyDayKey } from "@/lib/analytics/format";
 import { fetchAllPages } from "@/lib/analytics/paged";
 import type { DailyActivityPoint, UserSummaryRow } from "@/lib/analytics/types";
-import { UsersListClient } from "./users-list-client";
+import { UsersListClient, type AccessCell } from "./users-list-client";
 
 const SPARKLINE_DAYS = 14;
 const WEEK_MS = 7 * 86_400_000;
@@ -13,7 +13,7 @@ export default async function TeachersAnalyticsPage() {
   const admin = createAdminClient();
   const now = Date.now();
 
-  const [summaryRes, quizRes, eventsRes] = await Promise.all([
+  const [summaryRes, quizRes, eventsRes, enrollRes] = await Promise.all([
     // Most-recently-active teachers first; those who never logged in sort last.
     admin
       .from("user_analytics_summary")
@@ -48,8 +48,28 @@ export default async function TeachersAnalyticsPage() {
         .order("occurred_at", { ascending: false })
         .range(from, to),
     ),
+    // Only currently-active enrollments — the list shows "has access until
+    // when"; history lives on the detail page. Errors (migration pending)
+    // degrade the column to "—" like the quiz columns do.
+    fetchAllPages<{
+      teacher_id: string;
+      grade_id: number;
+      expires_at: string | null;
+    }>((from, to) =>
+      admin
+        .from("teacher_grade_enrollments")
+        .select("teacher_id, grade_id, expires_at")
+        .is("revoked_at", null)
+        .lte("starts_at", new Date(now).toISOString())
+        .or(`expires_at.is.null,expires_at.gt.${new Date(now).toISOString()}`)
+        // id tiebreak: package inserts share one created_at, and .range()
+        // pagination over a non-unique order can skip/duplicate rows.
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
   ]);
-  if (quizRes.truncated || eventsRes.truncated) {
+  if (quizRes.truncated || eventsRes.truncated || enrollRes.truncated) {
     // Aggregates below are lower bounds now; at that volume they belong in a
     // SQL view — this warning is the tripwire to build it.
     console.warn(
@@ -106,14 +126,39 @@ export default async function TeachersAnalyticsPage() {
     if (now - new Date(r.last_seen_at).getTime() <= WEEK_MS) activeWeek += 1;
   }
 
+  // Per-teacher access rollup: which grades are live and the nearest dated
+  // expiry (= when the first renewal is due). Rows are pre-filtered to active.
+  let access: Record<string, AccessCell> | null = null;
+  if (!enrollRes.error) {
+    access = {};
+    for (const e of enrollRes.rows) {
+      const cell = (access[e.teacher_id] ??= {
+        grades: [],
+        until: null,
+        unlimited: false,
+      });
+      if (!cell.grades.includes(e.grade_id)) cell.grades.push(e.grade_id);
+      if (e.expires_at === null) {
+        cell.unlimited = true;
+      } else if (cell.until === null || e.expires_at < cell.until) {
+        cell.until = e.expires_at;
+      }
+    }
+    for (const cell of Object.values(access)) {
+      cell.grades.sort((a, b) => a - b);
+    }
+  }
+  const withAccess = access === null ? null : Object.keys(access).length;
+
   return (
     <UsersListClient
       rows={rows}
       errorMessage={summaryRes.error?.message ?? null}
       quizAgg={quizAgg}
+      access={access}
       sparklines={sparklines}
       days={days}
-      totals={{ activeToday, activeWeek, quizzesWeek, studentsWeek }}
+      totals={{ activeToday, activeWeek, quizzesWeek, studentsWeek, withAccess }}
       serverNow={now}
     />
   );

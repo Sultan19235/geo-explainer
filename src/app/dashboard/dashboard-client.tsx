@@ -25,6 +25,10 @@ import { QuizResultsSection } from "./quiz-results-section";
 export type PurchasedGrade = {
   gradeId: number;
   topicCount: number;
+  // Per-grade period — every grade now carries its own expiry (enrollments).
+  active: boolean;
+  // Active: null = unlimited. Inactive: when the access ended.
+  expiresAt: string | null;
 };
 
 function LogoutButton() {
@@ -47,7 +51,6 @@ export function DashboardClient({
   purchasedGrades,
   savedQuizzes,
   quizResults,
-  accessExpiresAt,
   accessActive,
   logoutAction,
 }: {
@@ -60,7 +63,6 @@ export function DashboardClient({
   purchasedGrades: PurchasedGrade[];
   savedQuizzes: SavedQuizSummary[];
   quizResults: QuizResultSummary[];
-  accessExpiresAt: string | null;
   accessActive: boolean;
   logoutAction: () => Promise<void>;
 }) {
@@ -104,16 +106,19 @@ export function DashboardClient({
 
   const hasGrades = purchasedGrades.length > 0;
 
-  let accessLine: string | null = null;
-  if (hasGrades) {
-    if (!accessExpiresAt) {
-      accessLine = t("profile_access_unlimited");
-    } else if (accessActive) {
-      accessLine = t("profile_access_until")(formatDate(accessExpiresAt));
-    } else {
-      accessLine = t("profile_access_expired")(formatDate(accessExpiresAt));
+  // Each grade shows its own period on its card; the header badge only says
+  // whether anything is active right now.
+  const accessLineFor = ({ active, expiresAt }: PurchasedGrade) => {
+    if (!active) {
+      // No known end moment (degenerate data) → plain "expired", not
+      // "expired: <not set>".
+      return expiresAt
+        ? t("profile_access_expired")(formatDate(expiresAt))
+        : t("profile_status_expired");
     }
-  }
+    if (!expiresAt) return t("profile_access_unlimited");
+    return t("profile_access_until")(formatDate(expiresAt));
+  };
 
   const rows: { label: string; value: string }[] = [
     { label: t("profile_name"), value: fullName?.trim() || t("profile_not_set") },
@@ -207,7 +212,7 @@ export function DashboardClient({
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                 {t("profile_purchased_grades")}
               </h2>
-              {accessLine && (
+              {hasGrades && (
                 <span
                   className={
                     "rounded-full px-2.5 py-0.5 text-xs font-medium " +
@@ -223,31 +228,42 @@ export function DashboardClient({
               )}
             </div>
 
-            {accessLine && (
-              <p className="mb-4 text-sm text-muted-foreground">{accessLine}</p>
-            )}
-
             {hasGrades ? (
               <div className="grid gap-4 sm:grid-cols-2">
-                {purchasedGrades.map(({ gradeId, topicCount }) => (
+                {purchasedGrades.map((grade) => (
                   <Link
-                    key={gradeId}
-                    href={`/grades/${gradeId}`}
+                    key={grade.gradeId}
+                    href={`/grades/${grade.gradeId}`}
                     className="group block focus:outline-none"
                   >
-                    <Card className="h-full transition-all duration-150 group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:shadow-primary/10 group-hover:ring-primary/40 group-focus-visible:ring-primary">
+                    <Card
+                      className={
+                        "h-full transition-all duration-150 group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:shadow-primary/10 group-hover:ring-primary/40 group-focus-visible:ring-primary" +
+                        (grade.active ? "" : " opacity-70")
+                      }
+                    >
                       <CardContent className="flex items-center gap-4">
                         <span className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-accent text-2xl font-bold text-primary">
-                          {gradeId}
+                          {grade.gradeId}
                         </span>
                         <div className="min-w-0 flex-1">
                           <p className="text-base font-semibold">
-                            {t("grade_badge")(gradeId)}
+                            {t("grade_badge")(grade.gradeId)}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {topicCount > 0
-                              ? t("grade_topics_count")(topicCount)
+                            {grade.topicCount > 0
+                              ? t("grade_topics_count")(grade.topicCount)
                               : t("grade_topics_zero")}
+                          </p>
+                          <p
+                            className={
+                              "mt-0.5 text-xs " +
+                              (grade.active
+                                ? "text-muted-foreground"
+                                : "font-medium text-destructive")
+                            }
+                          >
+                            {accessLineFor(grade)}
                           </p>
                         </div>
                         <span className="text-sm font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">

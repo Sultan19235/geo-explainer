@@ -1,7 +1,11 @@
 import { type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { teacherHasGradeAccess } from "@/lib/teacher-access";
+import {
+  hasGradeAccess,
+  loadTeacherAccess,
+  type TeacherAccess,
+} from "@/lib/teacher-access";
 
 // Serves an uploaded lesson content file (.js) same-origin. Same reasoning
 // as /play/q/[id]: Supabase Storage's public endpoint serves the wrong
@@ -18,10 +22,7 @@ const BUCKET = "lessons";
 
 type Viewer = {
   isAdmin: boolean;
-  teacher: {
-    granted_grades: unknown;
-    access_expires_at: string | null;
-  } | null;
+  access: TeacherAccess | null;
 };
 
 async function getViewer(): Promise<Viewer> {
@@ -30,19 +31,11 @@ async function getViewer(): Promise<Viewer> {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return { isAdmin: false, teacher: null };
-    const { data: teacher } = await supabase
-      .from("teachers")
-      .select("is_admin, granted_grades, access_expires_at")
-      .eq("id", user.id)
-      .maybeSingle<{
-        is_admin: boolean;
-        granted_grades: unknown;
-        access_expires_at: string | null;
-      }>();
-    return { isAdmin: !!teacher?.is_admin, teacher: teacher ?? null };
+    if (!user) return { isAdmin: false, access: null };
+    const access = await loadTeacherAccess(supabase, user.id);
+    return { isAdmin: !!access?.isAdmin, access };
   } catch {
-    return { isAdmin: false, teacher: null };
+    return { isAdmin: false, access: null };
   }
 }
 
@@ -93,7 +86,7 @@ export async function GET(
       const allowed =
         catalogTopic.is_published &&
         (catalogTopic.is_free_sample ||
-          teacherHasGradeAccess(viewer.teacher, catalogTopic.grade_id));
+          hasGradeAccess(viewer.access, catalogTopic.grade_id));
       if (!allowed) {
         return new Response("Not found.", { status: 404 });
       }

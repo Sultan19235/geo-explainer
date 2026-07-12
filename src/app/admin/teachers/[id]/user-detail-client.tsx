@@ -30,6 +30,7 @@ import type {
   UserSummaryRow,
 } from "@/lib/analytics/types";
 import { cn } from "@/lib/utils";
+import { AccessPanel, type AdminEnrollmentRow } from "./access-panel";
 
 type EventFilter = "all" | ActivityRow["type"];
 
@@ -49,6 +50,7 @@ export function UserDetailClient({
   quizSessions,
   quizTotals,
   dailyActivity,
+  enrollments,
   serverNow,
 }: {
   summary: UserSummaryRow;
@@ -57,6 +59,7 @@ export function UserDetailClient({
   quizSessions: QuizSessionRow[] | null;
   quizTotals: { runs: number; students: number } | null;
   dailyActivity: DailyActivityPoint[];
+  enrollments: AdminEnrollmentRow[] | null;
   serverNow: number;
 }) {
   const { t, lang } = useT();
@@ -245,6 +248,13 @@ export function UserDetailClient({
           ⚠ {t("ua_sharing_warning")(summary.device_count)}
         </div>
       )}
+
+      <h2 className="mb-3 text-lg font-medium">{t("ua_access_title")}</h2>
+      <AccessPanel
+        teacherId={summary.user_id}
+        enrollments={enrollments}
+        serverNow={serverNow}
+      />
 
       <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {stats.map((s) => (

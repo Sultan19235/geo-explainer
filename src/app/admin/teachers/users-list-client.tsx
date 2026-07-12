@@ -13,6 +13,7 @@ import {
 import { ActivitySparkline } from "@/components/admin/activity-sparkline";
 import { useT } from "@/lib/i18n/context";
 import {
+  formatDate,
   formatLastSeen,
   isOnline,
   SHARING_DEVICE_THRESHOLD,
@@ -24,11 +25,20 @@ import { cn } from "@/lib/utils";
 // absent from the record simply have no finished quiz runs.
 type QuizAgg = Record<string, { runs: number; students: number }>;
 
+// A teacher's live paid access: which grades, the nearest dated expiry, and
+// whether any of it is unlimited. Absent teacher = no active access.
+export type AccessCell = {
+  grades: number[];
+  until: string | null;
+  unlimited: boolean;
+};
+
 type Totals = {
   activeToday: number;
   activeWeek: number;
   quizzesWeek: number | null;
   studentsWeek: number | null;
+  withAccess: number | null;
 };
 
 type SortKey =
@@ -38,12 +48,14 @@ type SortKey =
   | "quizzes"
   | "quiz_runs"
   | "students_reached"
-  | "devices";
+  | "devices"
+  | "access";
 
 function sortValue(
   r: UserSummaryRow,
   key: SortKey,
   quizAgg: QuizAgg | null,
+  access: Record<string, AccessCell> | null,
 ): number | null {
   switch (key) {
     case "last_seen":
@@ -60,6 +72,15 @@ function sortValue(
       return quizAgg ? (quizAgg[r.user_id]?.students ?? 0) : null;
     case "devices":
       return r.device_count;
+    case "access": {
+      // Sorts by "when does their access run out": no access → nulls last,
+      // dated → the nearest expiry, unlimited-only → after every dated one.
+      const cell = access?.[r.user_id];
+      if (!cell) return null;
+      return cell.until
+        ? new Date(cell.until).getTime()
+        : Number.MAX_SAFE_INTEGER;
+    }
   }
 }
 
@@ -67,6 +88,7 @@ export function UsersListClient({
   rows,
   errorMessage,
   quizAgg,
+  access,
   sparklines,
   days,
   totals,
@@ -75,6 +97,7 @@ export function UsersListClient({
   rows: UserSummaryRow[];
   errorMessage: string | null;
   quizAgg: QuizAgg | null;
+  access: Record<string, AccessCell> | null;
   sparklines: Record<string, DailyActivityPoint[]>;
   days: string[];
   totals: Totals;
@@ -102,14 +125,14 @@ export function UsersListClient({
   const sorted = useMemo(() => {
     const factor = sort.dir === "asc" ? 1 : -1;
     return [...rows].sort((a, b) => {
-      const va = sortValue(a, sort.key, quizAgg);
-      const vb = sortValue(b, sort.key, quizAgg);
+      const va = sortValue(a, sort.key, quizAgg, access);
+      const vb = sortValue(b, sort.key, quizAgg, access);
       if (va === null && vb === null) return 0;
       if (va === null) return 1; // nulls last regardless of direction
       if (vb === null) return -1;
       return (va - vb) * factor;
     });
-  }, [rows, sort, quizAgg]);
+  }, [rows, sort, quizAgg, access]);
 
   // Shared all-zero fallback for teachers with no events in the window.
   const zeroPoints = useMemo<DailyActivityPoint[]>(
@@ -138,6 +161,10 @@ export function UsersListClient({
     {
       label: t("ua_totals_students_week"),
       value: totals.studentsWeek === null ? "—" : String(totals.studentsWeek),
+    },
+    {
+      label: t("ua_totals_with_access"),
+      value: totals.withAccess === null ? "—" : String(totals.withAccess),
     },
   ];
 
@@ -195,6 +222,7 @@ export function UsersListClient({
               {sortableHead("last_seen", t("ua_col_last_seen"))}
               {sortableHead("sessions", t("ua_col_sessions"), true)}
               <TableHead>{t("ua_col_grades")}</TableHead>
+              {sortableHead("access", t("ua_access_col"))}
               {sortableHead("lessons", t("ua_col_lessons"), true)}
               {sortableHead("quizzes", t("ua_col_quizzes"), true)}
               {sortableHead("quiz_runs", t("ua_col_quiz_runs"), true)}
@@ -253,6 +281,31 @@ export function UsersListClient({
                   </TableCell>
                   <TableCell className="text-sm">
                     {grades.length ? grades.join(", ") : "—"}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-sm">
+                    {(() => {
+                      const cell = access?.[r.user_id];
+                      if (!cell) {
+                        return <span className="text-muted-foreground">—</span>;
+                      }
+                      // until = nearest renewal due; the ∞ marks that some of
+                      // the access never expires (detail page has per-grade
+                      // truth).
+                      const period = cell.until
+                        ? t("ua_access_until")(formatDate(cell.until, lang)) +
+                          (cell.unlimited ? " · ∞" : "")
+                        : t("ua_access_unlimited");
+                      return (
+                        <>
+                          <span className="font-medium">
+                            {cell.grades.join(", ")}
+                          </span>
+                          <span className="ml-1 text-xs text-muted-foreground">
+                            {period}
+                          </span>
+                        </>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {r.lesson_count}

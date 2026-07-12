@@ -56,6 +56,21 @@ export function formatDateTime(iso: string, lang: Lang): string {
   }
 }
 
+// Date only ("11 июл 2027 г." / "11 шіл 2027 ж."), for access periods where
+// the time of day is noise.
+export function formatDate(iso: string, lang: Lang): string {
+  try {
+    return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "kk-KZ", {
+      timeZone: APP_TIME_ZONE,
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(iso));
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
+
 // Time-of-day only, for the compact end of a "start – end" range where the
 // date half is already on screen.
 export function formatTime(iso: string, lang: Lang): string {

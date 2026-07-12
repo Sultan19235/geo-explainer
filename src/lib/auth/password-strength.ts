@@ -9,7 +9,9 @@ export function isValidEmail(email: string): boolean {
   return EMAIL_RE.test(email.trim());
 }
 
-export const MIN_PASSWORD_LENGTH = 6;
+// Raised from 6 (2026-07 security audit): accounts now hold paid access.
+// Must match the Supabase dashboard's Auth min-password setting.
+export const MIN_PASSWORD_LENGTH = 8;
 
 export type PasswordScore = 0 | 1 | 2 | 3 | 4;
 
@@ -19,7 +21,7 @@ export type PasswordRule = "length" | "case" | "number" | "symbol";
 
 export function passwordChecks(password: string): Record<PasswordRule, boolean> {
   return {
-    length: password.length >= 8,
+    length: password.length >= MIN_PASSWORD_LENGTH,
     case: /[a-z]/.test(password) && /[A-Z]/.test(password),
     number: /\d/.test(password),
     symbol: /[^A-Za-z0-9]/.test(password),

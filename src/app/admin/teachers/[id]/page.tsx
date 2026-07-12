@@ -11,6 +11,7 @@ import type {
   UserSummaryRow,
 } from "@/lib/analytics/types";
 import { UserDetailClient } from "./user-detail-client";
+import type { AdminEnrollmentRow } from "./access-panel";
 
 const DAY_MS = 86_400_000;
 const SPARKLINE_DAYS = 30;
@@ -25,8 +26,15 @@ export default async function UserDetailPage({
   const admin = createAdminClient();
   const now = Date.now();
 
-  const [summaryRes, sessionsRes, eventsRes, quizRes, quizAggRes, sparkRes] =
-    await Promise.all([
+  const [
+    summaryRes,
+    sessionsRes,
+    eventsRes,
+    quizRes,
+    quizAggRes,
+    sparkRes,
+    enrollRes,
+  ] = await Promise.all([
     admin
       .from("user_analytics_summary")
       .select(
@@ -86,11 +94,24 @@ export default async function UserDetailPage({
           .range(from, to),
       5,
     ),
+    // Newest sale first. May not exist yet (migration pending) — null tells
+    // the client to render the "unavailable" hint instead of the panel.
+    admin
+      .from("teacher_grade_enrollments")
+      .select(
+        "id, grade_id, starts_at, expires_at, revoked_at, package_label, created_at",
+      )
+      .eq("teacher_id", id)
+      .order("created_at", { ascending: false })
+      .limit(500)
+      .returns<AdminEnrollmentRow[]>(),
   ]);
 
   if (!summaryRes.data) {
     notFound();
   }
+
+  const enrollments = enrollRes.error ? null : (enrollRes.data ?? []);
 
   // quiz_results may not exist yet (migration pending) — null tells the client
   // to say "unavailable" instead of "no quizzes run". Students are re-built
@@ -144,6 +165,7 @@ export default async function UserDetailPage({
       quizSessions={quizSessions}
       quizTotals={quizTotals}
       dailyActivity={dailyActivity}
+      enrollments={enrollments}
       serverNow={now}
     />
   );

@@ -2,10 +2,7 @@ import { unstable_cache } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import {
-  teacherHasGradeAccess,
-  type TeacherAccessRow,
-} from "@/lib/teacher-access";
+import { hasGradeAccess, loadTeacherAccess } from "@/lib/teacher-access";
 import { GRADES } from "@/lib/grades";
 
 export const BUCKET = "lessons";
@@ -84,13 +81,8 @@ export async function loadAccessibleTopic(gradeId: number, slug: string) {
 
   let hasAccess = topic.is_free_sample;
   if (!hasAccess && user) {
-    const { data: teacher } = await supabase
-      .from("teachers")
-      .select("granted_grades, access_expires_at")
-      .eq("id", user.id)
-      .maybeSingle<TeacherAccessRow>();
-
-    hasAccess = teacherHasGradeAccess(teacher, gradeId);
+    const access = await loadTeacherAccess(supabase, user.id);
+    hasAccess = hasGradeAccess(access, gradeId);
   }
 
   if (!hasAccess) {

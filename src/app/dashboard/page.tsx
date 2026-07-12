@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { parseGender } from "@/lib/auth/gender";
-import { teacherHasGradeAccess } from "@/lib/teacher-access";
+import { loadTeacherAccess, summarizeGradeAccess } from "@/lib/teacher-access";
 import { endLoginSession } from "@/lib/analytics/track";
 import type { SavedQuizSummary } from "@/lib/quiz/saved-quiz";
 import {
@@ -25,8 +25,6 @@ type TeacherProfileRow = {
   full_name: string | null;
   phone: string | null;
   email: string | null;
-  granted_grades: number[] | null;
-  access_expires_at: string | null;
   is_admin: boolean;
   created_at: string;
 };
@@ -64,28 +62,30 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  const { data: teacher } = await supabase
-    .from("teachers")
-    .select(
-      "full_name, phone, email, granted_grades, access_expires_at, is_admin, created_at",
-    )
-    .eq("id", user.id)
-    .maybeSingle<TeacherProfileRow>();
+  const [{ data: teacher }, access] = await Promise.all([
+    supabase
+      .from("teachers")
+      .select("full_name, phone, email, is_admin, created_at")
+      .eq("id", user.id)
+      .maybeSingle<TeacherProfileRow>(),
+    loadTeacherAccess(supabase, user.id),
+  ]);
 
-  const grantedGrades = Array.isArray(teacher?.granted_grades)
-    ? [...teacher!.granted_grades].map(Number).sort((a, b) => a - b)
-    : [];
+  // One card per grade the teacher ever had, each with its own period —
+  // expired ones stay visible (marked) so renewals are obvious.
+  const gradeSummaries = summarizeGradeAccess(access);
+  const summaryGrades = gradeSummaries.map((s) => s.gradeId);
 
   // Count published topics per purchased grade for the cards.
   const topicCounts: Record<number, number> = {};
-  if (grantedGrades.length > 0) {
+  if (summaryGrades.length > 0) {
     const { data: topics } = await supabase
       .from("topics")
       .select("grade_id")
       .eq("is_published", true)
-      .in("grade_id", grantedGrades)
+      .in("grade_id", summaryGrades)
       .returns<{ grade_id: number | null }[]>();
-    for (const grade of grantedGrades) topicCounts[grade] = 0;
+    for (const grade of summaryGrades) topicCounts[grade] = 0;
     for (const row of topics ?? []) {
       if (typeof row.grade_id === "number" && row.grade_id in topicCounts) {
         topicCounts[row.grade_id] += 1;
@@ -93,19 +93,13 @@ export default async function DashboardPage() {
     }
   }
 
-  const accessActive = teacherHasGradeAccess(
-    teacher
-      ? {
-          granted_grades: grantedGrades,
-          access_expires_at: teacher.access_expires_at,
-        }
-      : null,
-    grantedGrades[0] ?? -1,
-  );
+  const accessActive = gradeSummaries.some((s) => s.active);
 
-  const purchasedGrades: PurchasedGrade[] = grantedGrades.map((gradeId) => ({
-    gradeId,
-    topicCount: topicCounts[gradeId] ?? 0,
+  const purchasedGrades: PurchasedGrade[] = gradeSummaries.map((s) => ({
+    gradeId: s.gradeId,
+    topicCount: topicCounts[s.gradeId] ?? 0,
+    active: s.active,
+    expiresAt: s.expiresAt,
   }));
 
   // The teacher's saved quizzes, newest-edited first. RLS scopes the select
@@ -164,7 +158,6 @@ export default async function DashboardPage() {
       purchasedGrades={purchasedGrades}
       savedQuizzes={savedQuizzes}
       quizResults={quizResults}
-      accessExpiresAt={teacher?.access_expires_at ?? null}
       accessActive={accessActive}
       logoutAction={logout}
     />
