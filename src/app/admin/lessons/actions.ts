@@ -75,6 +75,42 @@ export async function setTopicPublishedAction(input: {
   return { ok: true, id: input.id };
 }
 
+// Attach/detach a lesson topic to a catalog topic (public.topics). The
+// catalog topic keeps grade/slug/access; its learn page switches to the
+// native lesson player. One lesson topic backs at most one catalog topic,
+// so linking moves the pointer rather than duplicating it.
+export async function setCatalogTopicLinkAction(input: {
+  lessonTopicId: string;
+  topicId: string | null;
+}): Promise<TopicActionResult> {
+  await requireAdmin();
+  if (!UUID_RE.test(input.lessonTopicId)) {
+    return { ok: false, error: "invalid lesson topic id" };
+  }
+  if (input.topicId !== null && !UUID_RE.test(input.topicId)) {
+    return { ok: false, error: "invalid topic id" };
+  }
+
+  const admin = createAdminClient();
+  const { error: clearError } = await admin
+    .from("topics")
+    .update({ lesson_topic_id: null })
+    .eq("lesson_topic_id", input.lessonTopicId);
+  if (clearError) return { ok: false, error: clearError.message };
+
+  if (input.topicId) {
+    const { error } = await admin
+      .from("topics")
+      .update({ lesson_topic_id: input.lessonTopicId })
+      .eq("id", input.topicId);
+    if (error) return { ok: false, error: error.message };
+  }
+
+  revalidatePath("/admin/lessons");
+  revalidatePath("/grades", "layout");
+  return { ok: true, id: input.lessonTopicId };
+}
+
 // ─── Bulk file upload ────────────────────────────────────────────────────────
 
 export type UploadFileResult = {

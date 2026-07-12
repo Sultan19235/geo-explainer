@@ -18,10 +18,19 @@ import {
 import { cn } from "@/lib/utils";
 import {
   deleteLessonItemAction,
+  setCatalogTopicLinkAction,
   updateLessonItemAction,
   uploadLessonFilesAction,
   type UploadFileResult,
 } from "../actions";
+
+export type CatalogTopicOption = {
+  id: string;
+  grade_id: number;
+  slug: string;
+  name_kz: string;
+  lesson_topic_id: string | null;
+};
 
 export type AdminItem = {
   id: string;
@@ -43,9 +52,13 @@ const inputClass =
 export function TopicDetailClient({
   topic,
   items,
+  catalogTopics,
+  linkedCatalogId,
 }: {
   topic: { id: string; slug: string; title_kz: string; published: boolean };
   items: AdminItem[];
+  catalogTopics: CatalogTopicOption[];
+  linkedCatalogId: string | null;
 }) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -103,6 +116,12 @@ export function TopicDetailClient({
           Сабақты ашу
         </a>
       </div>
+
+      <CatalogLinkPanel
+        lessonTopicId={topic.id}
+        catalogTopics={catalogTopics}
+        linkedCatalogId={linkedCatalogId}
+      />
 
       <div
         onClick={() => fileInputRef.current?.click()}
@@ -196,6 +215,96 @@ export function TopicDetailClient({
           <ItemRow key={item.id} item={item} />
         ))}
       </div>
+    </div>
+  );
+}
+
+// Attach this lesson topic to a catalog topic: the /grades learn page of the
+// chosen topic then renders the native lesson player instead of HTML iframes.
+function CatalogLinkPanel({
+  lessonTopicId,
+  catalogTopics,
+  linkedCatalogId,
+}: {
+  lessonTopicId: string;
+  catalogTopics: CatalogTopicOption[];
+  linkedCatalogId: string | null;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [selected, setSelected] = useState(linkedCatalogId ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  const grades = [...new Set(catalogTopics.map((row) => row.grade_id))];
+  const linked = catalogTopics.find((row) => row.id === linkedCatalogId);
+  const dirty = selected !== (linkedCatalogId ?? "");
+
+  const save = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await setCatalogTopicLinkAction({
+        lessonTopicId,
+        topicId: selected || null,
+      });
+      if (result.ok) router.refresh();
+      else setError(result.error);
+    });
+  };
+
+  return (
+    <div className="mt-5 rounded-xl border-[1.5px] border-[#d8dde5] bg-white p-4">
+      <div className="text-[13px] font-bold uppercase tracking-[0.05em] text-[#6b7280]">
+        Негізгі сайтқа қосу
+      </div>
+      <div className="mt-1 text-xs text-[#6b7280]">
+        Каталогтағы тақырыпқа байлансаңыз, оның сабақ беті осы файлдардан
+        (жаңа плеерден) ашылады.
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <select
+          className={cn(inputClass, "min-w-64 max-w-full")}
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+        >
+          <option value="">— байланбаған (тек /labs) —</option>
+          {grades.map((grade) => (
+            <optgroup key={grade} label={`${grade}-сынып`}>
+              {catalogTopics
+                .filter((row) => row.grade_id === grade)
+                .map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name_kz} (/{row.slug})
+                    {row.lesson_topic_id &&
+                    row.lesson_topic_id !== lessonTopicId
+                      ? " · басқа сабаққа байланған"
+                      : ""}
+                  </option>
+                ))}
+            </optgroup>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={save}
+          disabled={pending || !dirty}
+          className="flex h-8 items-center gap-1 rounded-md bg-[#2563eb] px-3 text-[12px] font-semibold text-white transition-colors enabled:hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {pending && <Loader2Icon className="size-3.5 animate-spin" />}
+          Сақтау
+        </button>
+        {linked && !dirty && (
+          <a
+            href={`/grades/${linked.grade_id}/${linked.slug}/learn`}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 text-xs font-semibold text-[#2563eb] hover:underline"
+          >
+            <ExternalLinkIcon className="size-3.5" />
+            Сайттағы сабақ
+          </a>
+        )}
+      </div>
+      {error && <div className="mt-2 text-xs text-[#dc2626]">{error}</div>}
     </div>
   );
 }

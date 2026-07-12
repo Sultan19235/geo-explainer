@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { isPrefetchRequest, logActivity } from "@/lib/analytics/track";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { loadAccessibleTopic } from "./topic-access";
 import { LessonHubClient } from "./lesson-hub-client";
 
@@ -45,11 +46,30 @@ export default async function LessonHubPage({
     return legacy.count;
   };
 
-  const [{ count: problemCount }, quizCount] = await Promise.all([
-    supabase
+  // A topic linked to a lesson topic serves the native lesson player, so the
+  // badge counts its published lesson problems, not the legacy HTML ones.
+  const countProblems = async () => {
+    if (topic.lesson_topic_id) {
+      // Admin client: the RLS policy on lesson_items requires the lesson
+      // topic to be published in the /labs listing, which linked topics
+      // deliberately don't need. Access was gated by loadAccessibleTopic.
+      const { count } = await createAdminClient()
+        .from("lesson_items")
+        .select("id", { count: "exact", head: true })
+        .eq("topic_id", topic.lesson_topic_id)
+        .eq("kind", "problem")
+        .eq("published", true);
+      return count;
+    }
+    const { count } = await supabase
       .from("problems")
       .select("id", { count: "exact", head: true })
-      .eq("topic_id", topic.id),
+      .eq("topic_id", topic.id);
+    return count;
+  };
+
+  const [problemCount, quizCount] = await Promise.all([
+    countProblems(),
     countQuizzes(),
   ]);
 

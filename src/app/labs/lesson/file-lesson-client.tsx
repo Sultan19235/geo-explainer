@@ -75,10 +75,12 @@ export function FileLessonClient({
   topic,
   theoryItems,
   problemItems,
+  backHref,
 }: {
   topic: FileLessonTopic;
   theoryItems: LessonItemRef[];
   problemItems: LessonItemRef[];
+  backHref?: string;
 }) {
   const { lang } = useT();
   const [theoryDefs, setTheoryDefs] = useState<LessonTheoryDef[] | null>(null);
@@ -199,6 +201,7 @@ export function FileLessonClient({
       topicId={topic.slug}
       title={title}
       subtitle={subtitle}
+      backHref={backHref}
       bank={bank}
       theorySlot={
         theory ? (

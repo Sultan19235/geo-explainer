@@ -51,6 +51,7 @@ export function LessonShell({
   topicId,
   title,
   subtitle,
+  backHref = "/labs/lesson",
   bank,
   theorySlot,
   renderProblem,
@@ -59,6 +60,9 @@ export function LessonShell({
   topicId: string;
   title: Localized;
   subtitle?: Localized;
+  // Where the header's back arrow leads — /labs/lesson for the pilot list,
+  // the topic hub when the lesson is served on the main site.
+  backHref?: string;
   bank: BankProblem[];
   theorySlot: ReactNode;
   renderProblem: (
@@ -188,7 +192,7 @@ export function LessonShell({
         <div className="flex h-14 items-center justify-between gap-3 px-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <Link
-              href="/labs/lesson"
+              href={backHref}
               className="flex items-center gap-1.5 rounded-md border-[1.5px] border-[#d8dde5] px-3 py-1.5 text-[13px] font-semibold text-[#6b7280] transition-colors hover:border-[#c5cad3] hover:text-[#1a1a2e]"
             >
               <ArrowLeftIcon className="size-4" />

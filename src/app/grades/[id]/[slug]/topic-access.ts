@@ -28,6 +28,10 @@ export type TopicRow = {
   is_published: boolean;
   is_free_sample: boolean;
   theory_html_path: string | null;
+  // Set when the topic's content comes from the bulk-uploaded lesson files —
+  // the learn page then renders the native lesson player instead of the
+  // legacy HTML iframes.
+  lesson_topic_id: string | null;
 };
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -50,15 +54,29 @@ export async function loadAccessibleTopic(gradeId: number, slug: string) {
     supabase
       .from("topics")
       .select(
-        "id, grade_id, slug, name_kz, name_ru, description_kz, description_ru, is_published, is_free_sample, theory_html_path",
+        "id, grade_id, slug, name_kz, name_ru, description_kz, description_ru, is_published, is_free_sample, theory_html_path, lesson_topic_id",
       )
       .eq("grade_id", gradeId)
       .eq("slug", slug)
       .maybeSingle<TopicRow>(),
     supabase.auth.getUser(),
   ]);
-  const topic = topicResult.data;
+  let topic = topicResult.data;
   const user = userResult.data.user;
+
+  // Legacy fallback for a database without the linking migration
+  // (20260711130000) yet — same pattern as the hub's pack_path fallback.
+  if (topicResult.error) {
+    const legacy = await supabase
+      .from("topics")
+      .select(
+        "id, grade_id, slug, name_kz, name_ru, description_kz, description_ru, is_published, is_free_sample, theory_html_path",
+      )
+      .eq("grade_id", gradeId)
+      .eq("slug", slug)
+      .maybeSingle<Omit<TopicRow, "lesson_topic_id">>();
+    topic = legacy.data ? { ...legacy.data, lesson_topic_id: null } : null;
+  }
 
   if (!topic || !topic.is_published) {
     notFound();
