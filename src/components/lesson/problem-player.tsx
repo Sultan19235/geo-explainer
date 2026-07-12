@@ -7,7 +7,12 @@
 // normalized PlayerProblem shape.
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lang } from "@/lib/i18n/strings";
 import { pickText } from "@/lib/lesson/types";
@@ -21,7 +26,6 @@ const WORDS = {
   step: { kz: "қадам", ru: "шаг" },
   prev: { kz: "Алдыңғы", ru: "Назад" },
   next: { kz: "Келесі", ru: "Далее" },
-  problem: { kz: "Есеп", ru: "Задача" },
 } as const;
 
 export function ProblemPlayer({
@@ -36,9 +40,16 @@ export function ProblemPlayer({
   className?: string;
 }) {
   const [state, setState] = useState({ index: 0, animate: false });
+  const [statementOpen, setStatementOpen] = useState(true);
   const stepsRef = useRef<HTMLDivElement>(null);
   const total = problem.steps.length;
   const { index } = state;
+
+  // The statement matters most on the first step; once the student moves
+  // on, collapse it to a peek so the walkthrough gets the vertical space.
+  useEffect(() => {
+    setStatementOpen(index === 0);
+  }, [index]);
 
   const goPrev = () =>
     setState((s) => (s.index > 0 ? { index: s.index - 1, animate: false } : s));
@@ -101,10 +112,22 @@ export function ProblemPlayer({
       right={
         <div className="flex min-h-0 flex-col">
           {hasStatement && (
-            <div className="max-h-[45%] shrink-0 overflow-y-auto border-b-[1.5px] border-[#d8dde5] bg-[#fbfcfe] px-5 py-4 md:px-7">
-              <span className="mb-2.5 inline-flex items-center rounded bg-[#eff6ff] px-[9px] py-[3px] text-[10.5px] font-bold uppercase tracking-[0.05em] text-[#2563eb]">
-                {WORDS.problem[lang] ?? WORDS.problem.kz} №{problem.number}
-              </span>
+            <div
+              className={cn(
+                "relative shrink-0 border-b-[1.5px] border-[#d8dde5] bg-[#fbfcfe] px-5 py-2.5 md:px-7",
+                statementOpen
+                  ? "max-h-[45%] overflow-y-auto"
+                  : "cursor-pointer overflow-hidden",
+              )}
+              style={
+                statementOpen
+                  ? undefined
+                  : { maxHeight: "calc(20px + 52px * var(--lesson-scale, 1))" }
+              }
+              onClick={
+                statementOpen ? undefined : () => setStatementOpen(true)
+              }
+            >
               {problem.statementBlocks ? (
                 <LessonBlocks
                   blocks={problem.statementBlocks}
@@ -118,12 +141,26 @@ export function ProblemPlayer({
                   className="text-[length:calc(15px*var(--lesson-scale,1))]"
                 />
               ) : null}
+              {statementOpen && index > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setStatementOpen(false)}
+                  className="absolute right-2 top-2 grid size-6 place-items-center rounded-md bg-[#eef1f5]/90 text-[#6b7280] transition-colors hover:bg-[#e2e6ec] hover:text-[#1a1a2e]"
+                >
+                  <ChevronUpIcon className="size-4" />
+                </button>
+              )}
+              {!statementOpen && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 flex h-6 items-end justify-center bg-gradient-to-t from-[#fbfcfe] to-transparent">
+                  <ChevronDownIcon className="size-4 text-[#9aa3af]" />
+                </div>
+              )}
             </div>
           )}
 
           <div
             ref={stepsRef}
-            className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-5 py-5 md:px-7"
+            className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-3.5 md:px-7"
           >
             {problem.steps.slice(0, index + 1).map((step, stepIndex) => (
               <div
@@ -157,24 +194,24 @@ export function ProblemPlayer({
             ))}
           </div>
 
-          <div className="flex items-center justify-end gap-4 border-t-[1.5px] border-[#d8dde5] px-5 py-2.5">
+          <div className="flex items-center justify-end gap-3 border-t-[1.5px] border-[#d8dde5] px-4 py-1.5">
             <button
               type="button"
               onClick={goPrev}
               disabled={index <= 0}
-              className="flex h-9 items-center gap-1.5 rounded-md bg-[#eef1f5] px-4 text-[13px] font-semibold text-[#6b7280] transition-colors enabled:hover:bg-[#e2e6ec] enabled:hover:text-[#1a1a2e] disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-8 items-center gap-1.5 rounded-md bg-[#eef1f5] px-3.5 text-[12.5px] font-semibold text-[#6b7280] transition-colors enabled:hover:bg-[#e2e6ec] enabled:hover:text-[#1a1a2e] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ChevronLeftIcon className="size-4" />
               {WORDS.prev[lang] ?? WORDS.prev.kz}
             </button>
-            <span className="text-[13px] font-semibold text-[#6b7280]">
+            <span className="text-[12.5px] font-semibold text-[#6b7280]">
               {index + 1} / {total} {WORDS.step[lang] ?? WORDS.step.kz}
             </span>
             <button
               type="button"
               onClick={goNext}
               disabled={index >= total - 1}
-              className="flex h-9 items-center gap-1.5 rounded-md bg-[#2563eb] px-4 text-[13px] font-semibold text-white transition-colors enabled:hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="flex h-8 items-center gap-1.5 rounded-md bg-[#2563eb] px-3.5 text-[12.5px] font-semibold text-white transition-colors enabled:hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               {WORDS.next[lang] ?? WORDS.next.kz}
               <ChevronRightIcon className="size-4" />
