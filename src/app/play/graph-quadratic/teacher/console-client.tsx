@@ -660,6 +660,21 @@ function StudentCard({
   const pct = pctOf(s);
   const wrong = s.total - s.score;
   const left = s.connected === false;
+  // Live "away" clock: an off-screen tab throttles its heartbeat, so once the
+  // student goes off-screen we tick the timer up locally from the last report
+  // rather than waiting for their return for the true total to land.
+  const ticking = !s.focused && !left && s.awaySince != null;
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!ticking) return;
+    const id = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [ticking]);
+  const awaySeconds = Math.round(
+    ticking
+      ? s.awaySeconds + (Date.now() - (s.awaySince as number)) / 1000
+      : s.awaySeconds,
+  );
   const barColor =
     pct >= 70 ? "bg-emerald-600" : pct >= 40 ? "bg-amber-500" : "bg-red-500";
 
@@ -743,7 +758,7 @@ function StudentCard({
         {s.tabSwitches > 0 && (
           <span className="flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-1.5 py-0.5 text-[0.6rem] font-bold text-red-700">
             <EyeOff className="size-2.5" aria-hidden />
-            {s.tabSwitches}× · {s.awaySeconds}с
+            {s.tabSwitches}× · {awaySeconds}с
           </span>
         )}
       </div>

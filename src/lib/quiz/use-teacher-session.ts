@@ -69,7 +69,22 @@ function otherTabIsHosting(storageKey: string): boolean {
 export type TeacherPhase = "setup" | "lobby" | "live" | "results";
 
 // flash marks a card for a moment when a new answer arrives.
-export type LiveStudent = StudentRecord & { flash: "ok" | "err" | null };
+// awaySince (client-only) anchors the live "away" clock: the moment we last
+// saw a heartbeat report the student off-screen. Cards tick up from here so the
+// away timer grows in real time instead of only jumping to the true total when
+// the student returns — an off-screen tab throttles its heartbeat to a crawl.
+export type LiveStudent = StudentRecord & {
+  flash: "ok" | "err" | null;
+  awaySince: number | null;
+};
+
+// Re-derived on every incoming report. Re-anchored on each off-screen beat so
+// the local clock re-syncs with the accumulated awaySeconds the beat carries
+// (no double-count); cleared once the student is back or fully gone.
+function awayAnchor(record: StudentRecord): number | null {
+  if (record.focused || record.connected === false) return null;
+  return Date.now();
+}
 
 // What survives a reload. `ctx` is the console's own room setup (selected
 // questions, generator ticks…) — opaque here, replayed by the console before
@@ -245,6 +260,7 @@ export function useTeacherSession(options?: { persistKey?: string }) {
             next.set(s.studentId, {
               ...s,
               flash: prev.get(s.studentId)?.flash ?? null,
+              awaySince: awayAnchor(s),
             });
           }
           return next;
@@ -274,7 +290,11 @@ export function useTeacherSession(options?: { persistKey?: string }) {
               : (old?.flash ?? null);
           const next = new Map(prev);
           const { type: _type, ...record } = event;
-          next.set(event.studentId, { ...record, flash });
+          next.set(event.studentId, {
+            ...record,
+            flash,
+            awaySince: awayAnchor(record),
+          });
 
           if (flash && (!old || flash !== old.flash || event.total !== old.total)) {
             const existing = flashTimers.current.get(event.studentId);
