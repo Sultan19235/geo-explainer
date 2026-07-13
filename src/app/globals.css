@@ -257,10 +257,58 @@
   animation: quiz-pop 0.35s ease;
 }
 
+/* /join playground — gently drifting math doodles behind the code card. */
+@keyframes join-float {
+  0% {
+    transform: translateY(0) rotate(var(--join-rot, 0deg));
+  }
+  50% {
+    transform: translateY(-22px) rotate(calc(var(--join-rot, 0deg) + 6deg));
+  }
+  100% {
+    transform: translateY(0) rotate(var(--join-rot, 0deg));
+  }
+}
+.join-doodle {
+  animation: join-float var(--join-dur, 9s) ease-in-out infinite;
+  animation-delay: var(--join-delay, 0s);
+  will-change: transform;
+}
+
+/* The code card breathes in on load; the active PIN slot pulses. */
+@keyframes join-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.join-rise {
+  animation: join-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes join-slot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--pen-blue) 34%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--pen-blue) 16%, transparent);
+  }
+}
+.join-slot-active {
+  animation: join-slot-pulse 1.6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .quiz-parabola-path,
   .quiz-confetti-piece,
-  .quiz-pop {
+  .quiz-pop,
+  .join-doodle,
+  .join-rise,
+  .join-slot-active {
     animation: none;
   }
   .hero-stroke {
