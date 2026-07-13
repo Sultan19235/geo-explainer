@@ -441,6 +441,12 @@ export function PackConsoleClient({
           studentUrl={studentUrl}
           students={session.students}
           onStart={() => void session.start()}
+          onClose={() => {
+            // Teacher changed their mind before starting — reset() ends the
+            // room server-side so waiting students aren't stranded, then
+            // returns the console to setup.
+            if (window.confirm(t("c_close_room_confirm"))) session.reset();
+          }}
           onOpenQr={() => setQrOpen(true)}
           onKick={kickWithConfirm}
         />
@@ -1626,6 +1632,7 @@ function LobbyScreen({
   studentUrl,
   students,
   onStart,
+  onClose,
   onOpenQr,
   onKick,
 }: {
@@ -1633,6 +1640,7 @@ function LobbyScreen({
   studentUrl: string;
   students: Map<string, LiveStudent>;
   onStart: () => void;
+  onClose: () => void;
   onOpenQr: () => void;
   onKick: (s: LiveStudent) => void;
 }) {
@@ -1740,6 +1748,15 @@ function LobbyScreen({
         <Play className="size-4" aria-hidden />
         {t("c_start")}
       </Button>
+
+      <button
+        type="button"
+        onClick={onClose}
+        className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-muted-foreground transition-colors hover:text-red-600"
+      >
+        <X className="size-4" aria-hidden />
+        {t("c_close_room")}
+      </button>
     </div>
   );
 }

@@ -126,6 +126,9 @@ export const ENGINE_STRINGS = {
     c_students: "Оқушылар",
     c_waiting_students: "Оқушылардың қосылуын күтеміз...",
     c_start: "Тестті бастау",
+    c_close_room: "Бөлмені жабу",
+    c_close_room_confirm:
+      "Бөлмені жауып, тестті болдырмайсыз ба? Қосылған оқушылар шығарылады.",
     c_back: "Артқа",
     c_show_qr: "QR үлкейту",
     c_copy_link: "Сілтемені көшіру",
@@ -281,6 +284,9 @@ export const ENGINE_STRINGS = {
     c_students: "Ученики",
     c_waiting_students: "Ждём подключения учеников...",
     c_start: "Начать тест",
+    c_close_room: "Закрыть комнату",
+    c_close_room_confirm:
+      "Закрыть комнату и отменить тест? Подключённые ученики будут отключены.",
     c_back: "Назад",
     c_show_qr: "Увеличить QR",
     c_copy_link: "Скопировать ссылку",
