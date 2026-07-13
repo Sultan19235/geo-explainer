@@ -59,8 +59,18 @@ export type PackQuestion = {
   accept?: string[];
   // graph-quadratic
   graph?: PackGraphQuadratic;
+  // "Формулалар" panel for THIS question: what the figure shows + the GENERAL
+  // formulas the problem type needs (Pythagoras, V = S·h, …) — never the
+  // numbers plugged in. Absent → the pack-level `formulas` sheet is shown.
+  theory?: Localized[];
+  // progressive hints, revealed one at a time; the last one may set up the
+  // equation but must never state the answer
+  hints?: Localized[];
   // shown after the student answers
   solution?: Localized[];
+  // extra GeoGebra commands replayed on the figure when the solution reveals
+  // (highlight the triangle the solution uses, draw the height, …)
+  solutionGeogebra?: string[];
 };
 
 // Badge tint on the console; "slate" (neutral) when omitted.
@@ -110,6 +120,7 @@ export type QuizPack = {
 
 const MAX_QUESTIONS = 200;
 const MAX_OPTIONS = 6;
+const MAX_HINTS = 6;
 
 // Graph-quadratic questions carry the graph/equation as their own stem, so a
 // text prompt is optional; when the author gives none, the mode's default
@@ -518,11 +529,44 @@ export function validatePack(raw: unknown): {
       }
     }
 
+    if (q.theory !== undefined) {
+      if (!isLocalizedList(q.theory)) {
+        errors.push(`${label}: "theory" must be a list of strings (or {"kz","ru"} objects).`);
+      } else {
+        question.theory = q.theory as Localized[];
+      }
+    }
+
+    if (q.hints !== undefined) {
+      if (!isLocalizedList(q.hints)) {
+        errors.push(`${label}: "hints" must be a list of strings (or {"kz","ru"} objects).`);
+      } else if ((q.hints as Localized[]).length > MAX_HINTS) {
+        errors.push(`${label}: at most ${MAX_HINTS} hints.`);
+      } else {
+        question.hints = q.hints as Localized[];
+      }
+    }
+
     if (q.solution !== undefined) {
       if (!isLocalizedList(q.solution)) {
         errors.push(`${label}: "solution" must be a list of step strings.`);
       } else {
         question.solution = q.solution as Localized[];
+      }
+    }
+
+    if (q.solutionGeogebra !== undefined) {
+      if (
+        !Array.isArray(q.solutionGeogebra) ||
+        !q.solutionGeogebra.every((c) => typeof c === "string")
+      ) {
+        errors.push(`${label}: "solutionGeogebra" must be a list of command strings.`);
+      } else if (!question.geogebra) {
+        errors.push(
+          `${label}: "solutionGeogebra" needs a "geogebra" figure to draw on.`,
+        );
+      } else {
+        question.solutionGeogebra = q.solutionGeogebra as string[];
       }
     }
 

@@ -10,6 +10,8 @@ import {
   ArrowUp,
   Bookmark,
   BookmarkPlus,
+  BookOpen,
+  Calculator,
   Check,
   Copy,
   EyeOff,
@@ -17,16 +19,19 @@ import {
   Expand,
   GripVertical,
   History,
+  Lightbulb,
   ListChecks,
   ListOrdered,
   Loader2,
   Play,
   QrCode as QrCodeIcon,
+  Shapes,
   Shuffle,
   Square,
   Trophy,
   Users,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +68,11 @@ import {
   type LiveStudent,
   type ResumableRoom,
 } from "@/lib/quiz/use-teacher-session";
+import {
+  ALL_FEATURES,
+  FEATURE_KEYS,
+  type QuizFeatures,
+} from "@/lib/quiz/live-client";
 import {
   useResultAutosave,
   type ResultSaveStatus,
@@ -125,7 +135,22 @@ type RoomCtx = {
   orderMode: "custom" | "shuffle";
   genSections: SectionId[];
   genModes: GraphQuizMode[];
+  features?: QuizFeatures;
 };
+
+// The teacher's last student-aid choice, shared across quizzes (a teacher who
+// bans calculators bans them in every class).
+const FEATURES_STORAGE_KEY = "ms_quiz_features";
+
+function sanitizeStoredFeatures(raw: unknown): QuizFeatures {
+  const r = (raw ?? {}) as Partial<Record<keyof QuizFeatures, unknown>>;
+  return {
+    figure: r.figure !== false,
+    theory: r.theory !== false,
+    hints: r.hints !== false,
+    calculator: r.calculator !== false,
+  };
+}
 
 export function PackConsoleClient({
   quizId,
@@ -194,6 +219,27 @@ export function PackConsoleClient({
   // can't open until at least one section and one type are ticked.
   const [genSections, setGenSections] = useState<SectionId[]>([]);
   const [genModes, setGenModes] = useState<GraphQuizMode[]>([]);
+  // Student aids for this room (figure / formulas / hints / calculator).
+  // All on by default; the teacher's last choice is restored after mount
+  // (not in the initializer — localStorage would desync SSR hydration).
+  const [features, setFeatures] = useState<QuizFeatures>(ALL_FEATURES);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FEATURES_STORAGE_KEY);
+      if (raw) setFeatures(sanitizeStoredFeatures(JSON.parse(raw)));
+    } catch {
+      // unreadable blob — defaults stand
+    }
+  }, []);
+  const toggleFeature = (key: keyof QuizFeatures) => {
+    setFeatures((cur) => {
+      const next = { ...cur, [key]: !cur[key] };
+      try {
+        localStorage.setItem(FEATURES_STORAGE_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
   const rootRef = useRef<HTMLDivElement>(null);
 
   const quizTitle = loc(title, lang);
@@ -223,6 +269,10 @@ export function PackConsoleClient({
     !(wholePack && (orderMode === "shuffle" || selectedIds.join(",") === packOrder))
       ? selectedIds.join(",")
       : null;
+  // Switched-off aids ride the join link as `off=` — the fallback that keeps
+  // the teacher's choice working on a pre-v7 server. The server's copy of the
+  // same flags (v7) is what students actually trust when present.
+  const offList = FEATURE_KEYS.filter((key) => !features[key]);
   // The teacher's generator ticks ride the join link so every student's
   // device generates from exactly this room's choice.
   const joinParams = [
@@ -230,6 +280,7 @@ export function PackConsoleClient({
     orderMode === "shuffle" ? "shuffle=1" : null,
     generator ? `sec=${genSections.join(",")}` : null,
     generator ? `modes=${genModes.join(",")}` : null,
+    offList.length > 0 ? `off=${offList.join(",")}` : null,
   ]
     .filter(Boolean)
     .join("&");
@@ -305,6 +356,9 @@ export function PackConsoleClient({
         const stored = ctx.genModes as unknown[];
         setGenModes(GRAPH_MODES.filter((m) => stored.includes(m)));
       }
+      if (ctx.features && typeof ctx.features === "object") {
+        setFeatures(sanitizeStoredFeatures(ctx.features));
+      }
     }
     session.resume();
   };
@@ -344,12 +398,18 @@ export function PackConsoleClient({
           creating={session.creating}
           createError={session.createError}
           onCreate={() =>
-            void session.createRoom(quizTitle, studentPath, {
-              selectedIds,
-              orderMode,
-              genSections,
-              genModes,
-            } satisfies RoomCtx)
+            void session.createRoom(
+              quizTitle,
+              studentPath,
+              {
+                selectedIds,
+                orderMode,
+                genSections,
+                genModes,
+                features,
+              } satisfies RoomCtx,
+              features,
+            )
           }
           resumable={session.resumable}
           onResume={resumeRoom}
@@ -370,6 +430,8 @@ export function PackConsoleClient({
           setGenSections={setGenSections}
           genModes={genModes}
           setGenModes={setGenModes}
+          features={features}
+          onToggleFeature={toggleFeature}
         />
       )}
 
@@ -455,6 +517,8 @@ function SetupScreen({
   setGenSections,
   genModes,
   setGenModes,
+  features,
+  onToggleFeature,
 }: {
   quizId: string;
   quizTitle: string;
@@ -480,6 +544,8 @@ function SetupScreen({
   setGenSections: React.Dispatch<React.SetStateAction<SectionId[]>>;
   genModes: GraphQuizMode[];
   setGenModes: React.Dispatch<React.SetStateAction<GraphQuizMode[]>>;
+  features: QuizFeatures;
+  onToggleFeature: (key: keyof QuizFeatures) => void;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -732,6 +798,43 @@ function SetupScreen({
           </div>
         )}
 
+        {/* student aids: what the student's screen offers in this room. All
+            on by default; the last choice is remembered on this device. */}
+        <div className="mt-4">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3">
+            <p className="text-sm font-bold">{t("c_features_title")}</p>
+            <p className="text-xs text-muted-foreground">
+              {t("c_features_hint")}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <FeatureToggle
+              icon={Shapes}
+              label={t("c_feat_figure")}
+              on={features.figure}
+              onClick={() => onToggleFeature("figure")}
+            />
+            <FeatureToggle
+              icon={BookOpen}
+              label={t("c_feat_theory")}
+              on={features.theory}
+              onClick={() => onToggleFeature("theory")}
+            />
+            <FeatureToggle
+              icon={Lightbulb}
+              label={t("c_feat_hints")}
+              on={features.hints}
+              onClick={() => onToggleFeature("hints")}
+            />
+            <FeatureToggle
+              icon={Calculator}
+              label={t("c_feat_calc")}
+              on={features.calculator}
+              onClick={() => onToggleFeature("calculator")}
+            />
+          </div>
+        </div>
+
         {canSave && (
           <SaveQuizControls
             quizId={quizId}
@@ -950,6 +1053,42 @@ function ModeButton({
       <span className="mt-1 block text-xs leading-snug text-muted-foreground">
         {desc}
       </span>
+    </button>
+  );
+}
+
+// One student-aid switch (figure / formulas / hints / calculator). Same
+// visual language as the generator tick-boxes: allowed = primary + check.
+function FeatureToggle({
+  icon: Icon,
+  label,
+  on,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={cn(
+        "relative flex flex-col items-center gap-1 rounded-xl border-[1.5px] px-2 py-3 text-sm font-semibold transition-colors",
+        on
+          ? "border-primary bg-accent text-primary"
+          : "border-border text-muted-foreground hover:bg-accent/50",
+      )}
+    >
+      {on && (
+        <span className="absolute right-1.5 top-1.5 grid size-4 place-items-center rounded bg-primary text-white">
+          <Check className="size-3" aria-hidden />
+        </span>
+      )}
+      <Icon className={cn("size-5", !on && "opacity-60")} aria-hidden />
+      {label}
     </button>
   );
 }

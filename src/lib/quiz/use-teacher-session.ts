@@ -22,6 +22,7 @@ import {
   startSession,
   type ActiveRoomConflict,
   type LiveEvent,
+  type QuizFeatures,
   type StudentRecord,
 } from "./live-client";
 import { isRoomResultSaved } from "./result-claims";
@@ -142,7 +143,7 @@ export function useTeacherSession(options?: { persistKey?: string }) {
   const [conflict, setConflict] = useState<ActiveRoomConflict | null>(null);
   // The arguments of the create that hit the conflict, replayed on "yes".
   const conflictRetryRef = useRef<
-    [string, string | undefined, unknown] | null
+    [string, string | undefined, unknown, QuizFeatures | undefined] | null
   >(null);
 
   const phaseRef = useRef<TeacherPhase>("setup");
@@ -381,16 +382,23 @@ export function useTeacherSession(options?: { persistKey?: string }) {
     // consoles pass it so students can enter by typing the code on /join.
     // ctx = the console's setup for this room, persisted opaquely so a reload
     // can restore the exact same selection before reconnecting.
-    async (title: string, studentPath?: string, ctx?: unknown) => {
+    // features = the room's student-aid switches, stored server-side (v7) so
+    // students can't re-enable them by editing the join link.
+    async (
+      title: string,
+      studentPath?: string,
+      ctx?: unknown,
+      features?: QuizFeatures,
+    ) => {
       setCreating(true);
       setCreateError(null);
-      const res = await createSession(title, studentPath);
+      const res = await createSession(title, studentPath, features);
       setCreating(false);
       if ("error" in res) {
         if (res.error === "active_room") {
           // This teacher already has a live room (v6 rule). Hold the create's
           // arguments; the console confirms and calls resolveConflict.
-          conflictRetryRef.current = [title, studentPath, ctx];
+          conflictRetryRef.current = [title, studentPath, ctx, features];
           setConflict(res.room);
         } else {
           setCreateError(res.error);

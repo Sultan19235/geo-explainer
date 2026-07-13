@@ -9,15 +9,21 @@ import { useSearchParams } from "next/navigation";
 import {
   ArrowRight,
   BookOpen,
+  Calculator,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Eye,
   EyeOff,
   Flag,
   Flame,
+  Lightbulb,
   Loader2,
+  Shapes,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,17 +48,20 @@ import {
   type VertexTriple,
 } from "@/lib/quiz/quadratic";
 import { LanguageToggle } from "@/components/language-toggle";
+import { CalculatorPanel } from "@/components/quiz/quiz-calculator";
 import { useLanguage } from "@/lib/i18n/context";
 import { cn } from "@/lib/utils";
 import {
   checkInputAnswer,
   loc,
   seededOrder,
+  type Localized,
   type PackGenerator,
   type PackQuestion,
   type QuizPack,
 } from "@/lib/quiz/pack";
 import { engineT } from "@/lib/quiz/engine-strings";
+import { ALL_FEATURES, type QuizFeatures } from "@/lib/quiz/live-client";
 import {
   useLiveSession,
   type QuizStats,
@@ -172,6 +181,7 @@ function LiveMode({
     [],
   );
 
+
   const session = useLiveSession<PackExtra>(urlCode, {
     storagePrefix: `ms_pack_${quizId}_`,
     defaultExtra,
@@ -210,6 +220,22 @@ function LiveMode({
     [pack.shuffleQuestions, questionCount, session.extra.seed],
   );
 
+  // Which student aids the teacher allowed for this room. The server's word
+  // (v7, tamper-proof) wins; the join link's `off=` param covers rooms on
+  // older servers; no signal at all → everything on.
+  const offParam = searchParams.get("off");
+  const features = useMemo<QuizFeatures>(() => {
+    if (session.features) return session.features;
+    if (!offParam) return ALL_FEATURES;
+    const off = new Set(offParam.split(","));
+    return {
+      figure: !off.has("figure"),
+      theory: !off.has("theory"),
+      hints: !off.has("hints"),
+      calculator: !off.has("calculator"),
+    };
+  }, [session.features, offParam]);
+
   return (
     <main className="quiz-grid-paper min-h-dvh text-foreground">
       {session.phase === "checking" && (
@@ -230,7 +256,12 @@ function LiveMode({
         (generator ? (
           // Generator quiz: endless machine-made questions, no "done" — the
           // stream runs until the teacher ends the room.
-          <GeneratedFlow generator={generator} session={session} />
+          <GeneratedFlow
+            generator={generator}
+            session={session}
+            pack={fullPack}
+            features={features}
+          />
         ) : session.extra.done ? (
           <DoneScreen stats={session.stats} timeLeft={session.timeLeft} />
         ) : (
@@ -238,6 +269,7 @@ function LiveMode({
             pack={pack}
             session={session}
             qOrder={qOrder}
+            features={features}
           />
         ))}
       {session.phase === "ended" && <EndedScreen stats={session.stats} />}
@@ -381,15 +413,17 @@ function QuestionFlow({
   pack,
   session,
   qOrder,
+  features,
 }: {
   pack: QuizPack;
   session: Session;
   qOrder: number[];
+  features: QuizFeatures;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
   const [inputValue, setInputValue] = useState("");
-  const [formulasOpen, setFormulasOpen] = useState(false);
+  const [calcOpen, setCalcOpen] = useState(false);
 
   const { extra } = session;
   const total = pack.questions.length;
@@ -459,6 +493,8 @@ function QuestionFlow({
         lang={lang}
         optOrder={optOrder}
         record={prior ?? null}
+        features={features}
+        packFormulas={pack.formulas}
         inputValue={inputValue}
         onInputChange={setInputValue}
         onPick={(displayIndex) => {
@@ -498,22 +534,24 @@ function QuestionFlow({
         </Button>
       )}
 
-      {/* formulas */}
-      {pack.formulas && pack.formulas.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setFormulasOpen(true)}
-          className="fixed bottom-4 right-4 flex items-center gap-2 rounded-full border border-primary/25 bg-card px-4 py-2.5 text-sm font-semibold text-primary shadow-lg shadow-blue-950/10"
-        >
-          <BookOpen className="size-4" aria-hidden />
-          {t("formulas_button")}
-        </button>
-      )}
-      {formulasOpen && pack.formulas && (
-        <FormulasPanel
-          formulas={pack.formulas.map((f) => loc(f, lang))}
-          onClose={() => setFormulasOpen(false)}
-        />
+      {/* calculator (panel stays mounted so the expression survives) */}
+      {features.calculator && (
+        <>
+          <button
+            type="button"
+            onClick={() => setCalcOpen(true)}
+            className="fixed bottom-4 right-4 flex items-center gap-2 rounded-full border border-primary/25 bg-card px-4 py-2.5 text-sm font-semibold text-primary shadow-lg shadow-blue-950/10"
+          >
+            <Calculator className="size-4" aria-hidden />
+            {t("calc_button")}
+          </button>
+          <CalculatorPanel
+            open={calcOpen}
+            title={t("calc_button")}
+            closeLabel={t("close_button")}
+            onClose={() => setCalcOpen(false)}
+          />
+        </>
       )}
     </div>
   );
@@ -536,12 +574,17 @@ function randomOrder(count: number): number[] {
 function GeneratedFlow({
   generator,
   session,
+  pack,
+  features,
 }: {
   generator: PackGenerator;
   session: Session;
+  pack: QuizPack;
+  features: QuizFeatures;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
+  const [calcOpen, setCalcOpen] = useState(false);
   const [seq, setSeq] = useState(1);
   const [question, setQuestion] = useState<PackQuestion>(
     () =>
@@ -599,6 +642,8 @@ function GeneratedFlow({
         lang={lang}
         optOrder={optOrder}
         record={record}
+        features={features}
+        packFormulas={pack.formulas}
         onPick={(displayIndex) => {
           const pick = optOrder[displayIndex];
           answer({ ok: pick === 0, pick });
@@ -614,6 +659,25 @@ function GeneratedFlow({
           {t("next_button")}
           <ArrowRight className="size-4" aria-hidden />
         </Button>
+      )}
+
+      {features.calculator && (
+        <>
+          <button
+            type="button"
+            onClick={() => setCalcOpen(true)}
+            className="fixed bottom-4 right-4 flex items-center gap-2 rounded-full border border-primary/25 bg-card px-4 py-2.5 text-sm font-semibold text-primary shadow-lg shadow-blue-950/10"
+          >
+            <Calculator className="size-4" aria-hidden />
+            {t("calc_button")}
+          </button>
+          <CalculatorPanel
+            open={calcOpen}
+            title={t("calc_button")}
+            closeLabel={t("close_button")}
+            onClose={() => setCalcOpen(false)}
+          />
+        </>
       )}
     </div>
   );
@@ -639,6 +703,8 @@ function QuestionCard({
   optOrder,
   record,
   revealed = false,
+  features = ALL_FEATURES,
+  packFormulas,
   inputValue,
   onInputChange,
   onPick,
@@ -650,6 +716,11 @@ function QuestionCard({
   optOrder: number[];
   record: AnswerRecord | null;
   revealed?: boolean;
+  // Which aids the teacher allowed (previews default to everything).
+  features?: QuizFeatures;
+  // Pack-level formula sheet — the "Формулалар" panel's fallback when the
+  // question has no theory of its own.
+  packFormulas?: Localized[];
   inputValue?: string;
   onInputChange?: (value: string) => void;
   onPick?: (displayIndex: number) => void;
@@ -662,6 +733,40 @@ function QuestionCard({
   // below confirms. Guards against misclicks on phones. Callers remount this
   // card per question (key=question.id), which resets the selection.
   const [selected, setSelected] = useState<number | null>(null);
+
+  // ── Student aids: figure / formulas / hints behind collapsible chips ──────
+  // Read first, imagine first — the figure starts closed on purpose.
+  const theory =
+    question.theory && question.theory.length > 0
+      ? question.theory
+      : packFormulas && packFormulas.length > 0
+        ? packFormulas
+        : null;
+  const hints =
+    question.hints && question.hints.length > 0 ? question.hints : null;
+  const showFigure = Boolean(question.geogebra) && features.figure;
+  const showTheory = Boolean(theory) && features.theory;
+  // Hints are for the thinking phase; once answered the solution takes over.
+  const showHints = Boolean(hints) && features.hints && !answered;
+
+  const [figureOpen, setFigureOpen] = useState(false);
+  // Mounted on first open, then kept alive and only CSS-hidden: the applet
+  // is expensive to build, cheap to hide.
+  const [figureMounted, setFigureMounted] = useState(false);
+  const [theoryOpen, setTheoryOpen] = useState(false);
+  const [hintsOpen, setHintsOpen] = useState(false);
+  const [hintCount, setHintCount] = useState(1);
+
+  // Solution highlights auto-open the figure at reveal so the worked steps
+  // and the drawing they talk about land together.
+  const hasSolutionFigure =
+    showFigure && Boolean(question.solutionGeogebra?.length);
+  useEffect(() => {
+    if (answered && hasSolutionFigure) {
+      setFigureMounted(true);
+      setFigureOpen(true);
+    }
+  }, [answered, hasSolutionFigure]);
   const graph = question.type === "graph-quadratic" ? question.graph : null;
   // Mode A shows graph thumbnails as options; B & C show a text list. In every
   // mode the correct choice is index 0, matching the grading in QuestionFlow.
@@ -692,8 +797,90 @@ function QuestionCard({
         />
       )}
 
-      {question.geogebra && (
-        <GeoGebraFigure figure={question.geogebra} className="mt-4" />
+      {(showFigure || showTheory || showHints) && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {showFigure && (
+            <AidChip
+              icon={Shapes}
+              label={t("figure_button")}
+              open={figureOpen}
+              onClick={() => {
+                setFigureMounted(true);
+                setFigureOpen((o) => !o);
+              }}
+            />
+          )}
+          {showTheory && (
+            <AidChip
+              icon={BookOpen}
+              label={t("formulas_button")}
+              open={theoryOpen}
+              onClick={() => setTheoryOpen((o) => !o)}
+            />
+          )}
+          {showHints && (
+            <AidChip
+              icon={Lightbulb}
+              tone="amber"
+              label={
+                hints!.length > 1 && hintsOpen
+                  ? `${t("hint_button")} ${Math.min(hintCount, hints!.length)}/${hints!.length}`
+                  : t("hint_button")
+              }
+              open={hintsOpen}
+              onClick={() => setHintsOpen((o) => !o)}
+            />
+          )}
+        </div>
+      )}
+
+      {showFigure && figureMounted && (
+        <div className={cn("mt-3", !figureOpen && "hidden")}>
+          <GeoGebraFigure
+            figure={question.geogebra!}
+            extraCommands={answered ? question.solutionGeogebra : undefined}
+          />
+        </div>
+      )}
+
+      {showTheory && theoryOpen && (
+        <div className="mt-3 rounded-xl border border-border bg-background p-4">
+          <div className="space-y-2 text-[15px] leading-relaxed">
+            {theory!.map((line, i) => (
+              <p key={i}>
+                <MathText text={loc(line, lang)} />
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showHints && hintsOpen && (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+          <div className="space-y-2.5 text-[15px] leading-relaxed">
+            {hints!.slice(0, hintCount).map((hint, i) => (
+              <div key={i} className="flex gap-2.5">
+                <Lightbulb
+                  className="mt-1 size-4 shrink-0 text-amber-600"
+                  aria-hidden
+                />
+                <p className="min-w-0 flex-1">
+                  <MathText text={loc(hint, lang)} />
+                </p>
+              </div>
+            ))}
+          </div>
+          {hintCount < hints!.length && (
+            <button
+              type="button"
+              onClick={() => setHintCount((n) => n + 1)}
+              className="mt-3 flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-semibold text-amber-700 active:bg-amber-100"
+            >
+              <Lightbulb className="size-3.5" aria-hidden />
+              {t("hint_next")} · {hintCount + 1}/{hints!.length}
+            </button>
+          )}
+        </div>
       )}
 
       {/* Mode A — show the equation, pick its graph. */}
@@ -914,14 +1101,19 @@ function QuestionCard({
           )}
           {question.solution && question.solution.length > 0 && (
             <div className="mt-3 rounded-xl border border-border bg-background p-4">
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              <p className="mb-2.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
                 {t("solution_label")}
               </p>
-              <div className="space-y-1.5 text-sm leading-relaxed">
+              <div className="space-y-2 text-sm leading-relaxed">
                 {question.solution.map((step, i) => (
-                  <p key={i}>
-                    <MathText text={loc(step, lang)} />
-                  </p>
+                  <div key={i} className="flex gap-2.5">
+                    <span className="mt-px grid size-5 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-bold tabular-nums text-primary">
+                      {i + 1}
+                    </span>
+                    <p className="min-w-0 flex-1">
+                      <MathText text={loc(step, lang)} />
+                    </p>
+                  </div>
                 ))}
               </div>
             </div>
@@ -929,6 +1121,49 @@ function QuestionCard({
         </div>
       )}
     </section>
+  );
+}
+
+// A collapsible-aid toggle under the question text (figure / formulas /
+// hints). Chevron shows the state; amber tone marks the hint chip apart from
+// the reference aids.
+function AidChip({
+  icon: Icon,
+  label,
+  open,
+  tone = "blue",
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  open: boolean;
+  tone?: "blue" | "amber";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-1.5 rounded-full border-[1.5px] px-3.5 py-2 text-sm font-semibold transition-colors",
+        tone === "amber"
+          ? open
+            ? "border-amber-400 bg-amber-50 text-amber-700"
+            : "border-border bg-background text-amber-700 hover:bg-amber-50/60"
+          : open
+            ? "border-primary bg-accent text-primary"
+            : "border-border bg-background text-primary hover:bg-accent/60",
+      )}
+    >
+      <Icon className="size-4" aria-hidden />
+      {label}
+      {open ? (
+        <ChevronUp className="size-3.5 opacity-60" aria-hidden />
+      ) : (
+        <ChevronDown className="size-3.5 opacity-60" aria-hidden />
+      )}
+    </button>
   );
 }
 
@@ -1067,50 +1302,6 @@ function DragQuestion({
           </Button>
         </>
       )}
-    </div>
-  );
-}
-
-function FormulasPanel({
-  formulas,
-  onClose,
-}: {
-  formulas: string[];
-  onClose: () => void;
-}) {
-  const { lang } = useLanguage();
-  const t = engineT(lang);
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-blue-950/30 p-4 sm:items-center"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-base font-bold">
-            <BookOpen className="size-4 text-primary" aria-hidden />
-            {t("formulas_button")}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t("close_button")}
-            className="grid size-8 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent"
-          >
-            <X className="size-4" aria-hidden />
-          </button>
-        </div>
-        <div className="space-y-2.5 text-[15px] leading-relaxed">
-          {formulas.map((formula, i) => (
-            <p key={i}>
-              <MathText text={formula} />
-            </p>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
@@ -1256,6 +1447,7 @@ function GeneratedPreview({
             lang={lang}
             optOrder={identityOrder(choiceCount(question))}
             record={null}
+            packFormulas={pack.formulas}
             revealed
           />
         ) : (
@@ -1312,11 +1504,14 @@ function ListPreview({ pack }: { pack: QuizPack }) {
         </header>
 
         <QuestionCard
-          key={question.id}
+          // Remount on the answers toggle too: flipping it off must clear any
+          // solution highlights already drawn on the figure.
+          key={`${question.id}-${showAnswers ? "a" : "q"}`}
           question={question}
           lang={lang}
           optOrder={identityOrder(choiceCount(question))}
           record={null}
+          packFormulas={pack.formulas}
           revealed={showAnswers}
         />
 

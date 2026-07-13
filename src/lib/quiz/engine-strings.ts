@@ -34,6 +34,10 @@ export const ENGINE_STRINGS = {
     correct_answer_label: "Дұрыс жауап",
     solution_label: "Шешуі",
     formulas_button: "Формулалар",
+    figure_button: "Сызба",
+    hint_button: "Кеңес",
+    hint_next: "Келесі кеңес",
+    calc_button: "Калькулятор",
     score_label: "Ұпай",
     streak_label: "Қатарынан",
     // student — done / ended
@@ -88,6 +92,13 @@ export const ENGINE_STRINGS = {
     c_mode_custom_desc: "Сұрақтар сіз құрған ретпен беріледі",
     c_mode_shuffle: "Кездейсоқ рет",
     c_mode_shuffle_desc: "Әр оқушыға сұрақтар мен нұсқалар өз ретімен араласады",
+    // console — student aids (what the student's screen offers this room)
+    c_features_title: "Оқушыға көмек",
+    c_features_hint: "Тест кезінде оқушы экранында не болады",
+    c_feat_figure: "Сызба",
+    c_feat_theory: "Формулалар",
+    c_feat_hints: "Кеңестер",
+    c_feat_calc: "Калькулятор",
     // console — selection tray
     c_tray_title: "Таңдалған сұрақтар",
     c_tray_shuffle_note: "Реті маңызды емес — әр оқушыға өз кездейсоқ реті түседі",
@@ -178,6 +189,10 @@ export const ENGINE_STRINGS = {
     correct_answer_label: "Правильный ответ",
     solution_label: "Решение",
     formulas_button: "Формулы",
+    figure_button: "Чертёж",
+    hint_button: "Подсказка",
+    hint_next: "Следующая подсказка",
+    calc_button: "Калькулятор",
     score_label: "Баллы",
     streak_label: "Подряд",
     // student — done / ended
@@ -232,6 +247,13 @@ export const ENGINE_STRINGS = {
     c_mode_custom_desc: "Вопросы идут в порядке, который вы задали",
     c_mode_shuffle: "Случайный порядок",
     c_mode_shuffle_desc: "У каждого ученика свой порядок вопросов и вариантов",
+    // console — student aids (what the student's screen offers this room)
+    c_features_title: "Помощь ученику",
+    c_features_hint: "Что будет на экране ученика во время теста",
+    c_feat_figure: "Чертёж",
+    c_feat_theory: "Формулы",
+    c_feat_hints: "Подсказки",
+    c_feat_calc: "Калькулятор",
     // console — selection tray
     c_tray_title: "Выбранные вопросы",
     c_tray_shuffle_note: "Порядок не важен — у каждого ученика он свой",

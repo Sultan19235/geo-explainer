@@ -10,12 +10,50 @@ const BACKEND = QUIZ_BACKEND;
 
 export type SessionStatus = "waiting" | "active" | "ended" | "not_found";
 
+// Which student aids the teacher allowed for this room, chosen once at room
+// start. Server-carried (v7 /status + /submit) so a student editing the join
+// link can't re-enable what the teacher switched off.
+export type QuizFeatures = {
+  figure: boolean; // GeoGebra figure behind the "Сызба" toggle
+  theory: boolean; // per-question "Формулалар" panel
+  hints: boolean; // progressive hints
+  calculator: boolean; // built-in calculator
+};
+
+export const ALL_FEATURES: QuizFeatures = {
+  figure: true,
+  theory: true,
+  hints: true,
+  calculator: true,
+};
+
+export const FEATURE_KEYS = [
+  "figure",
+  "theory",
+  "hints",
+  "calculator",
+] as const satisfies readonly (keyof QuizFeatures)[];
+
+// Missing keys default to true so a payload from a newer server (more flags)
+// or an older console (fewer) can never lock students out of everything.
+function sanitizeFeatures(raw: unknown): QuizFeatures | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const out = { ...ALL_FEATURES };
+  for (const key of FEATURE_KEYS) {
+    if (r[key] === false) out[key] = false;
+  }
+  return out;
+}
+
 export type StatusResponse = {
   status: SessionStatus;
   timeLeft?: number; // seconds, present while a session exists
   // v6: the teacher removed this student from the room. Rides /status (lobby
   // polls) and /submit (heartbeats); old servers never send it.
   kicked?: boolean;
+  // v7: the room's student-aid switches; absent on old servers.
+  features?: QuizFeatures;
 };
 
 // Per-question outcomes, question id -> 1 (correct) | 0 (wrong). Only quizzes
@@ -49,7 +87,12 @@ function parseStatus(data: Partial<StatusResponse>, httpStatus: number) {
   if (s !== "waiting" && s !== "active" && s !== "ended" && s !== "not_found") {
     throw new Error(`quiz backend: unexpected status response (${httpStatus})`);
   }
-  return { status: s, timeLeft: data.timeLeft, kicked: data.kicked === true };
+  return {
+    status: s,
+    timeLeft: data.timeLeft,
+    kicked: data.kicked === true,
+    features: sanitizeFeatures(data.features),
+  };
 }
 
 // studentId lets the server attach the kicked verdict — the lobby's only
@@ -188,6 +231,9 @@ export async function createSession(
   // it so the universal /join page can turn a typed room code back into this
   // exact quiz; older servers simply ignore the field.
   studentPath?: string,
+  // The room's student-aid switches (v7 servers store and serve them back on
+  // /status and /submit; older servers ignore the field).
+  features?: QuizFeatures,
 ): Promise<
   | { code: string; hostSecret: string | null }
   | { error: "unauthorized" | "network" }
@@ -198,7 +244,7 @@ export async function createSession(
     const res = await fetch(`${BACKEND}/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, token, studentPath }),
+      body: JSON.stringify({ title, token, studentPath, features }),
     });
     if (res.status === 401) return { error: "unauthorized" };
     if (res.status === 409) {

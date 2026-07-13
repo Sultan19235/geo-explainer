@@ -1,5 +1,5 @@
 /**
- * MathSabaq Live Score Server — v6
+ * MathSabaq Live Score Server — v7
  * Hetzner Node.js backend — HTTP POST + SSE
  * No Socket.io. Pure HTTP. Sessions live in memory ONLY. This server never
  * writes results anywhere — since 2026-07-10 the teacher's CONSOLE saves the
@@ -17,6 +17,14 @@
  *   POST /leave     → student's pagehide beacon (text/plain) → connected:false
  *   GET  /live      → teacher SSE stream
  *   GET  /health    → sessions/students counts + enabled features
+ *
+ * v7 over v6: room-level student-aid switches. /session accepts a `features`
+ * object ({figure, theory, hints, calculator} booleans — which aids the
+ * teacher allows on student screens); /status and /submit responses carry it
+ * back, so the flags are server-held and a student editing the join link's
+ * `off=` fallback param can't re-enable what the teacher switched off.
+ * Missing/invalid → not stored, clients default to everything allowed
+ * (pre-v7 consoles keep working unchanged).
  *
  * v6 over v5: honest presence + classroom moderation.
  *   - one live room per teacher: /session remembers the verified token uid as
@@ -176,6 +184,19 @@ function cleanAnswers(raw) {
     if (++n >= MAX_ANSWER_ENTRIES) break;
   }
   return n > 0 ? out : undefined;
+}
+
+// Room-level student-aid switches from the console (v7): which aids the
+// teacher allows on student screens. Only the four known keys are kept and
+// each is coerced to a boolean (missing → true, matching the clients'
+// default). Anything malformed → null, and the field is simply not stored —
+// clients then fall back to "everything allowed".
+const FEATURE_KEYS = ['figure', 'theory', 'hints', 'calculator'];
+function cleanFeatures(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out = {};
+  for (const key of FEATURE_KEYS) out[key] = raw[key] !== false;
+  return out;
 }
 
 // Client-reported numbers (score, counters) are trusted for display but not to
@@ -389,6 +410,9 @@ app.post('/session', (req, res) => {
     createdAt: Date.now(),
     title: String(req.body.title || 'Math Quiz').slice(0, 200),
     studentPath: sanitizeStudentPath(req.body.studentPath),
+    // v7: which student aids the teacher allows; null = console predates the
+    // field (clients treat that as "everything allowed").
+    features: cleanFeatures(req.body.features),
     status: 'waiting',
     startedAt: null,
     students: new Map(),
@@ -482,6 +506,7 @@ app.get('/status', (req, res) => {
   res.json({
     status: session.status,
     timeLeft: getTimeLeft(session),
+    ...(session.features ? { features: session.features } : {}),
     ...(kicked ? { kicked: true } : {})
   });
 });
@@ -532,7 +557,8 @@ app.post('/submit', (req, res) => {
         ok: false,
         kicked: true,
         status: session.status,
-        timeLeft: getTimeLeft(session)
+        timeLeft: getTimeLeft(session),
+        ...(session.features ? { features: session.features } : {})
       });
     }
   }
@@ -585,7 +611,8 @@ app.post('/submit', (req, res) => {
   res.json({
     ok: true,
     status: session.status,
-    timeLeft: getTimeLeft(session)
+    timeLeft: getTimeLeft(session),
+    ...(session.features ? { features: session.features } : {})
   });
 });
 
@@ -695,7 +722,7 @@ app.get('/live', (req, res) => {
 // disclosed only to a request carrying the operator key. With LIVE_STATUS_KEY
 // unset the detail is unavailable to everyone, which is the safe default.
 app.get('/health', (req, res) => {
-  const body = { ok: true, version: 6 };
+  const body = { ok: true, version: 7 };
   const statusKey = process.env.LIVE_STATUS_KEY;
   if (statusKey && req.query.key === statusKey) {
     body.sessions = sessions.size;
@@ -709,7 +736,7 @@ app.get('/health', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ MathSabaq server v6 running on port ${PORT}`);
+  console.log(`✅ MathSabaq server v7 running on port ${PORT}`);
   console.log(`   class history: not saved HERE — the teacher console saves to Supabase`);
   console.log(`   /session auth gate: ${AUTH_ENFORCED ? 'ENFORCED' : 'OPEN — set QUIZ_TOKEN_SECRET to enforce'}`);
   console.log(`   host-secret gate:   ${HOST_SECRET_ENFORCED ? 'ENFORCED' : 'DORMANT — set LIVE_HOST_SECRET_ENFORCED to enforce'}`);

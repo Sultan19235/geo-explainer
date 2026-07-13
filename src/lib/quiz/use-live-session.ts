@@ -17,6 +17,7 @@ import {
   sendLeaveBeacon,
   submitScore,
   type AnswerMap,
+  type QuizFeatures,
 } from "./live-client";
 
 const STATE_TTL = 3 * 60 * 60 * 1000; // saved progress expires after 3h
@@ -91,6 +92,10 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
   });
   const [studentName, setStudentName] = useState("");
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  // The room's student-aid switches as the server reports them (v7); null
+  // until a /status or /submit response carries them (or on old servers,
+  // forever — the player falls back to the join link's `off=` param then).
+  const [features, setFeatures] = useState<QuizFeatures | null>(null);
   const [extra, setExtraState] = useState<TExtra>(opts.defaultExtra);
 
   // Mutable session identity + focus trackers. Refs, not state: sendScore is
@@ -197,6 +202,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
           joining: opts?.joining || undefined,
         });
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
+        if (res.features) setFeatures(res.features);
         if (res.kicked) kickedOut();
         else if (res.status === "ended" || res.status === "not_found") endQuiz();
       } catch {
@@ -264,6 +270,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         setStats(s.stats);
         setStudentName(s.name);
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
+        if (res.features) setFeatures(res.features);
         if (res.status === "active") startQuiz();
         else {
           s.phase = "waiting";
@@ -320,6 +327,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         await sendScore({ joining: true });
         saveState();
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
+        if (res.features) setFeatures(res.features);
         if (res.status === "active") startQuiz();
         else {
           s.phase = "waiting";
@@ -379,6 +387,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
           session.current.studentId,
         );
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
+        if (res.features) setFeatures(res.features);
         if (res.kicked) kickedOut();
         else if (res.status === "active") startQuiz();
         else if (res.status === "ended" || res.status === "not_found") {
@@ -489,6 +498,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     studentName,
     stats,
     timeLeft,
+    features,
     recordAnswer,
     markFinished,
     rejoin,

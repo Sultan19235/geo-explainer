@@ -42,12 +42,18 @@ function loadDeployScript(): Promise<void> {
 
 export function GeoGebraFigure({
   figure,
+  extraCommands,
   className,
 }: {
   figure: PackGeoGebra;
+  // Replayed once on the live applet after it's ready (solution highlights).
+  // Changing the list later does nothing — the card remounts per question.
+  extraCommands?: string[];
   className?: string;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const apiRef = useRef<GgbApi | null>(null);
+  const extraApplied = useRef(false);
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
   const height = figure.height ?? 360;
 
@@ -55,6 +61,8 @@ export function GeoGebraFigure({
     let cancelled = false;
     const host = hostRef.current;
     if (!host) return;
+    apiRef.current = null;
+    extraApplied.current = false;
     setState("loading");
 
     loadDeployScript()
@@ -90,6 +98,7 @@ export function GeoGebraFigure({
                     // one bad command shouldn't blank the figure
                   }
                 }
+                apiRef.current = api;
                 if (!cancelled) setState("ready");
               },
             },
@@ -108,6 +117,25 @@ export function GeoGebraFigure({
       host.innerHTML = "";
     };
   }, [figure, height]);
+
+  // Solution highlights: run on the already-built figure the moment both are
+  // there (applet ready + commands provided), whichever comes second — the
+  // student may answer before the applet finished loading, or the figure may
+  // first mount at reveal time (auto-open when it was never toggled open).
+  useEffect(() => {
+    if (state !== "ready" || !extraCommands || extraCommands.length === 0) return;
+    if (extraApplied.current) return;
+    extraApplied.current = true;
+    const api = apiRef.current;
+    if (!api) return;
+    for (const cmd of extraCommands) {
+      try {
+        api.evalCommand(cmd);
+      } catch {
+        // one bad highlight shouldn't break the rest
+      }
+    }
+  }, [state, extraCommands]);
 
   return (
     <div

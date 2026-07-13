@@ -94,13 +94,56 @@ Display math uses `$$…$$`. Remember to double backslashes in JSON:
     "height": 360,          // px, 200–800
     "commands": ["prism = Prism((0,0,0), (12,0,0), (12,12,0), (0,12,0), (0,0,14))"]
   },
+  "theory": [               // the question's "Формулалар" panel (see below)
+    "Көк дене — тік призма, қызыл кесінді — жақ диагоналі.",
+    "Призма көлемі: $V = S_{табан} \\cdot h$",
+    "Пифагор теоремасы: $c^2 = a^2 + b^2$"
+  ],
+  "hints": [                // progressive hints, revealed ONE at a time
+    "Диагональ, биіктік және табан қабырғасы қандай үшбұрыш құрайды?",
+    "Сол тікбұрышты үшбұрышқа Пифагор теоремасын қолдан."
+  ],
   "solution": [             // worked steps, revealed after answering
     "Табан ауданы: $S = a^2 = 144 \\Rightarrow a = 12$",
     "Диагональ: $d = \\sqrt{2a^2 + h^2} = 22$"
   ],
+  "solutionGeogebra": [     // extra commands run on the figure at reveal
+    "tri = Polygon((0,0,0), (12,12,0), (12,12,14))",
+    "SetColor(tri, \"#dc2626\")", "SetFilling(tri, 0.25)"
+  ],
   "tags": ["cube", "easy"]  // ids from tagGroups (see below)
 }
 ```
+
+- **`theory`** sits behind the question's «Формулалар» button. Structure it as:
+  (1) one–two sentences saying what the figure shows and what the colored
+  parts mean, then (2) the **general** formulas this problem type needs
+  (Pythagoras, $V = S \cdot h$, …) — never this question's numbers plugged
+  in. Questions without `theory` fall back to the pack-level `formulas`
+  sheet, so authoring it per question is strongly preferred.
+- **`hints`** (max 6) reveal one at a time behind the «Кеңес» button. Hint 1
+  is an orientation nudge ("which triangle does the diagonal form?"); the
+  last hint may set up the equation but must never state the answer.
+- **`solutionGeogebra`** requires `geogebra` and runs once when the solution
+  is revealed — highlight the triangle the solution uses, draw the height,
+  mark the angle. The figure auto-opens at reveal when this field exists.
+
+### Figure style (colors that survive a phone screen)
+
+The figure is redrawn from your commands, so readability is an authoring
+convention. Every pack must follow this palette:
+
+| Role | Command | Value |
+| --- | --- | --- |
+| Solid bodies / fills | `SetColor(obj, "#3b82f6")` + `SetFilling(obj, 0.12)` | light blue, nearly transparent |
+| Secondary edges, dashed helpers | `SetColor(obj, "#2563eb")` + `SetLineThickness(obj, 3)` | medium blue, thin |
+| THE key element (the segment/angle being asked about) | `SetColor(obj, "#dc2626")` + `SetLineThickness(obj, 6)` | red, thick — **only one red thing per figure** |
+| Labels & measurements (`S = 144`, `14`, angles) | `SetColor(txt, "#111827")` + `Text(...)` with `SetTextSize`/large font | near-black, bold, never yellow/pastel |
+
+Rules of thumb: fills must never hide what is behind them (≤ 0.15 filling);
+every number a student needs must be a dark text object big enough to read on
+a 6-inch screen; never use yellow, light green or gray for anything
+meaningful.
 
 ### Tags (console filters)
 
