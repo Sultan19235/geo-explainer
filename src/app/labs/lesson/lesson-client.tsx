@@ -31,7 +31,7 @@ export function LessonLabClient() {
       theorySlot={
         <TheoryPlayer theory={packToPlayerTheory(cylinderTheory)} lang={lang} />
       }
-      renderProblem={(problem, { isFullscreen }) => {
+      renderProblem={(problem, { isFullscreen, solveMode }) => {
         const pack = byId.get(problem.id);
         if (!pack) return null;
         return (
@@ -39,6 +39,7 @@ export function LessonLabClient() {
             key={pack.id}
             problem={packToPlayerProblem(pack)}
             lang={lang}
+            mode={solveMode}
             hotkeys={isFullscreen}
             className={isFullscreen ? "min-h-0 flex-1" : "h-[620px]"}
           />

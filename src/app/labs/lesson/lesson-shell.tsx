@@ -22,6 +22,11 @@ import { LanguageToggle } from "@/components/language-toggle";
 import { LessonNavigator } from "@/components/lesson/lesson-navigator";
 import { ProblemPicker } from "@/components/lesson/problem-picker";
 import {
+  SolveModeTabs,
+  useSolveMode,
+  type SolveMode,
+} from "@/components/lesson/solve-mode";
+import {
   FontSizeControl,
   useLessonFontScale,
 } from "@/components/lesson/font-size-control";
@@ -67,7 +72,7 @@ export function LessonShell({
   theorySlot: ReactNode;
   renderProblem: (
     problem: BankProblem,
-    ctx: { isFullscreen: boolean; lang: Lang },
+    ctx: { isFullscreen: boolean; lang: Lang; solveMode: SolveMode },
   ) => ReactNode;
   // Fires when the active problem changes — used to preload the next one.
   onActiveProblem?: (
@@ -77,6 +82,7 @@ export function LessonShell({
 }) {
   const { t, lang } = useT();
   const font = useLessonFontScale();
+  const [solveMode, setSolveMode] = useSolveMode();
   // null = default: the whole bank in its order. A non-null array is the
   // teacher's explicit pick (its order = lesson order).
   const [appliedIds, setAppliedIds] = useState<string[] | null>(null);
@@ -264,6 +270,7 @@ export function LessonShell({
                 ? `№${problem.number} — ${pickText(problem.title, lang)}`
                 : ""}
             </h2>
+            <SolveModeTabs mode={solveMode} onChange={setSolveMode} lang={lang} />
             <span className="text-xs font-semibold text-[#6b7280]">
               {problems.length} / {bank.length}
             </span>
@@ -277,7 +284,7 @@ export function LessonShell({
             </button>
           </div>
 
-          {problem && renderProblem(problem, { isFullscreen, lang })}
+          {problem && renderProblem(problem, { isFullscreen, lang, solveMode })}
 
           <LessonNavigator
             problems={problems}

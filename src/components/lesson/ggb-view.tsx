@@ -17,6 +17,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { DraftingCompassIcon, RotateCcwIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -50,6 +51,9 @@ type GgbViewProps = {
   // then play as smooth animations instead of jumping.
   animate: boolean;
   lang: Lang;
+  // Board mode's mini step control — rendered top-left in place of the
+  // "3D модель" hint, so the model can be stepped without the text pane.
+  stepperSlot?: ReactNode;
   className?: string;
 };
 
@@ -102,7 +106,7 @@ function removeFocusScrollGuard() {
 }
 
 export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
-  { sceneId, params, program, programKey, step, animate, lang, className },
+  { sceneId, params, program, programKey, step, animate, lang, stepperSlot, className },
   ref,
 ) {
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -554,9 +558,20 @@ export const GgbView = forwardRef<GgbViewHandle, GgbViewProps>(function GgbView(
     <div className={cn("relative min-h-0 overflow-hidden bg-white", className)}>
       <div ref={wrapperRef} data-ggb-focus-guard className="absolute inset-0" />
 
-      {!toolbarOn && (
+      {!toolbarOn && !stepperSlot && (
         <div className="pointer-events-none absolute top-2.5 left-3 z-[5] rounded bg-white/85 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.06em] text-[#6b7280]">
           {lang === "ru" ? "3D модель · можно вращать" : "3D модель · айналдыруға болады"}
+        </div>
+      )}
+
+      {stepperSlot && (
+        <div
+          className={cn(
+            "absolute left-2.5 z-[5]",
+            toolbarOn ? "top-[64px]" : "top-2",
+          )}
+        >
+          {stepperSlot}
         </div>
       )}
 

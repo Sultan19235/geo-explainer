@@ -59,3 +59,13 @@
   padding: 1px 6px;
   font-weight: 600;
 }
+
+/* Compact teaching mode: only DIRECT-child prose hides — paragraphs inside
+   the given/formula/answer boxes must survive. Callouts are explanation, so
+   they hide too. */
+.compact > :global(p),
+.compact > :global(ul),
+.compact > :global(ol),
+.compact :global(.lf-callout) {
+  display: none;
+}

@@ -10,7 +10,7 @@
 // expected trade-off.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EraserIcon, PenLineIcon, Trash2Icon } from "lucide-react";
+import { EraserIcon, PenLineIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lang } from "@/lib/i18n/strings";
 
@@ -148,6 +148,13 @@ export function PenOverlay({
     }
   };
 
+  const undo = () => {
+    strokesRef.current.pop();
+    liveStrokeRef.current = null;
+    if (strokesRef.current.length === 0) setHasStrokes(false);
+    redraw();
+  };
+
   const clearAll = () => {
     strokesRef.current = [];
     liveStrokeRef.current = null;
@@ -213,17 +220,30 @@ export function PenOverlay({
           <EraserIcon className="size-4" />
         </button>
         {hasStrokes && (
-          <button
-            type="button"
-            onClick={clearAll}
-            aria-label={lang === "ru" ? "Стереть всё" : "Барлығын өшіру"}
-            className={cn(
-              buttonBase,
-              "text-[#6b7280] hover:border-[#dc2626] hover:text-[#dc2626]",
-            )}
-          >
-            <Trash2Icon className="size-4" />
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={undo}
+              aria-label={lang === "ru" ? "Отменить" : "Болдырмау"}
+              className={cn(
+                buttonBase,
+                "text-[#6b7280] hover:border-[#c5cad3] hover:text-[#1a1a2e]",
+              )}
+            >
+              <Undo2Icon className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={clearAll}
+              aria-label={lang === "ru" ? "Стереть всё" : "Барлығын өшіру"}
+              className={cn(
+                buttonBase,
+                "text-[#6b7280] hover:border-[#dc2626] hover:text-[#dc2626]",
+              )}
+            >
+              <Trash2Icon className="size-4" />
+            </button>
+          </>
         )}
       </div>
     </div>

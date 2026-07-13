@@ -36,10 +36,14 @@ function renderMathInHtml(html: string): string {
 export function LessonHtml({
   html,
   lang,
+  compact = false,
   className,
 }: {
   html: { kz: string; ru?: string };
   lang: Lang;
+  // Compact teaching mode: top-level prose is hidden, formula/given/answer
+  // boxes stay (the teacher narrates the words).
+  compact?: boolean;
   className?: string;
 }) {
   const content = (lang === "ru" ? html.ru : undefined) ?? html.kz ?? "";
@@ -47,7 +51,12 @@ export function LessonHtml({
 
   return (
     <div
-      className={cn(styles.root, "[&_.katex]:text-[1.06em]", className)}
+      className={cn(
+        styles.root,
+        compact && styles.compact,
+        "[&_.katex]:text-[1.06em]",
+        className,
+      )}
       dangerouslySetInnerHTML={{ __html: rendered }}
     />
   );

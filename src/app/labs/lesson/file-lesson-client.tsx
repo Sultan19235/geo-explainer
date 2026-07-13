@@ -213,7 +213,7 @@ export function FileLessonClient({
       onActiveProblem={(problem) => {
         ensureProblem(problem.id);
       }}
-      renderProblem={(problem, { isFullscreen }) => {
+      renderProblem={(problem, { isFullscreen, solveMode }) => {
         // Loading/error placeholders keep the player's exact footprint so a
         // far jump doesn't collapse the section (worst in fullscreen, where
         // it read as "the lesson closed").
@@ -239,6 +239,7 @@ export function FileLessonClient({
             key={def.id}
             problem={fileToPlayerProblem(def, problem.number)}
             lang={lang}
+            mode={solveMode}
             hotkeys={isFullscreen}
             className={isFullscreen ? "min-h-0 flex-1" : "h-[620px]"}
           />
