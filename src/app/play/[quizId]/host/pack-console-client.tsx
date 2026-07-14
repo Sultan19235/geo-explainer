@@ -1888,10 +1888,11 @@ function StudentCard({
   const pct = pctOf(s);
   const wrong = s.total - s.score;
   const left = s.connected === false;
-  // Live "away" clock: an off-screen tab throttles its heartbeat, so once we
-  // see the student go off-screen we tick the timer up locally from the last
-  // report rather than waiting for their return for the true total to land.
-  const ticking = !s.focused && !left && s.awaySince != null;
+  // Live "away" clock: an off-screen tab throttles its heartbeat (and a left
+  // student's page is gone entirely), so once the student is off-screen or
+  // left we tick the timer up locally from the last report rather than
+  // waiting for their return for the true total to land.
+  const ticking = s.awaySince != null;
   const [, tick] = useState(0);
   useEffect(() => {
     if (!ticking) return;
@@ -2019,7 +2020,7 @@ function StudentCard({
         )}
       </div>
 
-      {s.tabSwitches > 0 && (
+      {(s.tabSwitches > 0 || awaySeconds >= 1) && (
         <div className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-sm font-bold text-red-700">
           <EyeOff className="size-4" aria-hidden />
           {s.tabSwitches}× · {fmtAway(awaySeconds)}

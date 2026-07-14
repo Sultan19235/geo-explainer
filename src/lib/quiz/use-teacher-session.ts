@@ -80,10 +80,14 @@ export type LiveStudent = StudentRecord & {
 
 // Re-derived on every incoming report. Re-anchored on each off-screen beat so
 // the local clock re-syncs with the accumulated awaySeconds the beat carries
-// (no double-count); cleared once the student is back or fully gone.
+// (no double-count); cleared once the student is back on screen. A student
+// who LEFT (connected:false) keeps an anchor too: their page is gone and
+// can't report, so the board's local clock is the only thing still counting —
+// the student adds the gone-time to its own total on return, so the numbers
+// reconcile instead of jumping back.
 function awayAnchor(record: StudentRecord): number | null {
-  if (record.focused || record.connected === false) return null;
-  return Date.now();
+  if (record.connected === false || !record.focused) return Date.now();
+  return null;
 }
 
 // What survives a reload. `ctx` is the console's own room setup (selected

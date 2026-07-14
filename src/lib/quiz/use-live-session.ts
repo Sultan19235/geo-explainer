@@ -45,6 +45,9 @@ type SavedBase = {
   streak: number;
   tabSwitches: number;
   awaySeconds: number;
+  // The page was already marked off-screen when this was saved (markAway ran
+  // and counted the exit) — the restore must not count it a second time.
+  wasAway?: boolean;
   answers?: AnswerMap;
   finished?: boolean;
   ts: number;
@@ -131,6 +134,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         streak: s.stats.streak,
         tabSwitches: s.tabSwitches,
         awaySeconds: away,
+        wasAway: !s.focused,
         answers: s.answers,
         finished: s.finished,
         ts: Date.now(),
@@ -263,6 +267,18 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         };
         s.tabSwitches = restored.tabSwitches || 0;
         s.awaySeconds = restored.awaySeconds || 0;
+        // The page wasn't there to measure the time between leaving (last
+        // save) and this return — during a running quiz that gap IS away
+        // time, so add it. The exit itself only counts if markAway hadn't
+        // already counted it before the save (wasAway). The threshold spares
+        // honest quick reloads; lobby gaps don't count (quiz hadn't started).
+        if (res.status === "active") {
+          const goneSeconds = Math.round((Date.now() - restored.ts) / 1000);
+          if (goneSeconds >= 5) {
+            s.awaySeconds += goneSeconds;
+            if (!restored.wasAway) s.tabSwitches += 1;
+          }
+        }
         s.answers = sanitizeAnswers(restored.answers);
         s.finished = restored.finished === true;
         s.extra = opts.sanitizeExtra(restored) ?? opts.defaultExtra;
@@ -489,6 +505,24 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
       window.removeEventListener("pageshow", onShow);
     };
   }, [saveState, sendScore]);
+
+  // Browser-back on the phone is a soft Next.js route change — the document
+  // never unloads, pagehide never fires, and the quiz page just unmounts. Send
+  // the same parting shot from the unmount cleanup so the teacher's board
+  // flips to "left" instantly on that path too. Refs keep this effect
+  // mount-once (no re-runs re-arming the cleanup), and the phase guard makes
+  // the StrictMode dev double-mount a no-op (code is still empty then).
+  const saveStateRef = useRef(saveState);
+  saveStateRef.current = saveState;
+  useEffect(() => {
+    return () => {
+      const s = session.current;
+      if (!s.code || !s.studentId) return;
+      if (s.phase !== "active" && s.phase !== "waiting") return;
+      saveStateRef.current(); // a return through /join resumes exactly here
+      sendLeaveBeacon(s.code, s.studentId);
+    };
+  }, []);
 
   return {
     phase,
