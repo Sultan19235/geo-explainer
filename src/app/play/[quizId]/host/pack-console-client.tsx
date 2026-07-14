@@ -1752,9 +1752,9 @@ function LobbyScreen({
       <button
         type="button"
         onClick={onClose}
-        className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-muted-foreground transition-colors hover:text-red-600"
+        className="mt-4 flex items-center gap-2 rounded-xl border-[1.5px] border-red-300 bg-red-50 px-5 py-2.5 text-base font-semibold text-red-600 transition-colors hover:border-red-400 hover:bg-red-100"
       >
-        <X className="size-4" aria-hidden />
+        <X className="size-5" aria-hidden />
         {t("c_close_room")}
       </button>
     </div>
