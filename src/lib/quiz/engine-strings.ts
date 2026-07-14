@@ -100,7 +100,9 @@ export const ENGINE_STRINGS = {
     c_feat_hints: "Кеңестер",
     c_feat_calc: "Калькулятор",
     // console — selection tray
+    c_bank_title: "Сұрақтар қоры",
     c_tray_title: "Таңдалған сұрақтар",
+    c_tray_empty: "Сұрақтар қорынан таңдаңыз — олар осы жерде тізіледі",
     c_tray_shuffle_note: "Реті маңызды емес — әр оқушыға өз кездейсоқ реті түседі",
     c_move_up: "Жоғары",
     c_move_down: "Төмен",
@@ -258,7 +260,9 @@ export const ENGINE_STRINGS = {
     c_feat_hints: "Подсказки",
     c_feat_calc: "Калькулятор",
     // console — selection tray
+    c_bank_title: "Банк вопросов",
     c_tray_title: "Выбранные вопросы",
+    c_tray_empty: "Выберите вопросы из банка — они появятся здесь",
     c_tray_shuffle_note: "Порядок не важен — у каждого ученика он свой",
     c_move_up: "Вверх",
     c_move_down: "Вниз",

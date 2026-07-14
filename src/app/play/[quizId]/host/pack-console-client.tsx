@@ -633,20 +633,23 @@ function SetupScreen({
   return (
     <div
       className={cn(
-        "mx-auto w-full max-w-3xl",
+        "mx-auto w-full",
+        generator ? "max-w-3xl" : "max-w-screen-2xl",
         embedded ? "py-2" : "px-4 py-6",
       )}
     >
       {resumable && (
-        <ResumeBanner
-          resumable={resumable}
-          onResume={onResume}
-          onDiscard={onDiscardResume}
-        />
+        <div className="mx-auto w-full max-w-3xl">
+          <ResumeBanner
+            resumable={resumable}
+            onResume={onResume}
+            onDiscard={onDiscardResume}
+          />
+        </div>
       )}
 
       {/* header card */}
-      <div className={cn(cardClass, "p-5")}>
+      <div className={cn(cardClass, "mx-auto w-full max-w-3xl p-5")}>
         {!embedded && (
           <div className="mb-3 flex justify-end">
             <LanguageToggle />
@@ -897,77 +900,82 @@ function SetupScreen({
         </Button>
       </div>
 
-      {/* selection tray */}
-      {selectedCount > 0 && (
-        <SelectionTray
-          selectedIds={selectedIds}
-          setSelectedIds={setSelectedIds}
-          byId={byId}
-          lang={lang}
-          reorderable={orderMode === "custom"}
-          cardClass={cardClass}
-        />
-      )}
+      {/* two-pane picker (list quizzes only): the full question bank on the
+          left, the quiz being built on the right — each scrolls on its own,
+          so long packs never bury the selection. */}
+      {!generator && (
+        <div className="mt-4 grid items-start gap-4 lg:grid-cols-2">
+          <section className={cn(cardClass, "flex flex-col")}>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-4 py-2.5">
+              <ListChecks className="size-4 text-primary" aria-hidden />
+              <p className="text-sm font-bold">{t("c_bank_title")}</p>
+              <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs font-bold tabular-nums">
+                {total}
+              </span>
+              <button
+                type="button"
+                onClick={toggleAllVisible}
+                className="ml-auto shrink-0 text-xs font-semibold text-primary hover:underline"
+              >
+                {allVisibleSelected ? t("c_deselect_all") : t("c_select_all")}
+              </button>
+            </div>
 
-      {/* tag filter chips (list quizzes only) */}
-      {!generator && tagGroups && tagGroups.length > 0 && (
-        <div className="mt-5 flex flex-wrap items-center gap-1.5 px-1">
-          <FilterChip
-            active={activeTags.size === 0}
-            label={`${t("c_filter_all")} · ${total}`}
-            onClick={() => setActiveTags(new Set())}
-          />
-          {tagGroups.map((group) => (
-            <Fragment key={group.id}>
-              <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden />
-              {group.tags.map((tag) => (
+            {tagGroups && tagGroups.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2.5">
                 <FilterChip
-                  key={tag.id}
-                  active={activeTags.has(tag.id)}
-                  label={`${loc(tag.label, lang)} · ${tagCounts.get(tag.id) ?? 0}`}
-                  onClick={() => toggleTag(tag.id)}
+                  active={activeTags.size === 0}
+                  label={`${t("c_filter_all")} · ${total}`}
+                  onClick={() => setActiveTags(new Set())}
+                />
+                {tagGroups.map((group) => (
+                  <Fragment key={group.id}>
+                    <span
+                      className="mx-1 h-4 w-px shrink-0 bg-border"
+                      aria-hidden
+                    />
+                    {group.tags.map((tag) => (
+                      <FilterChip
+                        key={tag.id}
+                        active={activeTags.has(tag.id)}
+                        label={`${loc(tag.label, lang)} · ${tagCounts.get(tag.id) ?? 0}`}
+                        onClick={() => toggleTag(tag.id)}
+                      />
+                    ))}
+                  </Fragment>
+                ))}
+              </div>
+            )}
+
+            <div className="max-h-[70vh] space-y-2 overflow-y-auto p-2">
+              {visible.map((question) => (
+                <QuestionPreviewRow
+                  key={question.id}
+                  index={byId.get(question.id)?.number ?? 0}
+                  question={question}
+                  lang={lang}
+                  selected={selectedSet.has(question.id)}
+                  orderPos={
+                    orderMode === "custom" && selectedSet.has(question.id)
+                      ? selectedIds.indexOf(question.id) + 1
+                      : null
+                  }
+                  tagDefs={tagDefs}
+                  onToggle={() => toggle(question.id)}
                 />
               ))}
-            </Fragment>
-          ))}
+            </div>
+          </section>
+
+          <SelectionTray
+            selectedIds={selectedIds}
+            setSelectedIds={setSelectedIds}
+            byId={byId}
+            lang={lang}
+            reorderable={orderMode === "custom"}
+            cardClass={cardClass}
+          />
         </div>
-      )}
-
-      {/* picker toolbar + question list (list quizzes only) */}
-      {!generator && (
-        <>
-          <div className="mb-2 mt-4 flex items-center justify-between gap-3 px-1">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {t("c_select_hint")}
-            </p>
-            <button
-              type="button"
-              onClick={toggleAllVisible}
-              className="shrink-0 text-xs font-semibold text-primary hover:underline"
-            >
-              {allVisibleSelected ? t("c_deselect_all") : t("c_select_all")}
-            </button>
-          </div>
-
-          <div className="space-y-2">
-            {visible.map((question) => (
-              <QuestionPreviewRow
-                key={question.id}
-                index={byId.get(question.id)?.number ?? 0}
-                question={question}
-                lang={lang}
-                selected={selectedSet.has(question.id)}
-                orderPos={
-                  orderMode === "custom" && selectedSet.has(question.id)
-                    ? selectedIds.indexOf(question.id) + 1
-                    : null
-                }
-                tagDefs={tagDefs}
-                onToggle={() => toggle(question.id)}
-              />
-            ))}
-          </div>
-        </>
       )}
     </div>
   );
@@ -1366,21 +1374,31 @@ function SelectionTray({
     setSelectedIds((prev) => prev.filter((x) => x !== id));
 
   return (
-    <div className={cn("mt-4", cardClass)}>
+    <div className={cn(cardClass)}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-4 py-2.5">
         <ListOrdered className="size-4 text-primary" aria-hidden />
         <p className="text-sm font-bold">{t("c_tray_title")}</p>
         <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs font-bold tabular-nums">
           {selectedIds.length}
         </span>
-        {!reorderable && (
+        {!reorderable && selectedIds.length > 0 && (
           <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <Shuffle className="size-3.5" aria-hidden />
             {t("c_tray_shuffle_note")}
           </span>
         )}
       </div>
-      <ol className="max-h-72 overflow-y-auto p-2">
+      {selectedIds.length === 0 && (
+        <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+          {t("c_tray_empty")}
+        </p>
+      )}
+      <ol
+        className={cn(
+          "max-h-[70vh] overflow-y-auto",
+          selectedIds.length > 0 && "p-2",
+        )}
+      >
         {selectedIds.map((id, i) => {
           const entry = byId.get(id);
           if (!entry) return null;

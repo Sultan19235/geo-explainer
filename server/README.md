@@ -40,18 +40,15 @@ service-role key has no business sitting on a box that doesn't use it).
 ssh root@89.167.9.192 'cp /root/server.js /root/server.js.bak'   # rollback copy
 scp server/server.js root@89.167.9.192:/root/server.js
 ssh root@89.167.9.192 'pm2 restart mathsabaq-live && pm2 save'
-curl -s https://mathsabaq.online/health                          # expect "version":6
+curl -s https://mathsabaq.online/health                          # expect "version":7
 ```
 
 Rollback: `ssh root@89.167.9.192 'cp /root/server.js.bak /root/server.js && pm2 restart mathsabaq-live'`
 
-**v6 deploy also needs nginx:** the box's nginx only proxies KNOWN paths to
-:3001 (see gotcha in memory / the /resolve incident) — add the new `/kick`
-and `/leave` paths to the same allowlist that already carries `/submit`,
-`/resolve` etc., then `nginx -t && systemctl reload nginx`. Without this the
-new endpoints 502 in prod while working locally. Verify with:
-`curl -s -X POST https://mathsabaq.online/leave -H 'Content-Type: text/plain' -d '{}'`
-→ expect `{"ok":true}` (nginx 502 HTML = allowlist entry missing).
+**v7 needs NO nginx change:** the room student-aid switches (`features`) ride
+the EXISTING `/session`, `/status` and `/submit` paths — no new endpoint was
+added, so the three steps above are the whole deploy. (Contrast v6, which
+added `/kick` and `/leave` and required adding those to the nginx allowlist.)
 
 First deploy on a fresh box also needs:
 
