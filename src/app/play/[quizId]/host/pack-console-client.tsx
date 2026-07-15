@@ -28,9 +28,11 @@ import {
   Shapes,
   Shuffle,
   Square,
+  Timer,
   Trophy,
   Users,
   X,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -72,11 +74,14 @@ import {
   ALL_FEATURES,
   FEATURE_KEYS,
   type QuizFeatures,
+  type RaceConfig,
+  type RaceQuestionConfig,
 } from "@/lib/quiz/live-client";
 import {
   useResultAutosave,
   type ResultSaveStatus,
 } from "@/lib/quiz/use-result-autosave";
+import { RaceBoard } from "./race-board";
 
 const AVATAR_COLORS = [
   "#2563eb",
@@ -129,14 +134,32 @@ function selectionSnapshot(ids: string[], mode: "custom" | "shuffle") {
 
 // The room setup that must survive a teacher-side reload: restoring it before
 // reconnecting keeps the join link/QR and the autosave's question columns
-// identical to the room the students are already in.
+// identical to the room the students are already in. The race fields must be
+// restored too — mode decides which live screen renders (race board vs
+// self-paced cards), and the timers feed nothing after creation but must not
+// silently reset for a possible follow-up room.
 type RoomCtx = {
   selectedIds: string[];
   orderMode: "custom" | "shuffle";
   genSections: SectionId[];
   genModes: GraphQuizMode[];
   features?: QuizFeatures;
+  mode?: "self" | "race";
+  raceSec?: number; // room default seconds per question
+  raceAuto?: boolean; // auto-advance initial value
+  raceQSec?: Record<string, number>; // per-question overrides, qid → seconds
 };
+
+// The default-time choices the setup card offers (spec §7); RACE_SEC_DEFAULT
+// doubles as the fallback wherever no explicit value survived.
+const RACE_SEC_CHOICES = [10, 20, 30, 45, 60, 90, 120] as const;
+const RACE_SEC_DEFAULT = 30;
+
+// Server clamp is [5, 600] (spec §2.2) — mirror it so what the tray shows is
+// what the room runs.
+function clampRaceSec(n: number): number {
+  return Math.min(600, Math.max(5, Math.round(n)));
+}
 
 // The teacher's last student-aid choice, shared across quizzes (a teacher who
 // bans calculators bans them in every class).
@@ -196,6 +219,91 @@ export function PackConsoleClient({
   const [orderMode, setOrderMode] = useState<"custom" | "shuffle">(
     initialOrderMode ?? "custom",
   );
+  // Room mode: self-paced (everything as before) or race (Жарыс) — the
+  // server-lockstep Kahoot flow. A PER-RUN choice on purpose: it is not part
+  // of saved quizzes, and generator packs can't race at all (their graph
+  // questions structurally leak the answer — correct is always index 0).
+  const [mode, setMode] = useState<"self" | "race">("self");
+  // Race timers: the room default + per-question overrides (qid → seconds).
+  // A question's effective time is raceQSec[id] ?? question.timeSec (author's
+  // suggestion) ?? raceSec — so un-edited rows follow the default live.
+  const [raceSec, setRaceSec] = useState<number>(RACE_SEC_DEFAULT);
+  const [raceAuto, setRaceAuto] = useState(false);
+  const [raceQSec, setRaceQSec] = useState<Record<string, number>>({});
+  // Switching to race dropped graph questions from the tray — tell, don't
+  // silently shrink the selection.
+  const [graphDropped, setGraphDropped] = useState(false);
+
+  const questionById = useMemo(
+    () => new Map(questions.map((q) => [q.id, q] as const)),
+    [questions],
+  );
+
+  // Effective race seconds for one question (see raceQSec above). The stored
+  // override is clamped only here — mid-typing values stay raw in state so
+  // "1" on the way to "15" doesn't snap to 5 under the teacher's cursor.
+  const raceSecFor = (q: PackQuestion) =>
+    clampRaceSec(raceQSec[q.id] ?? q.timeSec ?? raceSec);
+
+  const switchMode = (m: "self" | "race") => {
+    setMode(m);
+    if (m !== "race") {
+      setGraphDropped(false);
+      return;
+    }
+    // Race constraints (spec §7): the canonical order IS the teacher's tray
+    // order, so shuffle is off the table; graph-quadratic questions are out
+    // entirely (their correct option is structurally index 0).
+    setOrderMode("custom");
+    setSelectedIds((prev) => {
+      const kept = prev.filter(
+        (id) => questionById.get(id)?.type !== "graph-quadratic",
+      );
+      if (kept.length !== prev.length) setGraphDropped(true);
+      return kept;
+    });
+  };
+
+  // The race config the server will own, built straight from the pack in the
+  // teacher's tray order (spec §2.2). Answers/solutions ride ONLY this
+  // channel — the student join link is answer-stripped under race=1.
+  const buildRaceConfig = (): RaceConfig => ({
+    auto: raceAuto,
+    questions: selectedIds
+      .map((id) => questionById.get(id))
+      .filter(
+        (q): q is PackQuestion =>
+          q !== undefined && q.type !== "graph-quadratic",
+      )
+      .map((q) => {
+        const cfg: RaceQuestionConfig = {
+          id: q.id,
+          type: q.type === "mcq" ? "mcq" : "input",
+          timeSec: raceSecFor(q),
+        };
+        if (q.type === "mcq") {
+          cfg.correct = q.correct;
+          cfg.optionCount = q.options?.length;
+        } else {
+          // answer first, then alternates — trimmed and deduped; the server
+          // normalizes further (lowercase, comma→dot…) at grading time.
+          const seen = new Set<string>();
+          cfg.accept = [q.answer ?? "", ...(q.accept ?? [])]
+            .map((s) => s.trim())
+            .filter((s) => {
+              if (!s || seen.has(s)) return false;
+              seen.add(s);
+              return true;
+            });
+        }
+        // Explain-phase content, held server-side and broadcast to phones
+        // only at explain (the board renders its copy from the local pack).
+        if (q.solutionSteps) cfg.solutionSteps = q.solutionSteps;
+        if (q.solution) cfg.solution = q.solution;
+        if (q.solutionGeogebra) cfg.solutionGeogebra = q.solutionGeogebra;
+        return cfg;
+      }),
+  });
   // When some saved ids no longer exist in the pack, the loaded selection
   // already differs from the row — an unmatchable snapshot keeps "save
   // changes" enabled so the teacher can persist the cleanup.
@@ -275,9 +383,15 @@ export function PackConsoleClient({
   const offList = FEATURE_KEYS.filter((key) => !features[key]);
   // The teacher's generator ticks ride the join link so every student's
   // device generates from exactly this room's choice.
+  // race=1 makes the student page open the race flow AND makes the server
+  // component strip answers from the pack it ships (spec §5). shuffle is
+  // never emitted for race links: option order must stay canonical so the
+  // board's distribution letters match every phone (belt and braces — the
+  // mode switch already forces orderMode to custom).
   const joinParams = [
     qParam ? `q=${encodeURIComponent(qParam)}` : null,
-    orderMode === "shuffle" ? "shuffle=1" : null,
+    orderMode === "shuffle" && mode !== "race" ? "shuffle=1" : null,
+    mode === "race" && !generator ? "race=1" : null,
     generator ? `sec=${genSections.join(",")}` : null,
     generator ? `modes=${genModes.join(",")}` : null,
     offList.length > 0 ? `off=${offList.join(",")}` : null,
@@ -359,6 +473,32 @@ export function PackConsoleClient({
       if (ctx.features && typeof ctx.features === "object") {
         setFeatures(sanitizeStoredFeatures(ctx.features));
       }
+      // Race fields, whitelisted the same way: mode decides whether the live
+      // phase renders the race board, so getting it back is what makes a
+      // mid-race console reload land on the right screen at all. A ctx
+      // WITHOUT a mode key (a blob written by a pre-race build, alive up to
+      // 4h across a deploy) is by definition a self-paced room — default to
+      // "self" so a mode toggle clicked before resuming can't strand the
+      // teacher on a race board the room never had.
+      setMode(ctx.mode === "race" && !generator ? "race" : "self");
+      if (ctx.mode === "race" && !generator) setOrderMode("custom");
+      if (typeof ctx.raceSec === "number" && Number.isFinite(ctx.raceSec)) {
+        setRaceSec(clampRaceSec(ctx.raceSec));
+      }
+      if (typeof ctx.raceAuto === "boolean") setRaceAuto(ctx.raceAuto);
+      if (
+        ctx.raceQSec &&
+        typeof ctx.raceQSec === "object" &&
+        !Array.isArray(ctx.raceQSec)
+      ) {
+        const clean: Record<string, number> = {};
+        for (const [id, sec] of Object.entries(ctx.raceQSec)) {
+          if (questionById.has(id) && typeof sec === "number" && Number.isFinite(sec)) {
+            clean[id] = clampRaceSec(sec);
+          }
+        }
+        setRaceQSec(clean);
+      }
     }
     session.resume();
   };
@@ -407,8 +547,16 @@ export function PackConsoleClient({
                 genSections,
                 genModes,
                 features,
+                mode,
+                raceSec,
+                raceAuto,
+                raceQSec,
               } satisfies RoomCtx,
               features,
+              // The race config only exists for race rooms; the hook fails
+              // the create loudly (race_unsupported) if the server doesn't
+              // acknowledge it question-for-question.
+              mode === "race" && !generator ? buildRaceConfig() : undefined,
             )
           }
           resumable={session.resumable}
@@ -432,6 +580,15 @@ export function PackConsoleClient({
           setGenModes={setGenModes}
           features={features}
           onToggleFeature={toggleFeature}
+          mode={mode}
+          onModeChange={switchMode}
+          raceSec={raceSec}
+          setRaceSec={setRaceSec}
+          raceAuto={raceAuto}
+          setRaceAuto={setRaceAuto}
+          raceQSec={raceQSec}
+          setRaceQSec={setRaceQSec}
+          graphDropped={graphDropped}
         />
       )}
 
@@ -452,20 +609,48 @@ export function PackConsoleClient({
         />
       )}
 
-      {session.phase === "live" && session.code && (
-        <LiveScreen
-          quizTitle={quizTitle}
-          code={session.code}
-          students={session.students}
-          timeLeft={session.timeLeft}
-          onEnd={() => {
-            if (window.confirm(t("c_end_confirm"))) void session.end();
-          }}
-          onOpenQr={() => setQrOpen(true)}
-          onFullscreen={toggleFullscreen}
-          onKick={kickWithConfirm}
-        />
-      )}
+      {session.phase === "live" &&
+        session.code &&
+        (mode === "race" && !generator ? (
+          // Race rooms swap the self-paced scoreboard for the phase-driven
+          // race board; ending (button, podium's Аяқтау, or the 45-min clock)
+          // still lands on the SAME ResultsScreen below, so the autosave path
+          // is one and the same for both modes.
+          <RaceBoard
+            quizTitle={quizTitle}
+            code={session.code}
+            students={session.students}
+            timeLeft={session.timeLeft}
+            race={session.race}
+            questionById={questionById}
+            onEnd={() => {
+              if (window.confirm(t("c_end_confirm"))) void session.end();
+            }}
+            onOpenQr={() => setQrOpen(true)}
+            onFullscreen={toggleFullscreen}
+            onKick={kickWithConfirm}
+            onNext={session.raceNext}
+            onReveal={session.raceReveal}
+            onExplain={session.raceExplain}
+            onPodium={session.racePodium}
+            onSetAuto={session.raceSetAuto}
+            // Podium's «Аяқтау» is the expected end of a race — no confirm.
+            onFinish={() => void session.end()}
+          />
+        ) : (
+          <LiveScreen
+            quizTitle={quizTitle}
+            code={session.code}
+            students={session.students}
+            timeLeft={session.timeLeft}
+            onEnd={() => {
+              if (window.confirm(t("c_end_confirm"))) void session.end();
+            }}
+            onOpenQr={() => setQrOpen(true)}
+            onFullscreen={toggleFullscreen}
+            onKick={kickWithConfirm}
+          />
+        ))}
 
       {session.phase === "results" && (
         <ResultsScreen
@@ -525,6 +710,15 @@ function SetupScreen({
   setGenModes,
   features,
   onToggleFeature,
+  mode,
+  onModeChange,
+  raceSec,
+  setRaceSec,
+  raceAuto,
+  setRaceAuto,
+  raceQSec,
+  setRaceQSec,
+  graphDropped,
 }: {
   quizId: string;
   quizTitle: string;
@@ -540,7 +734,7 @@ function SetupScreen({
   setSaved: (s: SavedState) => void;
   savedMissing: number;
   creating: boolean;
-  createError: "unauthorized" | "network" | null;
+  createError: "unauthorized" | "network" | "race_unsupported" | null;
   onCreate: () => void;
   resumable: ResumableRoom | null;
   onResume: () => void;
@@ -552,6 +746,15 @@ function SetupScreen({
   setGenModes: React.Dispatch<React.SetStateAction<GraphQuizMode[]>>;
   features: QuizFeatures;
   onToggleFeature: (key: keyof QuizFeatures) => void;
+  mode: "self" | "race";
+  onModeChange: (m: "self" | "race") => void;
+  raceSec: number;
+  setRaceSec: (n: number) => void;
+  raceAuto: boolean;
+  setRaceAuto: React.Dispatch<React.SetStateAction<boolean>>;
+  raceQSec: Record<string, number>;
+  setRaceQSec: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  graphDropped: boolean;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -604,14 +807,26 @@ function SetupScreen({
 
   // "Select all" acts on the filtered view: appends the visible unselected
   // (in pack order) or clears the visible ones, leaving the rest untouched.
+  // In race mode graph-quadratic questions are unselectable (spec §7), so
+  // they count for neither "all selected" nor the append.
+  const selectable = useMemo(
+    () =>
+      mode === "race"
+        ? visible.filter((q) => q.type !== "graph-quadratic")
+        : visible,
+    [visible, mode],
+  );
   const allVisibleSelected =
-    visible.length > 0 && visible.every((q) => selectedSet.has(q.id));
+    selectable.length > 0 && selectable.every((q) => selectedSet.has(q.id));
   const toggleAllVisible = () => {
-    const visibleIds = new Set(visible.map((q) => q.id));
+    const visibleIds = new Set(selectable.map((q) => q.id));
     setSelectedIds((prev) =>
       allVisibleSelected
         ? prev.filter((id) => !visibleIds.has(id))
-        : [...prev, ...visible.filter((q) => !selectedSet.has(q.id)).map((q) => q.id)],
+        : [
+            ...prev,
+            ...selectable.filter((q) => !selectedSet.has(q.id)).map((q) => q.id),
+          ],
     );
   };
 
@@ -783,7 +998,33 @@ function SetupScreen({
           </>
         )}
 
-        {/* order mode (list quizzes only — a generator deals its own order) */}
+        {/* room mode (list quizzes only — generator packs can't race: their
+            graph questions structurally leak the answer) */}
+        {!generator && (
+          <div
+            role="radiogroup"
+            aria-label={`${t("race_mode_self")} / ${t("race_mode_race")}`}
+            className="mt-4 grid gap-2 sm:grid-cols-2"
+          >
+            <ModeButton
+              active={mode === "self"}
+              icon={ListChecks}
+              label={t("race_mode_self")}
+              onClick={() => onModeChange("self")}
+            />
+            <ModeButton
+              active={mode === "race"}
+              icon={Zap}
+              label={t("race_mode_race")}
+              onClick={() => onModeChange("race")}
+            />
+          </div>
+        )}
+
+        {/* order mode (list quizzes only — a generator deals its own order).
+            Race locks it to "custom": the tray order IS the race's canonical
+            question order, and per-student shuffle would unglue the board's
+            distribution letters from the phones. */}
         {!generator && (
           <div
             role="radiogroup"
@@ -801,10 +1042,71 @@ function SetupScreen({
               active={orderMode === "shuffle"}
               icon={Shuffle}
               label={t("c_mode_shuffle")}
-              desc={t("c_mode_shuffle_desc")}
+              // No dedicated §8 key exists for the lock reason, so the hint
+              // is composed: «Жарыс: сұрақтар сіз құрған ретпен беріледі».
+              desc={
+                mode === "race"
+                  ? `${t("race_mode_race")}: ${t("c_mode_custom_desc").toLowerCase()}`
+                  : t("c_mode_shuffle_desc")
+              }
+              disabled={mode === "race"}
               onClick={() => setOrderMode("shuffle")}
             />
           </div>
+        )}
+
+        {/* race timing: default seconds per question + auto-advance. The
+            per-question override inputs live on the tray rows below. */}
+        {!generator && mode === "race" && (
+          <div className="mt-4">
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3">
+              <p className="flex items-center gap-1.5 text-sm font-bold">
+                <Timer className="size-4 text-primary" aria-hidden />
+                {t("race_default_time")}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {RACE_SEC_CHOICES.map((sec) => (
+                <button
+                  key={sec}
+                  type="button"
+                  aria-pressed={raceSec === sec}
+                  onClick={() => setRaceSec(sec)}
+                  className={cn(
+                    "rounded-full border-[1.5px] px-3.5 py-1.5 text-sm font-bold tabular-nums transition-colors",
+                    raceSec === sec
+                      ? "border-primary bg-primary text-white"
+                      : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                  )}
+                >
+                  {sec}с
+                </button>
+              ))}
+              <button
+                type="button"
+                aria-pressed={raceAuto}
+                onClick={() => setRaceAuto((v) => !v)}
+                className={cn(
+                  "ml-auto flex items-center gap-1.5 rounded-xl border-[1.5px] px-3 py-1.5 text-sm font-semibold transition-colors",
+                  raceAuto
+                    ? "border-primary bg-accent text-primary"
+                    : "border-border text-muted-foreground hover:bg-accent/50",
+                )}
+              >
+                {raceAuto && <Check className="size-3.5" aria-hidden />}
+                <Zap className={cn("size-4", !raceAuto && "opacity-60")} aria-hidden />
+                {t("race_auto")}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* graph questions can't race — the mode switch just dropped some
+            from the tray, and silence here would read as a lost selection */}
+        {!generator && mode === "race" && graphDropped && (
+          <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-sm font-medium text-amber-800">
+            {t("race_graph_excluded")}
+          </p>
         )}
 
         {/* student aids: what the student's screen offers in this room. All
@@ -867,7 +1169,9 @@ function SetupScreen({
           >
             {createError === "unauthorized"
               ? t("c_err_unauthorized")
-              : t("c_err_network")}
+              : createError === "race_unsupported"
+                ? t("race_server_unsupported")
+                : t("c_err_network")}
           </p>
         )}
         {!generator && selectedCount === 0 && !createError && (
@@ -961,6 +1265,9 @@ function SetupScreen({
                       : null
                   }
                   tagDefs={tagDefs}
+                  raceExcluded={
+                    mode === "race" && question.type === "graph-quadratic"
+                  }
                   onToggle={() => toggle(question.id)}
                 />
               ))}
@@ -974,6 +1281,10 @@ function SetupScreen({
             lang={lang}
             reorderable={orderMode === "custom"}
             cardClass={cardClass}
+            raceMode={mode === "race"}
+            raceSec={raceSec}
+            raceQSec={raceQSec}
+            setRaceQSec={setRaceQSec}
           />
         </div>
       )}
@@ -1034,12 +1345,17 @@ function ModeButton({
   icon: Icon,
   label,
   desc,
+  disabled = false,
   onClick,
 }: {
   active: boolean;
   icon: typeof ListOrdered;
   label: string;
-  desc: string;
+  // Optional: the room-mode switch is label-only (no §8 key describes it).
+  desc?: string;
+  // Kept visible-but-inert (race locks the shuffle order): the desc then
+  // carries the reason, so hiding the button would hide the explanation too.
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -1047,12 +1363,14 @@ function ModeButton({
       type="button"
       role="radio"
       aria-checked={active}
+      disabled={disabled}
       onClick={onClick}
       className={cn(
         "rounded-xl border-[1.5px] p-3 text-left transition-colors",
         active
           ? "border-primary bg-accent"
-          : "border-border bg-background hover:border-primary/40",
+          : "border-border bg-background",
+        disabled ? "cursor-not-allowed opacity-50" : !active && "hover:border-primary/40",
       )}
     >
       <span
@@ -1064,9 +1382,11 @@ function ModeButton({
         <Icon className="size-4" aria-hidden />
         {label}
       </span>
-      <span className="mt-1 block text-xs leading-snug text-muted-foreground">
-        {desc}
-      </span>
+      {desc && (
+        <span className="mt-1 block text-xs leading-snug text-muted-foreground">
+          {desc}
+        </span>
+      )}
     </button>
   );
 }
@@ -1349,6 +1669,10 @@ function SelectionTray({
   lang,
   reorderable,
   cardClass,
+  raceMode = false,
+  raceSec = RACE_SEC_DEFAULT,
+  raceQSec = {},
+  setRaceQSec,
 }: {
   selectedIds: string[];
   setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
@@ -1356,10 +1680,44 @@ function SelectionTray({
   lang: "kz" | "ru";
   reorderable: boolean;
   cardClass: string;
+  // Race mode: each row gets a seconds input. Displays the effective value
+  // (override → author's timeSec → room default) and writes overrides back
+  // through setRaceQSec; the value is clamped to [5,600] on blur, not on
+  // every keystroke, so intermediate typing doesn't snap under the cursor.
+  raceMode?: boolean;
+  raceSec?: number;
+  raceQSec?: Record<string, number>;
+  setRaceQSec?: React.Dispatch<React.SetStateAction<Record<string, number>>>;
 }) {
   const t = engineT(lang);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  const secFor = (q: PackQuestion) =>
+    raceQSec[q.id] ?? q.timeSec ?? raceSec;
+
+  const setSec = (id: string, raw: string) => {
+    if (!setRaceQSec) return;
+    const n = Number(raw);
+    if (raw.trim() === "" || !Number.isFinite(n)) {
+      // Cleared → back to the question's own default (timeSec ?? room's).
+      setRaceQSec((prev) => {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      return;
+    }
+    setRaceQSec((prev) => ({ ...prev, [id]: n }));
+  };
+
+  const clampSec = (id: string) => {
+    if (!setRaceQSec) return;
+    setRaceQSec((prev) =>
+      id in prev ? { ...prev, [id]: clampRaceSec(prev[id]) } : prev,
+    );
+  };
 
   const move = (from: number, to: number) =>
     setSelectedIds((prev) => {
@@ -1447,6 +1805,29 @@ function SelectionTray({
               <span className="min-w-0 flex-1 pt-1 text-[13px] leading-snug">
                 <MathText text={loc(entry.question.text, lang)} />
               </span>
+              {raceMode && (
+                <label
+                  className="flex shrink-0 items-center gap-1 pt-0.5"
+                  title={t("race_per_q_sec")}
+                >
+                  <Timer
+                    className="size-3.5 text-muted-foreground/60"
+                    aria-hidden
+                  />
+                  <input
+                    type="number"
+                    min={5}
+                    max={600}
+                    step={5}
+                    inputMode="numeric"
+                    aria-label={t("race_per_q_sec")}
+                    value={secFor(entry.question)}
+                    onChange={(e) => setSec(id, e.target.value)}
+                    onBlur={() => clampSec(id)}
+                    className="h-7 w-14 rounded-md border border-border bg-background px-1.5 text-center text-xs font-bold tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  />
+                </label>
+              )}
               {reorderable && (
                 <>
                   <TrayButton
@@ -1513,6 +1894,7 @@ function QuestionPreviewRow({
   selected,
   orderPos,
   tagDefs,
+  raceExcluded = false,
   onToggle,
 }: {
   index: number;
@@ -1523,30 +1905,44 @@ function QuestionPreviewRow({
   // unselected) and the checkbox falls back to a plain check mark.
   orderPos: number | null;
   tagDefs: Map<string, PackTag>;
+  // Race mode: graph-quadratic questions can't be picked (spec §7) — the row
+  // stays visible (the teacher should see what exists) but is inert, dimmed
+  // and explains itself via tooltip + inline notice.
+  raceExcluded?: boolean;
   onToggle: () => void;
 }) {
+  const t = engineT(lang);
   return (
     <div
       role="checkbox"
       aria-checked={selected}
-      tabIndex={0}
+      aria-disabled={raceExcluded || undefined}
+      tabIndex={raceExcluded ? -1 : 0}
+      title={raceExcluded ? t("race_graph_excluded") : undefined}
       onClick={() => {
+        if (raceExcluded) return;
         // let teachers drag-select/copy question text without toggling
         const sel = window.getSelection();
         if (sel && sel.type === "Range") return;
         onToggle();
       }}
       onKeyDown={(e) => {
+        if (raceExcluded) return;
         if (e.key === " " || e.key === "Enter") {
           e.preventDefault();
           onToggle();
         }
       }}
       className={cn(
-        "group cursor-pointer rounded-xl border-[1.5px] bg-card p-3.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-        selected
-          ? "border-primary/40"
-          : "border-border opacity-60 hover:border-primary/40 hover:opacity-80",
+        "group rounded-xl border-[1.5px] bg-card p-3.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        raceExcluded
+          ? "cursor-not-allowed border-border opacity-40 saturate-50"
+          : [
+              "cursor-pointer",
+              selected
+                ? "border-primary/40"
+                : "border-border opacity-60 hover:border-primary/40 hover:opacity-80",
+            ],
       )}
     >
       <div className="flex items-start gap-3">
@@ -1575,6 +1971,12 @@ function QuestionPreviewRow({
             </span>
             <MathText text={loc(question.text, lang)} />
           </div>
+
+          {raceExcluded && (
+            <p className="mt-1.5 text-[11px] font-bold text-amber-700">
+              {t("race_graph_excluded")}
+            </p>
+          )}
 
           {question.tags && question.tags.length > 0 && tagDefs.size > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">

@@ -1,6 +1,10 @@
 // Thin client for the Hetzner live-score server (server/server.js).
 // Students call GET /status and POST /submit; the teacher console also
 // creates/starts/ends sessions and listens on the /live SSE stream.
+// Race mode (v8, docs/RACE_MODE_SPEC.md) adds /race/* endpoints and rides
+// optional fields on the existing responses — everything race is additive.
+
+import type { Localized } from "./pack";
 
 export const QUIZ_BACKEND = (
   process.env.NEXT_PUBLIC_QUIZ_BACKEND_URL ?? "https://mathsabaq.online"
@@ -46,6 +50,231 @@ function sanitizeFeatures(raw: unknown): QuizFeatures | undefined {
   return out;
 }
 
+// ─── Race mode wire types (v8) ──────────────────────────────────────────────
+// Kahoot-style lockstep rooms: the server owns the state machine, phones and
+// the board just render phases. Names and field shapes here are the protocol
+// contract of docs/RACE_MODE_SPEC.md §2 — keep them byte-compatible with
+// server/server.js. A self-paced room never sees any of these fields, and an
+// old (v7) server simply never sends them.
+
+export type RacePhase = "idle" | "question" | "reveal" | "explain" | "podium";
+
+// Teacher's /race/advance verbs. Illegal-for-the-current-phase actions 409
+// server-side ({error:'bad_phase'}) so a double-click is harmless.
+export type RaceAdvanceAction = "next" | "reveal" | "explain" | "podium" | "auto";
+
+// One question of the race config the console sends on POST /session. The
+// server re-sanitizes everything (drop-don't-reject, timeSec clamp [5,600],
+// accept ≤20 entries, solution content size-capped) — these shapes mirror the
+// pack so the console can build the config straight from selected questions.
+export type RaceQuestionConfig = {
+  id: string; // pack question id (server caps at 64 chars)
+  type: "mcq" | "input";
+  timeSec: number; // per-question countdown seconds
+  correct?: number; // mcq only: CANONICAL option index (race forbids option shuffle)
+  optionCount?: number; // mcq only: bucket count for the reveal distribution (≤6)
+  accept?: string[]; // input only: answer + accepted alternates
+  // Explain-phase content. Held server-side and broadcast ONLY at explain, so
+  // the answer-stripped student pack never carries solutions during the
+  // question. Steps use pack.ts's lesson-format SolutionStep shape; the wire
+  // treats them as opaque payload (the server size-caps and re-emits verbatim).
+  solutionSteps?: unknown[];
+  solution?: Localized[]; // flat fallback when there are no authored steps
+  solutionGeogebra?: string[]; // replayed on the student figure at explain
+};
+
+export type RaceConfig = {
+  auto: boolean; // auto-advance initial value (teacher can flip it live)
+  questions: RaceQuestionConfig[]; // canonical order = teacher's tray order
+};
+
+// Race resync summary riding /status and /submit responses (spec §2.7). This
+// is the poll-level recovery channel: screen lock kills the student SSE, and
+// the next heartbeat response carries enough to re-anchor the local timer —
+// it is also how the student page learns the room is a race at all.
+export type RaceSummary = {
+  phase: RacePhase;
+  qIndex: number; // current question, -1 before the first one opens
+  qCount: number;
+  qId?: string;
+  openAt?: number; // epoch ms: answers accepted from here
+  deadline?: number; // epoch ms: phones display this as time-up
+  remainingMs?: number; // server-computed at send time — the skew-free anchor
+  answered?: boolean; // only present when the request carried a studentId
+  auto?: boolean;
+};
+
+// What "correct" looks like at reveal: mcq sends the canonical option index,
+// input sends the canonical answer string.
+export type RaceCorrect = { pick: number } | { answer: string };
+
+// The per-student reveal view — one shape shared by the 'reveal' event and
+// the 'reveal' field of a resync 'state' snapshot (identical by spec §2.5).
+export type RaceRevealView = {
+  qIndex: number;
+  qId: string;
+  correct: RaceCorrect;
+  you: {
+    answered: boolean;
+    ok: boolean;
+    points: number; // this question's speed points (0 on wrong/miss)
+    bonus: number; // streak bonus already included on top of points
+    streak: number;
+    totalPoints: number;
+    // null for a student the standings haven't ranked yet (first contact
+    // with the room happened after the current question's reveal ran).
+    rank: number | null;
+    of: number;
+  };
+};
+
+// The explain payload — shared by the 'explain' event and the resync 'state'.
+// Content shows up here for the first time (see RaceQuestionConfig).
+export type RaceExplainView = {
+  qIndex: number;
+  qId: string;
+  solutionSteps?: unknown[]; // pack SolutionStep[] — opaque on the wire
+  solution?: Localized[];
+  solutionGeogebra?: string[];
+};
+
+// Student SSE events (GET /race/stream). 'state' doubles as the on-connect
+// snapshot AND the resync shape, so a phone that lost its stream mid-question
+// lands back on the exact screen it should be showing.
+export type RaceStudentEvent =
+  | {
+      type: "state";
+      phase: RacePhase;
+      qIndex: number;
+      qCount: number;
+      qId?: string;
+      openAt?: number;
+      deadline?: number;
+      // Anchor the local countdown to remainingMs at receipt time
+      // (performance.now() + remainingMs) — NEVER the device wall-clock.
+      remainingMs?: number;
+      timeSec?: number;
+      answered?: boolean; // whether THIS student answered the current question
+      you?: { points: number; correct: number; streak: number; rank: number | null; of: number };
+      // Present only while phase is reveal/explain/podium:
+      reveal?: RaceRevealView;
+      explain?: RaceExplainView;
+    }
+  | {
+      type: "question";
+      qIndex: number;
+      qCount: number;
+      qId: string;
+      openAt: number; // now + 3s get-ready countdown, baked in server-side
+      deadline: number;
+      remainingMs: number;
+      timeSec: number;
+    }
+  | ({ type: "reveal" } & RaceRevealView)
+  | ({ type: "explain" } & RaceExplainView)
+  | {
+      type: "podium";
+      top: { name: string; points: number }[]; // final top 3
+      // rank is null for a student the final standings never ranked (first
+      // contact with the room came after the last reveal).
+      you: { rank: number | null; of: number; points: number; correct: number };
+    };
+
+// One leaderboard row as the teacher 'race' reveal/podium events carry it.
+export type RaceBoardRow = {
+  studentId: string;
+  name: string;
+  points: number; // running total
+  delta: number; // points earned on the just-closed question
+  ok: boolean;
+  streak: number;
+  rank: number;
+  // Feeds the board's ▲/▼ rank-change arrows. The server sends rank itself
+  // (a neutral "no movement") for a row's first appearance, but the type
+  // admits null so a defensive consumer never renders a fabricated drop.
+  prevRank: number | null;
+};
+
+// Reveal distribution: mcq = answer counts per CANONICAL option index (race
+// forces canonical option order so board bars and phone letters agree);
+// input = three buckets.
+export type RaceDist = number[] | { ok: number; wrong: number; none: number };
+
+// Teacher SSE additions on the existing /live stream. Old consoles ignore
+// unknown event types safely, so these ride the same connection.
+export type RaceTeacherEvent =
+  | {
+      // Phase transition. Which fields are present varies by phase (spec
+      // §2.5) — question carries the clock, reveal carries dist/board/correct,
+      // podium carries the final board — hence the optionals.
+      type: "race";
+      phase: RacePhase;
+      qIndex: number;
+      qCount?: number;
+      qId?: string;
+      openAt?: number;
+      deadline?: number;
+      remainingMs?: number;
+      timeSec?: number;
+      answeredCount?: number;
+      activeCount?: number;
+      correct?: RaceCorrect;
+      dist?: RaceDist;
+      board?: RaceBoardRow[];
+    }
+  | {
+      // Live answered-counter tick while a question is open.
+      type: "race_answer";
+      qIndex: number;
+      answeredCount: number;
+      activeCount: number;
+    };
+
+// The teacher-side race view carried on the /live connect 'snapshot' so a
+// mid-race console reload restores the exact board (current dist/board are
+// included when the room sits in reveal/explain/podium).
+export type TeacherRaceState = {
+  phase: RacePhase;
+  qIndex: number;
+  qCount: number;
+  qId?: string;
+  openAt?: number;
+  deadline?: number;
+  remainingMs?: number;
+  timeSec?: number;
+  answeredCount?: number;
+  activeCount?: number;
+  auto?: boolean;
+  dist?: RaceDist;
+  board?: RaceBoardRow[];
+  correct?: RaceCorrect;
+};
+
+const RACE_PHASES: readonly string[] = [
+  "idle",
+  "question",
+  "reveal",
+  "explain",
+  "podium",
+];
+
+// Pass-through with a sanity gate. race is an OPTIONAL rider on /status and
+// /submit: old servers never send it, and parseStatus must keep throwing ONLY
+// on unknown status strings (that throw is load-bearing for reload recovery).
+// So a missing or malformed race field quietly reads as "not a race room" —
+// never an error, never a new status.
+function sanitizeRaceSummary(raw: unknown): RaceSummary | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const r = raw as Partial<RaceSummary>;
+  if (typeof r.phase !== "string" || !RACE_PHASES.includes(r.phase)) {
+    return undefined;
+  }
+  if (typeof r.qIndex !== "number" || typeof r.qCount !== "number") {
+    return undefined;
+  }
+  return r as RaceSummary;
+}
+
 export type StatusResponse = {
   status: SessionStatus;
   timeLeft?: number; // seconds, present while a session exists
@@ -54,6 +283,8 @@ export type StatusResponse = {
   kicked?: boolean;
   // v7: the room's student-aid switches; absent on old servers.
   features?: QuizFeatures;
+  // v8: present only on race rooms — the student's poll-level resync channel.
+  race?: RaceSummary;
 };
 
 // Per-question outcomes, question id -> 1 (correct) | 0 (wrong). Only quizzes
@@ -92,6 +323,7 @@ function parseStatus(data: Partial<StatusResponse>, httpStatus: number) {
     timeLeft: data.timeLeft,
     kicked: data.kicked === true,
     features: sanitizeFeatures(data.features),
+    race: sanitizeRaceSummary(data.race),
   };
 }
 
@@ -187,6 +419,37 @@ export function sendLeaveBeacon(code: string, studentId: string): void {
   }
 }
 
+// The student race SSE stream URL (GET /race/stream). studentId is mandatory:
+// the stream is individualized (your answered flag, your points, your rank).
+export function raceStreamUrl(code: string, studentId: string): string {
+  const params = new URLSearchParams({ code, studentId });
+  return `${QUIZ_BACKEND}/race/stream?${params.toString()}`;
+}
+
+// Submits the student's answer for the current race question. The server
+// accepts one answer per student per question (first wins) and only while the
+// question is open (+1.5s grace) — so `false` here just means the press
+// didn't land (network blip, phase already closed). The reveal event is the
+// source of truth for whether an answer counted; callers may flip to the
+// "accepted" screen optimistically but can retry the POST on false.
+export async function raceAnswer(
+  code: string,
+  studentId: string,
+  qIndex: number,
+  payload: { pick?: number; given?: string },
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${BACKEND}/race/answer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, studentId, qIndex, ...payload }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ─── Teacher side ───────────────────────────────────────────────────────────
 
 // One student row as the /live SSE stream reports it.
@@ -212,11 +475,16 @@ export type LiveEvent =
       students: StudentRecord[];
       status: SessionStatus;
       timeLeft: number;
+      // v8: present only on race rooms — the full teacher race view, so a
+      // console reload mid-race restores the exact board.
+      race?: TeacherRaceState;
     }
   | ({ type: "update" } & StudentRecord)
   | { type: "kicked"; studentId: string }
   | { type: "started"; startedAt: number }
-  | { type: "ended"; reason: "teacher" | "timeout" };
+  | { type: "ended"; reason: "teacher" | "timeout" }
+  // v8 race phase events; old consoles ignore unknown types safely.
+  | RaceTeacherEvent;
 
 // The teacher already has a live room; the server refused to open a second.
 export type ActiveRoomConflict = {
@@ -240,8 +508,13 @@ export async function createSession(
   // The room's student-aid switches (v7 servers store and serve them back on
   // /status and /submit; older servers ignore the field).
   features?: QuizFeatures,
+  // Race mode config (v8). A v7 server ignores the field and opens a plain
+  // self-paced room — which is why the RESPONSE carries the race
+  // acknowledgment back (see below): the console must fail loudly rather
+  // than run a race board on top of a self-paced room.
+  race?: RaceConfig,
 ): Promise<
-  | { code: string; hostSecret: string | null }
+  | { code: string; hostSecret: string | null; race?: { qCount: number } }
   | { error: "unauthorized" | "network" }
   | { error: "active_room"; room: ActiveRoomConflict }
 > {
@@ -250,7 +523,7 @@ export async function createSession(
     const res = await fetch(`${BACKEND}/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, token, studentPath, features }),
+      body: JSON.stringify({ title, token, studentPath, features, race }),
     });
     if (res.status === 401) return { error: "unauthorized" };
     if (res.status === 409) {
@@ -273,9 +546,29 @@ export async function createSession(
       }
       return { error: "network" };
     }
-    const data = (await res.json()) as { code?: string; hostSecret?: string };
+    const data = (await res.json()) as {
+      code?: string;
+      hostSecret?: string;
+      race?: { qCount?: unknown };
+    };
     if (!data.code) return { error: "network" };
-    return { code: data.code, hostSecret: data.hostSecret ?? null };
+    const out: {
+      code: string;
+      hostSecret: string | null;
+      race?: { qCount: number };
+    } = { code: data.code, hostSecret: data.hostSecret ?? null };
+    // The race acknowledgment: a v8 server that stored the race config echoes
+    // {race:{qCount}}. Only a well-typed echo is surfaced — the console
+    // treats its absence (old server, or the config was dropped as malformed)
+    // as "this room is NOT a race" and destroys the half-made room.
+    if (
+      data.race &&
+      typeof data.race === "object" &&
+      typeof data.race.qCount === "number"
+    ) {
+      out.race = { qCount: data.race.qCount };
+    }
+    return out;
   } catch {
     return { error: "network" };
   }
@@ -347,5 +640,23 @@ export async function kickStudent(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code, hostSecret, studentId }),
+  });
+}
+
+// Drives the race state machine (POST /race/advance, hostSecret-gated).
+// `value` only means something for action 'auto' (the on/off switch). The
+// resulting phase change comes back over the /live SSE stream, so the return
+// is deliberately void; a 409 {error:'bad_phase'} from a double-clicked
+// button is exactly as harmless as it should be — the console ignores it.
+export async function raceAdvance(
+  code: string,
+  hostSecret: string | null,
+  action: RaceAdvanceAction,
+  value?: boolean,
+): Promise<void> {
+  await fetch(`${BACKEND}/race/advance`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, hostSecret, action, value }),
   });
 }

@@ -19,11 +19,16 @@ import {
   fetchStatus,
   kickStudent,
   liveStreamUrl,
+  raceAdvance,
   startSession,
   type ActiveRoomConflict,
   type LiveEvent,
   type QuizFeatures,
+  type RaceAdvanceAction,
+  type RaceBoardRow,
+  type RaceConfig,
   type StudentRecord,
+  type TeacherRaceState,
 } from "./live-client";
 import { isRoomResultSaved } from "./result-claims";
 
@@ -76,6 +81,23 @@ export type TeacherPhase = "setup" | "lobby" | "live" | "results";
 export type LiveStudent = StudentRecord & {
   flash: "ok" | "err" | null;
   awaySince: number | null;
+  // Race rooms only: the student's running speed-points total, stamped from
+  // the server's reveal/podium leaderboards (never computed locally). Rides
+  // the card into results so the autosave can persist it; forever undefined
+  // in self-paced rooms.
+  racePoints?: number;
+};
+
+// The race board's view of the room: the server's TeacherRaceState plus a
+// local receipt anchor. remainingMs is only true at SEND time, so every
+// countdown must be computed as `remainingMs - (performance.now() - anchorNow)`
+// — anchoring to the deadline epoch instead would trust the teacher machine's
+// wall clock, which is exactly what the spec forbids on the student side too.
+export type RaceView = TeacherRaceState & {
+  // performance.now() when this state landed. Doubles as the dwell anchor for
+  // the reveal phase's 8s auto-advance badge (the reveal event carries no
+  // clock of its own).
+  anchorNow: number;
 };
 
 // Re-derived on every incoming report. Re-anchored on each off-screen beat so
@@ -151,18 +173,33 @@ export function useTeacherSession(options?: { persistKey?: string }) {
     () => new Map(),
   );
   const [creating, setCreating] = useState(false);
+  // race_unsupported: the server acknowledged the room but NOT the race
+  // config (v7, or the config was dropped as malformed) — the half-made room
+  // is already destroyed by then and the console must say so loudly instead
+  // of silently hosting a self-paced room under a race board.
   const [createError, setCreateError] = useState<
-    "unauthorized" | "network" | null
+    "unauthorized" | "network" | "race_unsupported" | null
   >(null);
   const [timeLeft, setTimeLeft] = useState(SESSION_SECONDS);
   const [resumable, setResumable] = useState<ResumableRoom | null>(null);
+  // Race rooms: the server-owned phase machine as this console last saw it
+  // (null in self-paced rooms and before the first snapshot). Every write
+  // stamps anchorNow — see RaceView.
+  const [race, setRace] = useState<RaceView | null>(null);
   // v6 one-room-per-teacher: the server refused to open a room because this
   // teacher already has a live one. The console asks "end it and start new?"
   // and answers through resolveConflict.
   const [conflict, setConflict] = useState<ActiveRoomConflict | null>(null);
   // The arguments of the create that hit the conflict, replayed on "yes".
   const conflictRetryRef = useRef<
-    [string, string | undefined, unknown, QuizFeatures | undefined] | null
+    | [
+        string,
+        string | undefined,
+        unknown,
+        QuizFeatures | undefined,
+        RaceConfig | undefined,
+      ]
+    | null
   >(null);
 
   const phaseRef = useRef<TeacherPhase>("setup");
@@ -250,14 +287,40 @@ export function useTeacherSession(options?: { persistKey?: string }) {
     hostSecretRef.current = null;
     setCreateError(null);
     setTimeLeft(SESSION_SECONDS);
+    setRace(null);
     clearStoredRoom();
     setResumable(null);
     setPhaseBoth("setup");
   }, [code, clearStoredRoom]);
 
+  // Stamp the server's leaderboard points onto the student cards. This is the
+  // only writer of LiveStudent.racePoints: points exist server-side only
+  // (speed + streak scoring, spec §2.6), and riding them on the cards is what
+  // lets the existing results screen + autosave pick them up with zero
+  // changes to their data flow.
+  const stampRacePoints = (board: RaceBoardRow[]) => {
+    setStudents((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const row of board) {
+        const s = next.get(row.studentId);
+        if (s && s.racePoints !== row.points) {
+          next.set(row.studentId, { ...s, racePoints: row.points });
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  };
+
   const applyEvent = useCallback(
     (event: LiveEvent) => {
       if (event.type === "snapshot") {
+        // Points are re-stamped from the snapshot's race board (when any), so
+        // a console reload mid-race rebuilds the cards complete.
+        const points = new Map<string, number>(
+          (event.race?.board ?? []).map((row) => [row.studentId, row.points]),
+        );
         setStudents((prev) => {
           const next = new Map<string, LiveStudent>();
           for (const s of event.students) {
@@ -265,11 +328,23 @@ export function useTeacherSession(options?: { persistKey?: string }) {
               ...s,
               flash: prev.get(s.studentId)?.flash ?? null,
               awaySince: awayAnchor(s),
+              // Prefer the snapshot's board; fall back to what the card
+              // already held so a board-less snapshot (or an old server)
+              // can't wipe points the autosave still needs.
+              racePoints:
+                points.get(s.studentId) ?? prev.get(s.studentId)?.racePoints,
             });
           }
           return next;
         });
         setTimeLeft(event.timeLeft);
+        // Mid-race reload recovery: the snapshot's race field IS the current
+        // board (incl. reveal dist/board). Absence is not "no race" for an
+        // already-racing console — a v8 server always sends it on race rooms,
+        // so only ever overwrite, never clear, from a snapshot.
+        if (event.race) {
+          setRace({ ...event.race, anchorNow: performance.now() });
+        }
         // Another tab (or a reconnect after refresh) may already be live.
         if (event.status === "active" && phaseRef.current === "lobby") {
           setPhaseBoth("live");
@@ -298,6 +373,10 @@ export function useTeacherSession(options?: { persistKey?: string }) {
             ...record,
             flash,
             awaySince: awayAnchor(record),
+            // 'update' carries no points (they only ride race boards) — keep
+            // what the last reveal stamped or the card would flicker to "—"
+            // on every heartbeat between reveals.
+            racePoints: old?.racePoints,
           });
 
           if (flash && (!old || flash !== old.flash || event.total !== old.total)) {
@@ -319,6 +398,82 @@ export function useTeacherSession(options?: { persistKey?: string }) {
           }
           return next;
         });
+        return;
+      }
+
+      if (event.type === "race") {
+        // Phase transition from the server's race state machine. Which fields
+        // ride the event varies by phase (spec §2.5): question carries the
+        // clock, reveal carries correct/dist/board, explain carries almost
+        // nothing (content is in the local pack), podium carries the final
+        // board — so each branch decides what to keep from the previous view.
+        const anchorNow = performance.now();
+        setRace((prev) => {
+          if (event.phase === "question") {
+            // A fresh question invalidates the previous reveal's dist/board/
+            // correct — dropping them (not carrying them over) is what makes
+            // "stale bars behind a live countdown" impossible.
+            return {
+              phase: "question",
+              qIndex: event.qIndex,
+              qCount: event.qCount ?? prev?.qCount ?? 0,
+              qId: event.qId,
+              openAt: event.openAt,
+              deadline: event.deadline,
+              remainingMs: event.remainingMs,
+              timeSec: event.timeSec,
+              answeredCount: event.answeredCount ?? 0,
+              activeCount: event.activeCount ?? prev?.activeCount,
+              auto: prev?.auto,
+              anchorNow,
+            };
+          }
+          if (event.phase === "reveal") {
+            return {
+              phase: "reveal",
+              qIndex: event.qIndex,
+              qCount: event.qCount ?? prev?.qCount ?? 0,
+              qId: event.qId ?? prev?.qId,
+              timeSec: prev?.timeSec,
+              correct: event.correct,
+              dist: event.dist,
+              board: event.board,
+              answeredCount: event.answeredCount ?? prev?.answeredCount,
+              activeCount: event.activeCount ?? prev?.activeCount,
+              auto: prev?.auto,
+              anchorNow,
+            };
+          }
+          // explain / podium: keep the reveal's data underneath — the board
+          // returns from explain straight to next/podium, and podium may want
+          // the last correct/dist visible in a collapsed state later.
+          return {
+            ...(prev ?? { qCount: event.qCount ?? 0 }),
+            phase: event.phase,
+            qIndex: event.qIndex,
+            qCount: event.qCount ?? prev?.qCount ?? 0,
+            board: event.board ?? prev?.board,
+            anchorNow,
+          };
+        });
+        if (event.board) stampRacePoints(event.board);
+        return;
+      }
+
+      if (event.type === "race_answer") {
+        // Live "answered n / of" tick. Only merged while it matches the
+        // question on screen — a straggler tick from the previous question
+        // (grace-window answer racing the phase change) must not resurrect
+        // its counter over the new one.
+        setRace((prev) =>
+          prev && prev.qIndex === event.qIndex && prev.phase === "question"
+            ? {
+                ...prev,
+                answeredCount: event.answeredCount,
+                activeCount: event.activeCount,
+              }
+            : prev,
+        );
         return;
       }
 
@@ -408,25 +563,38 @@ export function useTeacherSession(options?: { persistKey?: string }) {
     // can restore the exact same selection before reconnecting.
     // features = the room's student-aid switches, stored server-side (v7) so
     // students can't re-enable them by editing the join link.
+    // race = the lockstep race config (v8); its ACKNOWLEDGMENT is checked
+    // below — a server that ignored the field must not get a room.
     async (
       title: string,
       studentPath?: string,
       ctx?: unknown,
       features?: QuizFeatures,
+      race?: RaceConfig,
     ) => {
       setCreating(true);
       setCreateError(null);
-      const res = await createSession(title, studentPath, features);
+      const res = await createSession(title, studentPath, features, race);
       setCreating(false);
       if ("error" in res) {
         if (res.error === "active_room") {
           // This teacher already has a live room (v6 rule). Hold the create's
           // arguments; the console confirms and calls resolveConflict.
-          conflictRetryRef.current = [title, studentPath, ctx, features];
+          conflictRetryRef.current = [title, studentPath, ctx, features, race];
           setConflict(res.room);
         } else {
           setCreateError(res.error);
         }
+        return;
+      }
+      // Race requested but not acknowledged question-for-question — a v7
+      // server ignored the field, or v8 dropped the config as malformed.
+      // The room EXISTS at this point but is self-paced; running a race board
+      // on top of it would silently grade nothing, so destroy it and fail
+      // loudly (spec §1: never a silent downgrade).
+      if (race && res.race?.qCount !== race.questions.length) {
+        void endSession(res.code, res.hostSecret).catch(() => {});
+        setCreateError("race_unsupported");
         return;
       }
       // Opening a fresh room supersedes a leftover one (an ignored resume
@@ -456,10 +624,56 @@ export function useTeacherSession(options?: { persistKey?: string }) {
       setCode(res.code);
       setStudents(new Map());
       setTimeLeft(SESSION_SECONDS);
+      // Seed the race view immediately (the /live snapshot re-confirms it
+      // within ~1 RTT) so the board never renders a race room without one.
+      setRace(
+        race
+          ? {
+              phase: "idle",
+              qIndex: -1,
+              qCount: race.questions.length,
+              auto: race.auto,
+              anchorNow: performance.now(),
+            }
+          : null,
+      );
       setPhaseBoth("lobby");
       connectStream(res.code);
     },
     [connectStream, persistRoom, storageKey],
+  );
+
+  // ─── Race actions ────────────────────────────────────────────────────────
+  // All of them drive POST /race/advance with this room's hostSecret. The
+  // server answers illegal-for-the-phase actions with 409 bad_phase, which is
+  // deliberately swallowed here: a double-clicked «Келесі» must be a no-op,
+  // and the REAL outcome of every action arrives as a 'race' event over the
+  // /live stream anyway — the response body carries nothing the board needs.
+  const raceAction = useCallback(
+    (action: RaceAdvanceAction, value?: boolean) => {
+      if (!code) return;
+      void raceAdvance(code, hostSecretRef.current, action, value).catch(
+        () => {
+          // network blip — the teacher just presses the button again
+        },
+      );
+    },
+    [code],
+  );
+
+  const raceNext = useCallback(() => raceAction("next"), [raceAction]);
+  const raceReveal = useCallback(() => raceAction("reveal"), [raceAction]);
+  const raceExplain = useCallback(() => raceAction("explain"), [raceAction]);
+  const racePodium = useCallback(() => raceAction("podium"), [raceAction]);
+  // Auto-advance flips take effect server-side, but there is no dedicated
+  // broadcast for them — mirror the flip locally so the badge answers the
+  // click instantly (a snapshot on reconnect re-syncs the truth).
+  const raceSetAuto = useCallback(
+    (value: boolean) => {
+      raceAction("auto", value);
+      setRace((prev) => (prev ? { ...prev, auto: value } : prev));
+    },
+    [raceAction],
   );
 
   // Answer to the active-room conflict: end the old room and replay the
@@ -725,5 +939,12 @@ export function useTeacherSession(options?: { persistKey?: string }) {
     reset,
     resume,
     discardResume,
+    // Race rooms only (null otherwise): the board's state + phase actions.
+    race,
+    raceNext,
+    raceReveal,
+    raceExplain,
+    racePodium,
+    raceSetAuto,
   };
 }

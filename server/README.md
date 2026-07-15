@@ -10,15 +10,18 @@ written to any database.
 
 | Endpoint | Who | What |
 |---|---|---|
-| `POST /session` | teacher console | create room → `{code}` (token-gated when `QUIZ_TOKEN_SECRET` is set; 409 `active_room` if this teacher already has a live room — needs the token's uid) |
-| `POST /start` / `POST /end` | teacher console | waiting → active → ended (`/end` also accepts an owner token instead of the hostSecret) |
-| `POST /kick` | teacher console | remove one student; passive heartbeats can't re-register them, an explicit re-join can |
-| `GET /status?code=&studentId=` | student page | poll state while waiting / after (+`kicked` verdict when studentId sent) |
-| `GET /resolve?code=` | /join page | room code → `{status, title, studentPath}` (universal entrance) |
-| `POST /submit` | student page | score heartbeat (15s) + immediate on answer/focus change; `joining:true` = deliberate (re-)join |
+| `POST /session` | teacher console | create room → `{code, hostSecret}` (token-gated when `QUIZ_TOKEN_SECRET` is set; 409 `active_room` if this teacher already has a live room — needs the token's uid). v8: optional `race` config → response adds `race:{qCount}` (the console's required ack); cap violations → 400 `race_too_large` / `race_invalid` |
+| `POST /start` / `POST /end` | teacher console | waiting → active → ended (`/end` also accepts an owner token instead of the hostSecret; race timers are killed on end) |
+| `POST /kick` | teacher console | remove one student; passive heartbeats can't re-register them, an explicit re-join can (kicked students are excluded from race dist/board) |
+| `GET /status?code=&studentId=` | student page | poll state while waiting / after (+`kicked` verdict when studentId sent; race rooms add the `race` summary — phase/qIndex/deadline/answered) |
+| `GET /resolve?code=` | /join page | room code → `{status, title, studentPath}` (universal entrance; race rooms add `race:true`) |
+| `POST /submit` | student page | score heartbeat (15s) + immediate on answer/focus change; `joining:true` = deliberate (re-)join. In race rooms client `score`/`total`/`answers` are IGNORED (server-owned); response adds the `race` summary |
 | `POST /leave` | student page | pagehide beacon (text/plain JSON) → student shows as "left"; a >45s-silent student in an active room is swept to "left" automatically |
-| `GET /live?code=` | teacher console | SSE stream: `snapshot`, `update`, `kicked`, `started`, `ended` |
-| `GET /health` | anyone | counts + which features are enabled |
+| `GET /live?code=` | teacher console | SSE stream: `snapshot`, `update`, `kicked`, `started`, `ended`; v8 adds `race` / `race_answer` events and a `race` field on the connect snapshot (mid-race console reload) |
+| `GET /race/stream?code=&studentId=` | student page | v8 SSE stream for race rooms: individualized `state` connect snapshot, then `question` / `reveal` / `explain` / `podium` events (own per-IP cap `LIVE_MAX_RACE_SSE_PER_IP`, default 200) |
+| `POST /race/answer` | student page | v8 `{code, studentId, qIndex, pick?\|given?}` — graded server-side at accept, one answer per question (first wins), 409 `bad_phase` outside the answer window |
+| `POST /race/advance` | teacher console | v8 hostSecret-gated race state machine: `{action: next\|reveal\|explain\|podium\|auto, value?}`; illegal action → 409 `bad_phase` (double-click safe) |
+| `GET /health` | anyone | liveness + `"version":8`; counts/gates only with `LIVE_STATUS_KEY` |
 
 ## Config
 
@@ -30,6 +33,10 @@ vars win):
   See rollout order below. **Setting it on the box alone breaks room creation
   for consoles that don't send tokens.**
 
+- `LIVE_MAX_RACE_SSE_PER_IP` — v8, max concurrent `/race/stream` connections
+  per IP (default 200 — every racing phone holds one, and a single school NAT
+  can front several whole classes; the teacher-stream cap stays separate).
+
 v2's `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are gone — v3 removed
 results persistence. If they're still in `/root/.env`, delete them (a
 service-role key has no business sitting on a box that doesn't use it).
@@ -40,15 +47,63 @@ service-role key has no business sitting on a box that doesn't use it).
 ssh root@89.167.9.192 'cp /root/server.js /root/server.js.bak'   # rollback copy
 scp server/server.js root@89.167.9.192:/root/server.js
 ssh root@89.167.9.192 'pm2 restart mathsabaq-live && pm2 save'
-curl -s https://mathsabaq.online/health                          # expect "version":7
+curl -s https://mathsabaq.online/health                          # expect "version":8
 ```
 
 Rollback: `ssh root@89.167.9.192 'cp /root/server.js.bak /root/server.js && pm2 restart mathsabaq-live'`
 
-**v7 needs NO nginx change:** the room student-aid switches (`features`) ride
+## v8 deploy — race mode (Жарыс)
+
+Spec: `docs/RACE_MODE_SPEC.md`. **v8 needs ONE nginx allowlist entry**: all
+three new endpoints deliberately live under the single `/race` path prefix
+(`/race/stream`, `/race/answer`, `/race/advance`), so one prefix location
+covers the whole feature. Add it BEFORE restarting pm2 — a v8 site talking to
+a box whose nginx still blocks `/race` fails room creation with the explicit
+"server doesn't support race" error (self-paced rooms are unaffected).
+
+Prefix-location variant (preferred — future `/race/*` endpoints ride free):
+
+```nginx
+location /race {
+    proxy_pass http://127.0.0.1:3001;
+    proxy_http_version 1.1;
+    proxy_set_header Connection '';
+    proxy_buffering off;          # /race/stream is SSE — buffering kills it
+    proxy_read_timeout 24h;       # SSE connections are long-lived
+}
+```
+
+If the existing allowlist is built from exact locations instead, add all three
+(`/race/stream` needs the SSE settings; the two POSTs can share the plain
+proxy block the other POST endpoints use):
+
+```nginx
+location = /race/stream  { proxy_pass http://127.0.0.1:3001; proxy_http_version 1.1; proxy_set_header Connection ''; proxy_buffering off; proxy_read_timeout 24h; }
+location = /race/answer  { proxy_pass http://127.0.0.1:3001; }
+location = /race/advance { proxy_pass http://127.0.0.1:3001; }
+```
+
+Then the standard three deploy steps above; `curl -s
+https://mathsabaq.online/health` must show `"version":8`.
+
+Notes:
+
+- **Body limit**: v8 raises `express.json` from the default 100kb to **1mb** —
+  race configs carry explain-phase solution steps. If nginx caps request
+  bodies (`client_max_body_size`), it must allow ≥1m on `/session`.
+- Race rooms are additive: a `/session` without a `race` field behaves
+  byte-for-byte as v7, and the console REQUIRES the `race:{qCount}` ack in
+  the `/session` response — so a stale v7 box can never silently open a
+  self-paced room behind a race board.
+- Scoring, grading and per-question results are server-side in race rooms;
+  `/submit` ignores client `score`/`total`/`answers` there. Input answers are
+  graded by a port of `normalizeAnswer`/`checkInputAnswer` from
+  `src/lib/quiz/pack.ts` — keep the two textually in sync.
+
+**v7 needed NO nginx change:** the room student-aid switches (`features`) rode
 the EXISTING `/session`, `/status` and `/submit` paths — no new endpoint was
-added, so the three steps above are the whole deploy. (Contrast v6, which
-added `/kick` and `/leave` and required adding those to the nginx allowlist.)
+added. (Like v6, which added `/kick` and `/leave`, v8 requires the nginx
+allowlist step above.)
 
 First deploy on a fresh box also needs:
 

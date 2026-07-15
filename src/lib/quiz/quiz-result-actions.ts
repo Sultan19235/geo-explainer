@@ -31,9 +31,15 @@ function cleanAnswers(raw: unknown): AnswerMap | undefined {
   return n > 0 ? out : undefined;
 }
 
-function cleanStudents(raw: unknown): ResultStudent[] | null {
+// Race rooms add a per-student speed-points total. Local intersection rather
+// than a change to ResultStudent: the column is jsonb (extra keys are free)
+// and only race rows ever carry it. Mirrors use-result-autosave.ts — keep the
+// two in sync.
+type ResultStudentRow = ResultStudent & { racePoints?: number };
+
+function cleanStudents(raw: unknown): ResultStudentRow[] | null {
   if (!Array.isArray(raw)) return null;
-  const students: ResultStudent[] = [];
+  const students: ResultStudentRow[] = [];
   for (const item of raw.slice(0, RESULT_STUDENTS_MAX)) {
     if (typeof item !== "object" || item === null) return null;
     const s = item as Record<string, unknown>;
@@ -52,6 +58,11 @@ function cleanStudents(raw: unknown): ResultStudent[] | null {
           ? Math.max(0, Math.round(s.awaySeconds))
           : 0,
       answers: cleanAnswers(s.answers),
+      // Absent on self-paced rows on purpose (not 0) — "no race" and "raced
+      // to zero points" must stay distinguishable to future readers.
+      ...(typeof s.racePoints === "number" && Number.isFinite(s.racePoints)
+        ? { racePoints: Math.max(0, Math.round(s.racePoints)) }
+        : {}),
     });
   }
   return students.length >= 1 ? students : null;

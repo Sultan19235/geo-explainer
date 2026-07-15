@@ -18,6 +18,7 @@ import {
   submitScore,
   type AnswerMap,
   type QuizFeatures,
+  type RaceSummary,
 } from "./live-client";
 
 const STATE_TTL = 3 * 60 * 60 * 1000; // saved progress expires after 3h
@@ -99,6 +100,13 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
   // until a /status or /submit response carries them (or on old servers,
   // forever — the player falls back to the join link's `off=` param then).
   const [features, setFeatures] = useState<QuizFeatures | null>(null);
+  // Race-mode summary as the server reports it (v8, docs/RACE_MODE_SPEC.md
+  // §2.7). Pure pass-through: null on self-paced rooms and old servers; on a
+  // race room every /status poll and /submit heartbeat refreshes it, which is
+  // the poll-level resync channel the race hook leans on when its SSE stream
+  // dies (phone screen lock). This hook itself never acts on it — all the
+  // load-bearing invariants here stay race-blind.
+  const [raceSummary, setRaceSummary] = useState<RaceSummary | null>(null);
   const [extra, setExtraState] = useState<TExtra>(opts.defaultExtra);
 
   // Mutable session identity + focus trackers. Refs, not state: sendScore is
@@ -215,6 +223,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         );
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
         if (res.features) setFeatures(res.features);
+        if (res.race) setRaceSummary(res.race);
         if (res.kicked) kickedOut();
         else if (res.status === "ended" || res.status === "not_found") endQuiz();
       } catch {
@@ -295,6 +304,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         setStudentName(s.name);
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
         if (res.features) setFeatures(res.features);
+        if (res.race) setRaceSummary(res.race);
         if (res.status === "active") startQuiz();
         else {
           s.phase = "waiting";
@@ -353,6 +363,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         saveState();
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
         if (res.features) setFeatures(res.features);
+        if (res.race) setRaceSummary(res.race);
         if (res.status === "active") startQuiz();
         else {
           s.phase = "waiting";
@@ -417,6 +428,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         );
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
         if (res.features) setFeatures(res.features);
+        if (res.race) setRaceSummary(res.race);
         if (res.kicked) kickedOut();
         else if (res.status === "active") startQuiz();
         else if (res.status === "ended" || res.status === "not_found") {
@@ -554,11 +566,19 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     stats,
     timeLeft,
     features,
+    raceSummary,
     recordAnswer,
     markFinished,
     rejoin,
     extra,
     updateExtra,
     needsCodeInput: !urlCode,
+    // Session identity, read-only. The race layer opens its own SSE stream
+    // (individualized by studentId) and posts /race/answer next to this hook
+    // — never instead of it — so it needs the exact identity this session
+    // registered with. Ref reads are safe at render time: every place that
+    // assigns code/studentId flips `phase` right after, forcing a re-render.
+    code: session.current.code,
+    studentId: session.current.studentId,
   };
 }

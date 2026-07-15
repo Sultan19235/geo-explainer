@@ -19,6 +19,13 @@ import {
   type QuadParams,
   type SectionId,
 } from "./quadratic";
+// Race explain-phase steps reuse the LESSON block union so the race board and
+// the student page render them with the exact same LessonBlocks component.
+// Type-only import on purpose: lesson/types carries runtime helpers (pickText,
+// substParams) that must not be dragged into the quiz bundle, and its
+// `Localized` is structurally identical to ours — only `Block` crosses over,
+// keeping the lesson module the single source of truth for the block shapes.
+import type { Block } from "@/lib/lesson/types";
 
 export type PackLang = "kz" | "ru";
 
@@ -43,6 +50,15 @@ export type PackGraphQuadratic =
   | { mode: "C"; equation: QuadParams; distractors: QuadParams[] }
   | { mode: "B"; equation: QuadParams; ask: GraphAsk }
   | { mode: "D"; equation: QuadParams };
+
+// One step of a lesson-style worked solution ("Берілгені" → "Шешуі" →
+// "Жауабы"), shown during a race room's explain phase (Түсіндіру). `Block` is
+// the lesson player's 6-member union (p | given | find | formula | callout |
+// answer) — see the type-only import note at the top of this file.
+export type SolutionStep = {
+  name: Localized; // "Берілгені", "Шешуі", "Жауабы"
+  blocks: Block[];
+};
 
 export type PackQuestion = {
   id: string;
@@ -71,6 +87,15 @@ export type PackQuestion = {
   // extra GeoGebra commands replayed on the figure when the solution reveals
   // (highlight the triangle the solution uses, draw the height, …)
   solutionGeogebra?: string[];
+  // Race explain phase: worked solution in the lesson step format, rendered
+  // with LessonBlocks on the class board AND on phones. Precedence there:
+  // solutionSteps → flat `solution` → no explain content (no Түсіндіру
+  // button). The flat `solution` keeps its exact self-paced semantics.
+  solutionSteps?: SolutionStep[];
+  // Author-suggested race time limit in seconds (whole number, 5–600). The
+  // console tray pre-fills each question's timer from it; the teacher can
+  // still override, and self-paced rooms ignore it entirely.
+  timeSec?: number;
 };
 
 // Badge tint on the console; "slate" (neutral) when omitted.
@@ -121,6 +146,15 @@ export type QuizPack = {
 const MAX_QUESTIONS = 200;
 const MAX_OPTIONS = 6;
 const MAX_HINTS = 6;
+// Race explain phase: a worked solution must stay board-sized, and the whole
+// race config rides the /session request body — these caps match server v8's
+// sanitizer (docs/RACE_MODE_SPEC.md §2.2) so a valid pack never gets clipped.
+const MAX_SOLUTION_STEPS = 12;
+const MAX_STEP_BLOCKS = 30;
+// timeSec clamp (spec §4): below 5s nobody can read the question, above 600s
+// it is not a race anymore.
+const MIN_TIME_SEC = 5;
+const MAX_TIME_SEC = 600;
 
 // Graph-quadratic questions carry the graph/equation as their own stem, so a
 // text prompt is optional; when the author gives none, the mode's default
@@ -196,6 +230,77 @@ function normalizeCorrect(value: unknown, optionCount: number): number | null {
   }
   if (index === null || index < 0 || index >= optionCount) return null;
   return index;
+}
+
+// Validates one lesson block inside "solutionSteps", mirroring the lesson
+// Block union (src/lib/lesson/types.ts) member by member: text-carrying
+// blocks need a Localized "text", math-carrying blocks need a non-empty
+// "latex" string. Extra keys are dropped so a validated pack holds only the
+// exact shapes the LessonBlocks renderer expects. Returns the normalized
+// block, or an error string the caller prefixes with the position.
+function normalizeSolutionBlock(
+  raw: unknown,
+): { block: Block } | { error: string } {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { error: "each block must be an object." };
+  }
+  const b = raw as Record<string, unknown>;
+  switch (b.type) {
+    case "p":
+    case "find":
+    case "answer": {
+      if (!isLocalized(b.text)) {
+        return {
+          error: `"${b.type}" block needs a "text" string (or {"kz","ru"}).`,
+        };
+      }
+      return { block: { type: b.type, text: b.text as Localized } };
+    }
+    case "given": {
+      if (typeof b.latex !== "string" || b.latex.trim().length === 0) {
+        return { error: '"given" block needs a non-empty "latex" string.' };
+      }
+      return { block: { type: "given", latex: b.latex } };
+    }
+    case "formula": {
+      if (typeof b.latex !== "string" || b.latex.trim().length === 0) {
+        return { error: '"formula" block needs a non-empty "latex" string.' };
+      }
+      if (b.label !== undefined && !isLocalized(b.label)) {
+        return {
+          error: '"formula" block "label" must be a string or {"kz","ru"}.',
+        };
+      }
+      return {
+        block: {
+          type: "formula",
+          latex: b.latex,
+          label: b.label as Localized | undefined,
+        },
+      };
+    }
+    case "callout": {
+      if (!isLocalized(b.text)) {
+        return { error: '"callout" block needs a "text" string (or {"kz","ru"}).' };
+      }
+      if (b.title !== undefined && !isLocalized(b.title)) {
+        return {
+          error: '"callout" block "title" must be a string or {"kz","ru"}.',
+        };
+      }
+      return {
+        block: {
+          type: "callout",
+          text: b.text as Localized,
+          title: b.title as Localized | undefined,
+        },
+      };
+    }
+    default:
+      return {
+        error: `unknown block type "${String(b.type)}" — use p, given, find, formula, callout or answer.`,
+      };
+  }
 }
 
 // Validates raw JSON and returns a normalized pack, or a list of readable
@@ -570,6 +675,79 @@ export function validatePack(raw: unknown): {
       }
     }
 
+    if (q.solutionSteps !== undefined) {
+      if (!Array.isArray(q.solutionSteps) || q.solutionSteps.length === 0) {
+        errors.push(
+          `${label}: "solutionSteps" must be a non-empty list of steps.`,
+        );
+      } else if (q.solutionSteps.length > MAX_SOLUTION_STEPS) {
+        errors.push(`${label}: at most ${MAX_SOLUTION_STEPS} solution steps.`);
+      } else {
+        const steps: SolutionStep[] = [];
+        let stepsOk = true;
+        (q.solutionSteps as unknown[]).forEach((rawStep, si) => {
+          const sLabel = `${label}: solutionSteps[${si}]`;
+          if (
+            typeof rawStep !== "object" ||
+            rawStep === null ||
+            Array.isArray(rawStep)
+          ) {
+            errors.push(`${sLabel}: each step must be an object.`);
+            stepsOk = false;
+            return;
+          }
+          const s = rawStep as Record<string, unknown>;
+          if (!isLocalized(s.name)) {
+            errors.push(
+              `${sLabel}: missing "name" (a string or {"kz","ru"}) — e.g. "Берілгені", "Шешуі", "Жауабы".`,
+            );
+            stepsOk = false;
+            return;
+          }
+          if (!Array.isArray(s.blocks) || s.blocks.length === 0) {
+            errors.push(`${sLabel}: "blocks" must be a non-empty list.`);
+            stepsOk = false;
+            return;
+          }
+          if (s.blocks.length > MAX_STEP_BLOCKS) {
+            errors.push(`${sLabel}: at most ${MAX_STEP_BLOCKS} blocks per step.`);
+            stepsOk = false;
+            return;
+          }
+          const blocks: Block[] = [];
+          for (const rawBlock of s.blocks) {
+            const result = normalizeSolutionBlock(rawBlock);
+            if ("error" in result) {
+              errors.push(`${sLabel}: ${result.error}`);
+              stepsOk = false;
+              return;
+            }
+            blocks.push(result.block);
+          }
+          steps.push({ name: s.name as Localized, blocks });
+        });
+        // All-or-nothing: a half-valid worked solution on the board would be
+        // worse than the flat `solution` fallback, so any bad step drops the
+        // whole field (the errors above still fail the upload).
+        if (stepsOk) question.solutionSteps = steps;
+      }
+    }
+
+    if (q.timeSec !== undefined) {
+      if (
+        typeof q.timeSec !== "number" ||
+        !Number.isInteger(q.timeSec) ||
+        q.timeSec < MIN_TIME_SEC ||
+        q.timeSec > MAX_TIME_SEC
+      ) {
+        errors.push(
+          `${label}: "timeSec" must be a whole number of seconds from ${MIN_TIME_SEC} to ${MAX_TIME_SEC}.`,
+        );
+      } else {
+        question.timeSec = q.timeSec;
+      }
+    }
+
     if (q.tags !== undefined) {
       if (!Array.isArray(q.tags) || !q.tags.every((t) => typeof t === "string")) {
         errors.push(`${label}: "tags" must be a list of tag id strings.`);
@@ -604,6 +782,16 @@ export function validatePack(raw: unknown): {
     },
     errors: [],
   };
+}
+
+// Whether a question has anything to show in a race room's explain phase
+// (used by the console to decide if the Түсіндіру button renders).
+// Precedence at render time: solutionSteps → flat `solution`; neither → no
+// explain content. validatePack guarantees stored lists are non-empty, but we
+// re-check length so hand-built questions behave too.
+export function hasExplainContent(q: PackQuestion): boolean {
+  if (q.solutionSteps !== undefined && q.solutionSteps.length > 0) return true;
+  return q.solution !== undefined && q.solution.length > 0;
 }
 
 // ─── Answer checking (typed answers) ────────────────────────────────────────

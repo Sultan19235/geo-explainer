@@ -164,6 +164,36 @@ export const ENGINE_STRINGS = {
     c_results_saved: "Нәтижелер профиліңізге сақталды.",
     c_results_save_error: "Нәтижелерді сақтау сәтсіз болды.",
     c_results_retry: "Қайталау",
+    // race mode (Жарыс) — console setup
+    race_mode_self: "Өз қарқынымен",
+    race_mode_race: "Жарыс",
+    race_default_time: "Бір сұраққа уақыт",
+    race_auto: "Автоматты өту",
+    race_per_q_sec: "Уақыты (сек)",
+    race_graph_excluded: "График сұрақтары жарыс режиміне қосылмайды",
+    race_server_unsupported:
+      "Сервер жарыс режимін әлі қолдамайды. Бөлме ашылмады — кейінірек қайталап көріңіз.",
+    // race mode — student screens
+    race_waiting: "Сұрақты күтеміз...",
+    race_get_ready: "Дайындал!",
+    race_answered_wait: "Жауабың қабылданды — күте тұр",
+    race_time_up: "Уақыт бітті",
+    race_points: "Ұпай",
+    race_streak: "Қатарынан",
+    race_rank_line: "{n}-орын / {of}",
+    race_correct_answer: "Дұрыс жауап",
+    race_your_result: "Нәтижең",
+    race_pack_changed: "Тест жаңарды — қайта қосыл.",
+    // race mode — teacher board
+    race_first_question: "Бастау → 1-сұрақ",
+    race_reveal_now: "Жауаптарды ашу",
+    race_answered_count: "Жауап берді: {n}/{of}",
+    race_next: "Келесі",
+    race_explain: "Түсіндіру",
+    race_podium: "Марапаттау",
+    race_finish: "Аяқтау",
+    race_auto_badge: "Автоматты өту",
+    race_leaderboard: "Көшбасшылар",
   },
   ru: {
     // student — join
@@ -324,6 +354,36 @@ export const ENGINE_STRINGS = {
     c_results_saved: "Результаты сохранены в вашем профиле.",
     c_results_save_error: "Не удалось сохранить результаты.",
     c_results_retry: "Повторить",
+    // race mode (Соревнование) — console setup
+    race_mode_self: "В своём темпе",
+    race_mode_race: "Соревнование",
+    race_default_time: "Время на вопрос",
+    race_auto: "Автопереход",
+    race_per_q_sec: "Время (сек)",
+    race_graph_excluded: "Графические вопросы не участвуют в соревновании",
+    race_server_unsupported:
+      "Сервер пока не поддерживает режим соревнования. Комната не открыта — попробуйте позже.",
+    // race mode — student screens
+    race_waiting: "Ждём вопрос...",
+    race_get_ready: "Приготовься!",
+    race_answered_wait: "Ответ принят — подожди",
+    race_time_up: "Время вышло",
+    race_points: "Баллы",
+    race_streak: "Подряд",
+    race_rank_line: "{n}-е место из {of}",
+    race_correct_answer: "Правильный ответ",
+    race_your_result: "Твой результат",
+    race_pack_changed: "Тест обновился — подключись заново.",
+    // race mode — teacher board
+    race_first_question: "Начать → 1-й вопрос",
+    race_reveal_now: "Показать ответы",
+    race_answered_count: "Ответили: {n}/{of}",
+    race_next: "Дальше",
+    race_explain: "Разбор",
+    race_podium: "Награждение",
+    race_finish: "Завершить",
+    race_auto_badge: "Автопереход",
+    race_leaderboard: "Лидеры",
   },
 } as const;
 

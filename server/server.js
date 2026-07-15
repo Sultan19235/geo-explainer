@@ -1,5 +1,5 @@
 /**
- * MathSabaq Live Score Server — v7
+ * MathSabaq Live Score Server — v8
  * Hetzner Node.js backend — HTTP POST + SSE
  * No Socket.io. Pure HTTP. Sessions live in memory ONLY. This server never
  * writes results anywhere — since 2026-07-10 the teacher's CONSOLE saves the
@@ -17,6 +17,27 @@
  *   POST /leave     → student's pagehide beacon (text/plain) → connected:false
  *   GET  /live      → teacher SSE stream
  *   GET  /health    → sessions/students counts + enabled features
+ *   GET  /race/stream  → student SSE for race rooms (individualized events)
+ *   POST /race/answer  → student's answer to the open race question
+ *   POST /race/advance → teacher drives the race state machine (hostSecret)
+ *
+ * v8 over v7: race mode (Жарыс) — Kahoot-style lockstep rooms. Spec:
+ * docs/RACE_MODE_SPEC.md (normative for every message shape below).
+ * /session optionally accepts a sanitized `race` config (fixed mcq/input
+ * question list with per-question time limits and explain-phase solution
+ * content); when accepted the response carries `race:{qCount}` — the ack the
+ * console REQUIRES, so a v7 server silently ignoring the field can never
+ * produce a self-paced room behind a race board. The server then owns a
+ * per-room state machine (idle→question→reveal[→explain]→…→podium) driven by
+ * POST /race/advance, grades every answer AT ACCEPT time (speed points +
+ * streak bonus, §2.6 of the spec), and writes the graded results back into
+ * the regular student records (score/total/answers) so the v7 board, results
+ * screen and console autosave keep working untouched. In race rooms /submit
+ * consequently IGNORES client-sent score/total/answers (server-owned) while
+ * every presence semantic (heartbeat, away clock, kick, leave beacon, sweep)
+ * stays exactly v7. Self-paced rooms — any /session without a valid `race`
+ * config — behave byte-for-byte as v7. express.json's body limit grows to
+ * 1mb because race configs carry solution steps.
  *
  * v7 over v6: room-level student-aid switches. /session accepts a `features`
  * object ({figure, theory, hints, calculator} booleans — which aids the
@@ -67,6 +88,9 @@
  *   LIVE_RATE_LIMIT_PER_MIN  per-IP request ceiling per minute (default 2000;
  *                            0 disables). Generous for a NAT'd classroom.
  *   LIVE_MAX_SSE_PER_IP      max concurrent /live streams per IP (default 50).
+ *   LIVE_MAX_RACE_SSE_PER_IP max concurrent /race/stream connections per IP
+ *                            (default 200 — a school NAT legitimately holds
+ *                            several whole classes of phones at once).
  */
 
 const fs = require('fs');
@@ -90,7 +114,11 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
-app.use(express.json());
+// v8: race configs carry explain-phase solution content (lesson steps with
+// latex), which does not fit express.json's default 100kb ceiling. 1mb still
+// tightly bounds a hostile body — and the race sanitizer re-checks its own
+// 512KB cap on the config itself, so the extra headroom buys nothing to abuse.
+app.use(express.json({ limit: '1mb' }));
 
 const SESSION_DURATION = 45 * 60 * 1000; // 45 minutes in ms
 
@@ -136,8 +164,13 @@ app.use(
 // school NAT stays well under it while a single-host flood is still cut off.
 const RATE_LIMIT_PER_MIN = Number(process.env.LIVE_RATE_LIMIT_PER_MIN ?? 2000);
 const MAX_SSE_PER_IP = Number(process.env.LIVE_MAX_SSE_PER_IP ?? 50);
+// v8: /race/stream gets its OWN per-IP ceiling, far above the teacher-stream
+// one — every student phone in a race holds a stream open, and one school NAT
+// can front several classes simultaneously (spec §2.8).
+const MAX_RACE_SSE_PER_IP = Number(process.env.LIVE_MAX_RACE_SSE_PER_IP ?? 200);
 const rlHits = new Map(); // ip -> timestamps within the trailing minute
 const sseByIp = new Map(); // ip -> open /live connection count
+const raceSseByIp = new Map(); // ip -> open /race/stream connection count
 
 function clientIpOf(req) {
   const xff = req.headers['x-forwarded-for'];
@@ -197,6 +230,184 @@ function cleanFeatures(raw) {
   const out = {};
   for (const key of FEATURE_KEYS) out[key] = raw[key] !== false;
   return out;
+}
+
+// ─── Race mode (v8) — config sanitization ───────────────────────────────────
+// Spec: docs/RACE_MODE_SPEC.md §2.2. Shape problems follow the same
+// drop-don't-reject philosophy as `features` (malformed → field not stored →
+// plain self-paced room; the console detects the missing `race.qCount` ack
+// and fails loudly). Cap violations are DIFFERENT: they get explicit 400s
+// (race_too_large / race_invalid) because a teacher must never unknowingly
+// run a self-paced room while their console renders a race board.
+
+const RACE_GET_READY_MS = 3000; // 3s "get ready" countdown baked into openAt
+const RACE_ANSWER_GRACE_MS = 1500; // answers in flight at the buzzer still land
+const RACE_EARLY_CLOSE_MS = 700; // all-answered → reveal (absorbs stragglers)
+const RACE_AUTO_ADVANCE_MS = 8000; // auto mode: reveal → next question/podium
+
+const MAX_RACE_QUESTIONS = 200;
+const MAX_RACE_CONFIG_BYTES = 512 * 1024; // whole config, serialized
+const MAX_RACE_SOLUTION_STEPS = 12;
+const MAX_RACE_BLOCKS_PER_STEP = 30;
+const MAX_RACE_STRING = 2000; // any single string inside solution content
+const MAX_RACE_ACCEPT_ENTRIES = 20;
+const MAX_RACE_ACCEPT_LENGTH = 200;
+const MAX_RACE_OPTION_COUNT = 6;
+const MIN_RACE_TIME_SEC = 5;
+const MAX_RACE_TIME_SEC = 600;
+
+// Explain-phase solution content (lesson-format steps) is opaque to the
+// server — the phones and the board render it — so it is size-capped rather
+// than schema-validated: strings are truncated, containers are copied up to a
+// bounded depth/width, anything unserializable is dropped. The 512KB
+// whole-config ceiling below bounds the total regardless.
+const MAX_RACE_CONTENT_DEPTH = 8;
+const MAX_RACE_CONTENT_KEYS = 40;
+function clampRaceContent(value, depth = 0) {
+  if (typeof value === 'string') return value.slice(0, MAX_RACE_STRING);
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null) return value;
+  if (depth >= MAX_RACE_CONTENT_DEPTH) return undefined;
+  if (Array.isArray(value)) {
+    const out = [];
+    for (const item of value) {
+      const v = clampRaceContent(item, depth + 1);
+      if (v !== undefined) out.push(v);
+      if (out.length >= MAX_RACE_CONTENT_KEYS) break;
+    }
+    return out;
+  }
+  if (typeof value === 'object') {
+    const out = {};
+    let n = 0;
+    for (const [k, v] of Object.entries(value)) {
+      const c = clampRaceContent(v, depth + 1);
+      if (c !== undefined) out[String(k).slice(0, 64)] = c;
+      if (++n >= MAX_RACE_CONTENT_KEYS) break;
+    }
+    return out;
+  }
+  return undefined;
+}
+
+// One race question. Returns the sanitized question or null — an invalid
+// question is dropped (the console requires qCount to match what it sent, so
+// a drop still fails room creation loudly on the console side).
+function sanitizeRaceQuestion(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const id = typeof raw.id === 'string' ? raw.id : '';
+  // Same 64-char cap as /submit's answer keys on purpose — race question ids
+  // ARE the keys doReveal() writes into student.answers.
+  if (!id || id.length > MAX_ANSWER_KEY_LENGTH) return null;
+  if (raw.type !== 'mcq' && raw.type !== 'input') return null;
+  const t = Number(raw.timeSec);
+  const timeSec = Number.isFinite(t)
+    ? Math.min(MAX_RACE_TIME_SEC, Math.max(MIN_RACE_TIME_SEC, Math.round(t)))
+    : 30;
+  const q = { id, type: raw.type, timeSec };
+  if (raw.type === 'mcq') {
+    // `correct` is the CANONICAL option index (race forces canonical option
+    // order on phones so board distribution letters match); `optionCount`
+    // sizes the reveal distribution buckets.
+    const optionCount = Number(raw.optionCount);
+    const correct = Number(raw.correct);
+    if (!Number.isInteger(optionCount) || optionCount < 2 || optionCount > MAX_RACE_OPTION_COUNT) return null;
+    if (!Number.isInteger(correct) || correct < 0 || correct >= optionCount) return null;
+    q.optionCount = optionCount;
+    q.correct = correct;
+  } else {
+    // The console pre-merges the question's `answer` into `accept`, so this
+    // list is the complete grading key for the input question.
+    if (!Array.isArray(raw.accept)) return null;
+    const accept = raw.accept
+      .filter((a) => typeof a === 'string' && a.trim().length > 0 && a.length <= MAX_RACE_ACCEPT_LENGTH)
+      .slice(0, MAX_RACE_ACCEPT_ENTRIES);
+    if (accept.length === 0) return null;
+    q.accept = accept;
+  }
+  // Explain-phase content — all optional, broadcast ONLY at explain so a
+  // student sniffing the SSE stream during the question learns nothing.
+  if (Array.isArray(raw.solutionSteps) && raw.solutionSteps.length > 0) {
+    const steps = [];
+    for (const step of raw.solutionSteps.slice(0, MAX_RACE_SOLUTION_STEPS)) {
+      if (!step || typeof step !== 'object' || Array.isArray(step)) continue;
+      const blocks = Array.isArray(step.blocks)
+        ? step.blocks
+            .slice(0, MAX_RACE_BLOCKS_PER_STEP)
+            .map((b) => clampRaceContent(b))
+            .filter((b) => b !== undefined)
+        : [];
+      if (blocks.length === 0) continue;
+      steps.push({ name: clampRaceContent(step.name), blocks });
+    }
+    if (steps.length > 0) q.solutionSteps = steps;
+  }
+  if (Array.isArray(raw.solution) && raw.solution.length > 0) {
+    const flat = raw.solution
+      .slice(0, MAX_RACE_BLOCKS_PER_STEP)
+      .map((s) => clampRaceContent(s))
+      .filter((s) => s !== undefined);
+    if (flat.length > 0) q.solution = flat;
+  }
+  if (Array.isArray(raw.solutionGeogebra) && raw.solutionGeogebra.length > 0) {
+    const gg = raw.solutionGeogebra
+      .filter((s) => typeof s === 'string' && s.length > 0)
+      .slice(0, 60)
+      .map((s) => s.slice(0, MAX_RACE_STRING));
+    if (gg.length > 0) q.solutionGeogebra = gg;
+  }
+  return q;
+}
+
+// Returns {race} (sanitized config), {race:null} (absent/malformed → plain
+// self-paced room) or {error} (cap violation → 400, NOT silent downgrade).
+function sanitizeRaceConfig(raw) {
+  if (raw === undefined || raw === null) return { race: null };
+  if (typeof raw !== 'object' || Array.isArray(raw) || !Array.isArray(raw.questions)) {
+    return { race: null };
+  }
+  if (raw.questions.length > MAX_RACE_QUESTIONS) return { error: 'race_too_large' };
+  const questions = raw.questions.map(sanitizeRaceQuestion).filter(Boolean);
+  if (questions.length === 0) return { error: 'race_invalid' };
+  const race = { auto: raw.auto === true, questions };
+  if (JSON.stringify(race).length > MAX_RACE_CONFIG_BYTES) return { error: 'race_too_large' };
+  return { race };
+}
+
+// ─── Race mode (v8) — input-answer grading ──────────────────────────────────
+// PORT of normalizeAnswer / checkInputAnswer from src/lib/quiz/pack.ts
+// ("Answer checking (typed answers)" section). Race answers are graded HERE —
+// the phone only relays the raw string — so the two implementations MUST stay
+// textually in sync: if the rules change in pack.ts, mirror them here (and
+// vice versa). Rules: trim, lowercase, unicode minus → '-', comma → dot,
+// strip all whitespace; exact string match, else both-numeric compare with
+// 1e-9 tolerance.
+
+// "2,5" and "2.5" are the same number to a student; so are "x+1" and "x + 1".
+function normalizeAnswerServer(value) {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/−/g, '-') // unicode minus
+    .replace(/,/g, '.')
+    .replace(/\s+/g, '');
+}
+
+// `accept` is the sanitized question's complete grading key (answer already
+// merged in by the console — see sanitizeRaceQuestion).
+function checkInputAnswerServer(given, accept) {
+  const normalizedGiven = normalizeAnswerServer(given);
+  if (!normalizedGiven) return false;
+  for (const candidate of accept) {
+    const normalizedCandidate = normalizeAnswerServer(candidate);
+    if (!normalizedCandidate) continue;
+    if (normalizedGiven === normalizedCandidate) return true;
+    const a = Number(normalizedGiven);
+    const b = Number(normalizedCandidate);
+    if (Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 1e-9) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Client-reported numbers (score, counters) are trusted for display but not to
@@ -281,6 +492,525 @@ function broadcast(session, payload) {
   });
 }
 
+// ─── Race mode (v8) — state machine ─────────────────────────────────────────
+// Spec: docs/RACE_MODE_SPEC.md §2.3–§2.6. One lockstep state machine per race
+// room: idle → question → reveal [→ explain] → … → podium, driven by
+// POST /race/advance. All timers live on session.race and are cleared on
+// every transition, on /end, on the 45-min auto-end and on eviction — a stale
+// timer firing into a dead or moved-on room is the classic bug here.
+
+function newRaceState(config) {
+  return {
+    auto: config.auto,
+    questions: config.questions, // sanitized config; never mutated after create
+    phase: 'idle',               // 'idle'|'question'|'reveal'|'explain'|'podium'
+    qIndex: -1,                  // current question, -1 before the first open
+    openAt: null,                // epoch ms: answers accepted from here
+    deadline: null,              // epoch ms: phones display this as time-up
+    closeTimer: null,            // setTimeout handle → doReveal
+    autoTimer: null,             // setTimeout handle → auto next
+    answers: [],                 // per question: Map<studentId, {pick?, given?, at, ms, ok, base, bonus, points}>
+    totals: new Map(),           // studentId -> {name, points, correct, streak, timeMs, lastRank}
+    watchers: new Map(),         // studentId -> Set<res> (open /race/stream conns)
+    closedCount: 0,              // questions revealed so far → student.total
+    lastReveal: null,            // {qIndex, qId, correct, dist, board, answeredCount, activeCount}
+  };
+}
+
+function clearRaceTimers(race) {
+  if (!race) return;
+  if (race.closeTimer) { clearTimeout(race.closeTimer); race.closeTimer = null; }
+  if (race.autoTimer) { clearTimeout(race.autoTimer); race.autoTimer = null; }
+}
+
+function isKickedIn(session, studentId) {
+  return Boolean(session.kicked && session.kicked.has(String(studentId)));
+}
+
+// "Active" for race purposes = present on the board: joined, not kicked
+// (kicked records are deleted from the map) and not marked left.
+function raceActiveCount(session) {
+  let n = 0;
+  for (const s of session.students.values()) {
+    if (s.connected !== false) n++;
+  }
+  return n;
+}
+
+// Answers on the CURRENT question, excluding kicked students (their stored
+// answer stays in the map so a re-join can't double-answer, but it must not
+// inflate the teacher's "answered: 17/26" counter or the reveal dist).
+function raceAnsweredCount(session) {
+  const race = session.race;
+  const ansMap = race.qIndex >= 0 ? race.answers[race.qIndex] : null;
+  if (!ansMap) return 0;
+  let n = 0;
+  for (const sid of ansMap.keys()) {
+    if (!isKickedIn(session, sid)) n++;
+  }
+  return n;
+}
+
+function sendRaceEvent(session, studentId, payload) {
+  const set = session.race && session.race.watchers.get(studentId);
+  if (!set) return;
+  const msg = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const res of set) {
+    try { res.write(msg); } catch (_) {}
+  }
+}
+
+function broadcastRaceStudents(session, payload) {
+  const race = session.race;
+  if (!race) return;
+  const msg = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const set of race.watchers.values()) {
+    for (const res of set) {
+      try { res.write(msg); } catch (_) {}
+    }
+  }
+}
+
+// totals rows are created lazily (first answer, or seeded at reveal so
+// never-answering students still appear on the board with 0 points). `name`
+// is cached here so a student who leaves — or is later evicted from the
+// students map — keeps their name on the final board.
+function ensureRaceTotals(race, studentId, name) {
+  let t = race.totals.get(studentId);
+  if (!t) {
+    t = { name: name || 'Student', points: 0, correct: 0, streak: 0, timeMs: 0, lastRank: null };
+    race.totals.set(studentId, t);
+  } else if (name) {
+    t.name = name;
+  }
+  return t;
+}
+
+// Rank rule (spec): points desc, ties broken by EARLIER cumulative answer
+// time (`timeMs`: answered questions contribute their response time, missed
+// ones the full question time — so at equal points, not answering never
+// beats answering slowly). Kicked students are excluded entirely.
+function rankedRaceTotals(session) {
+  const race = session.race;
+  return Array.from(race.totals.entries())
+    .filter(([sid]) => !isKickedIn(session, sid))
+    .sort((a, b) => b[1].points - a[1].points || a[1].timeMs - b[1].timeMs);
+}
+
+function raceHasExplainContent(q) {
+  // Mirrors hasExplainContent() in src/lib/quiz/pack.ts: solutionSteps, else
+  // flat solution; a lone GeoGebra command list is not explainable content.
+  return Boolean(
+    (q.solutionSteps && q.solutionSteps.length) || (q.solution && q.solution.length),
+  );
+}
+
+// Open question `qIndex` (phase → 'question'). The 3s get-ready countdown is
+// BAKED INTO openAt: phones show 3‑2‑1 between event arrival and openAt, then
+// the answer window runs to `deadline`. The server keeps accepting for
+// RACE_ANSWER_GRACE_MS past the deadline so an answer already on the wire at
+// the buzzer isn't lost to network latency — phones display `deadline`.
+function openQuestion(session, qIndex) {
+  const race = session.race;
+  clearRaceTimers(race);
+  const q = race.questions[qIndex];
+  const now = Date.now();
+  race.phase = 'question';
+  race.qIndex = qIndex;
+  race.openAt = now + RACE_GET_READY_MS;
+  race.deadline = race.openAt + q.timeSec * 1000;
+  race.answers[qIndex] = new Map();
+  race.closeTimer = setTimeout(() => {
+    race.closeTimer = null;
+    doReveal(session);
+  }, race.deadline + RACE_ANSWER_GRACE_MS - now);
+
+  // remainingMs is the skew-free anchor: phones must never trust their own
+  // wall clock, only "this many ms left as of receipt" (SSE latency ≈ ms).
+  const base = {
+    qIndex,
+    qCount: race.questions.length,
+    qId: q.id,
+    openAt: race.openAt,
+    deadline: race.deadline,
+    remainingMs: Math.max(0, race.deadline - Date.now()),
+    timeSec: q.timeSec,
+  };
+  broadcastRaceStudents(session, { type: 'question', ...base });
+  broadcast(session, {
+    type: 'race',
+    phase: 'question',
+    ...base,
+    answeredCount: 0,
+    activeCount: raceActiveCount(session),
+  });
+}
+
+// The 8s auto-advance after a reveal. Only ever acts out of 'reveal' — the
+// teacher pressing «Түсіндіру» (explain) cancels it for that question, and a
+// manual advance clears it via the transition's clearRaceTimers.
+function armAutoTimer(session) {
+  const race = session.race;
+  if (race.autoTimer) clearTimeout(race.autoTimer);
+  race.autoTimer = setTimeout(() => {
+    race.autoTimer = null;
+    if (session.status !== 'active' || race.phase !== 'reveal') return;
+    if (race.qIndex + 1 < race.questions.length) openQuestion(session, race.qIndex + 1);
+    else goPodium(session);
+  }, RACE_AUTO_ADVANCE_MS);
+}
+
+// Close the current question and score it (phase → 'reveal'). IDEMPOTENT by
+// the phase guard — the deadline timer, the all-answered 700ms timer and a
+// teacher's early-reveal button can all race each other harmlessly.
+function doReveal(session) {
+  const race = session.race;
+  if (!race || race.phase !== 'question') return;
+  if (race.closeTimer) { clearTimeout(race.closeTimer); race.closeTimer = null; }
+  race.phase = 'reveal';
+
+  const qIndex = race.qIndex;
+  const q = race.questions[qIndex];
+  const ansMap = race.answers[qIndex] || new Map();
+  const fullMs = q.timeSec * 1000;
+  const answeredCount = raceAnsweredCount(session);
+  const activeCount = raceActiveCount(session);
+
+  // Seed totals for every currently-joined student so the board includes the
+  // ones who never answered anything (0 points beats being invisible).
+  for (const [sid, s] of session.students.entries()) {
+    ensureRaceTotals(race, String(sid), s.name);
+  }
+
+  // Settle scores. Speed points (`base`) were fixed at accept time (§2.6);
+  // only the history-dependent streak bonus is decided here. prevRank is
+  // captured BEFORE re-ranking so the board can show ▲/▼ movement.
+  const prevRanks = new Map();
+  for (const [sid, t] of race.totals.entries()) {
+    if (isKickedIn(session, sid)) continue;
+    prevRanks.set(sid, t.lastRank);
+    const rec = ansMap.get(sid);
+    if (rec && rec.ok) {
+      t.streak += 1;
+      rec.bonus = t.streak >= 2 ? 100 * Math.min(t.streak - 1, 5) : 0;
+      rec.points = rec.base + rec.bonus;
+      t.points += rec.points;
+      t.correct += 1;
+      t.timeMs += rec.ms;
+    } else {
+      t.streak = 0; // wrong OR missed resets the streak
+      if (rec) {
+        rec.bonus = 0;
+        rec.points = 0;
+        t.timeMs += rec.ms;
+      } else {
+        t.timeMs += fullMs; // missing beats nobody on the time tiebreak
+      }
+    }
+  }
+
+  const ranked = rankedRaceTotals(session);
+  ranked.forEach(([, t], i) => { t.lastRank = i + 1; });
+
+  // Write the graded outcome into the REGULAR student records so the v7
+  // board, results screen and console autosave keep working unchanged:
+  // score = correct count, total = questions closed so far, answers[qId] =
+  // 0|1. `finished` is NOT touched here — it stays a self-paced concept
+  // until the podium. updatedAt is left alone on purpose: it is the
+  // presence-sweep signal and a server-side write must not mask a dead page.
+  race.closedCount += 1;
+  for (const [sid, s] of session.students.entries()) {
+    const t = race.totals.get(String(sid));
+    if (!t) continue;
+    const rec = ansMap.get(String(sid));
+    s.score = t.correct;
+    s.total = race.closedCount;
+    s.answers = { ...(s.answers || {}), [q.id]: rec && rec.ok ? 1 : 0 };
+    broadcast(session, { type: 'update', studentId: sid, ...s });
+  }
+
+  // The correct answer only leaves the server NOW — never before reveal.
+  const correct = q.type === 'mcq' ? { pick: q.correct } : { answer: q.accept[0] };
+
+  // Distribution buckets (kicked students excluded — spec §2 rank/dist rule).
+  let dist;
+  if (q.type === 'mcq') {
+    dist = new Array(q.optionCount).fill(0);
+    for (const [sid, rec] of ansMap.entries()) {
+      if (isKickedIn(session, sid)) continue;
+      if (Number.isInteger(rec.pick) && rec.pick >= 0 && rec.pick < q.optionCount) {
+        dist[rec.pick] += 1;
+      }
+    }
+  } else {
+    let okCount = 0;
+    let wrongCount = 0;
+    for (const [sid, rec] of ansMap.entries()) {
+      if (isKickedIn(session, sid)) continue;
+      if (rec.ok) okCount += 1;
+      else wrongCount += 1;
+    }
+    dist = { ok: okCount, wrong: wrongCount, none: Math.max(0, activeCount - okCount - wrongCount) };
+  }
+
+  const board = ranked.map(([sid, t]) => {
+    const rec = ansMap.get(sid);
+    const s = session.students.get(sid);
+    return {
+      studentId: sid,
+      name: (s && s.name) || t.name,
+      points: t.points,
+      delta: rec ? rec.points : 0,
+      ok: Boolean(rec && rec.ok),
+      streak: t.streak,
+      rank: t.lastRank,
+      // First appearance on a board (first reveal of the race, or a student's
+      // first scored reveal after joining mid-race) has no previous rank —
+      // send the CURRENT rank so the console renders a neutral dot, never a
+      // fabricated ▲/▼ movement.
+      prevRank: prevRanks.get(sid) ?? t.lastRank,
+    };
+  });
+
+  // Kept around for late joiners' connect snapshots, the /live snapshot
+  // (mid-race console reload) and the podium's final board.
+  race.lastReveal = { qIndex, qId: q.id, correct, dist, board, answeredCount, activeCount };
+
+  broadcast(session, {
+    type: 'race',
+    phase: 'reveal',
+    qIndex,
+    qCount: race.questions.length,
+    qId: q.id,
+    correct,
+    dist,
+    board,
+    answeredCount,
+    activeCount,
+  });
+
+  // Individualized: each phone sees only ITS own result + the shared correct
+  // answer — a student's stream never carries classmates' scores.
+  for (const sid of race.watchers.keys()) {
+    const ev = buildStudentReveal(session, sid);
+    if (ev) sendRaceEvent(session, sid, ev);
+  }
+
+  if (race.auto) armAutoTimer(session);
+}
+
+// The per-student view of the last reveal — used both as the live 'reveal'
+// event and embedded in the connect 'state' snapshot for resyncing phones.
+function buildStudentReveal(session, studentId) {
+  const race = session.race;
+  const lr = race.lastReveal;
+  if (!lr) return null;
+  const ansMap = race.answers[lr.qIndex];
+  const rec = ansMap ? ansMap.get(studentId) : undefined;
+  const t = race.totals.get(studentId);
+  return {
+    type: 'reveal',
+    qIndex: lr.qIndex,
+    qCount: race.questions.length,
+    qId: lr.qId,
+    correct: lr.correct,
+    you: {
+      answered: Boolean(rec),
+      ok: Boolean(rec && rec.ok),
+      points: rec ? rec.base : 0, // speed points; streak bonus rides separately
+      bonus: rec ? rec.bonus || 0 : 0,
+      streak: t ? t.streak : 0,
+      totalPoints: t ? t.points : 0,
+      rank: t && t.lastRank != null ? t.lastRank : null,
+      of: lr.board.length,
+    },
+  };
+}
+
+// Explain payload: the stored solution content finally leaves the server.
+// Shared shape between the live 'explain' event and the connect snapshot.
+function buildExplainEvent(session) {
+  const race = session.race;
+  const q = race.questions[race.qIndex];
+  return {
+    type: 'explain',
+    qIndex: race.qIndex,
+    qCount: race.questions.length,
+    qId: q.id,
+    ...(q.solutionSteps ? { solutionSteps: q.solutionSteps } : {}),
+    ...(q.solution ? { solution: q.solution } : {}),
+    ...(q.solutionGeogebra ? { solutionGeogebra: q.solutionGeogebra } : {}),
+  };
+}
+
+function doExplain(session) {
+  const race = session.race;
+  race.phase = 'explain';
+  // Explain cancels auto-advance for THIS question: the teacher is talking,
+  // the room must not move on under them. (Re-armed at the next reveal.)
+  if (race.autoTimer) { clearTimeout(race.autoTimer); race.autoTimer = null; }
+  // The console renders solution content from its local pack — the teacher
+  // event only signals the transition; phones get the full payload.
+  broadcast(session, {
+    type: 'race',
+    phase: 'explain',
+    qIndex: race.qIndex,
+    qCount: race.questions.length,
+  });
+  broadcastRaceStudents(session, buildExplainEvent(session));
+}
+
+function buildStudentPodium(session, studentId) {
+  const race = session.race;
+  const board = race.lastReveal ? race.lastReveal.board : [];
+  const t = race.totals.get(studentId);
+  return {
+    type: 'podium',
+    qIndex: race.qIndex,
+    qCount: race.questions.length,
+    top: board.slice(0, 3).map((r) => ({ name: r.name, points: r.points })),
+    you: {
+      rank: t && t.lastRank != null ? t.lastRank : null,
+      of: board.length,
+      points: t ? t.points : 0,
+      correct: t ? t.correct : 0,
+    },
+  };
+}
+
+function goPodium(session) {
+  const race = session.race;
+  clearRaceTimers(race);
+  race.phase = 'podium';
+
+  // Mark everyone still present as finished so the console's autosave rows
+  // look complete (score/total were already server-written at each reveal).
+  // Left students keep finished=false — the same signal self-paced gives.
+  for (const [studentId, student] of session.students.entries()) {
+    if (student.connected === false || student.finished) continue;
+    student.finished = true;
+    broadcast(session, { type: 'update', studentId, ...student });
+  }
+
+  // Totals haven't moved since the last reveal, so its board IS the final
+  // standings (podium is only reachable from reveal/explain of the last q).
+  const board = race.lastReveal ? race.lastReveal.board : [];
+  broadcast(session, {
+    type: 'race',
+    phase: 'podium',
+    qIndex: race.qIndex,
+    qCount: race.questions.length,
+    board,
+  });
+  for (const sid of race.watchers.keys()) {
+    sendRaceEvent(session, sid, buildStudentPodium(session, sid));
+  }
+}
+
+// The individualized connect snapshot for /race/stream — also THE resync
+// shape: a phone that lost its stream (screen lock kills SSE) reopens and
+// this restores the exact phase, its own answered flag and running totals.
+function buildStudentState(session, studentId) {
+  const race = session.race;
+  const now = Date.now();
+  const state = {
+    type: 'state',
+    phase: race.phase,
+    qIndex: race.qIndex,
+    qCount: race.questions.length,
+  };
+  if (race.qIndex >= 0) {
+    const q = race.questions[race.qIndex];
+    const ansMap = race.answers[race.qIndex];
+    state.qId = q.id;
+    state.openAt = race.openAt;
+    state.deadline = race.deadline;
+    state.remainingMs = Math.max(0, (race.deadline || now) - now);
+    state.timeSec = q.timeSec;
+    state.answered = Boolean(ansMap && ansMap.has(studentId));
+  }
+  const t = race.totals.get(studentId);
+  state.you = {
+    points: t ? t.points : 0,
+    correct: t ? t.correct : 0,
+    streak: t ? t.streak : 0,
+    rank: t && t.lastRank != null ? t.lastRank : null,
+    of: race.lastReveal ? race.lastReveal.board.length : 0,
+  };
+  if (race.phase === 'reveal' || race.phase === 'explain' || race.phase === 'podium') {
+    const reveal = buildStudentReveal(session, studentId);
+    if (reveal) state.reveal = reveal;
+  }
+  if (race.phase === 'explain') state.explain = buildExplainEvent(session);
+  // Additive beyond the spec's state example: a phone connecting DURING the
+  // podium needs the top-3 too, not just its own `you` line.
+  if (race.phase === 'podium') state.podium = buildStudentPodium(session, studentId);
+  return state;
+}
+
+// §2.7 — the poll-level resync channel riding /status and /submit responses:
+// how a student page learns the room is a race before opening the stream, and
+// how it recovers after an SSE drop. `answered` only when a studentId is known.
+function raceSummary(session, studentId) {
+  const race = session.race;
+  const now = Date.now();
+  const out = {
+    phase: race.phase,
+    qIndex: race.qIndex,
+    qCount: race.questions.length,
+    auto: race.auto,
+  };
+  if (race.qIndex >= 0) {
+    const q = race.questions[race.qIndex];
+    out.qId = q.id;
+    out.openAt = race.openAt;
+    out.deadline = race.deadline;
+    out.remainingMs = Math.max(0, (race.deadline || now) - now);
+  }
+  if (studentId !== undefined && studentId !== null && studentId !== '') {
+    const ansMap = race.qIndex >= 0 ? race.answers[race.qIndex] : null;
+    out.answered = Boolean(ansMap && ansMap.has(String(studentId)));
+  }
+  return out;
+}
+
+// The teacher-side race view embedded in the /live connect snapshot — a
+// mid-race console reload restores the exact board (dist + standings) from it.
+function teacherRaceState(session) {
+  const race = session.race;
+  const now = Date.now();
+  const out = {
+    phase: race.phase,
+    qIndex: race.qIndex,
+    qCount: race.questions.length,
+    auto: race.auto,
+    answeredCount: raceAnsweredCount(session),
+    activeCount: raceActiveCount(session),
+  };
+  if (race.qIndex >= 0) {
+    const q = race.questions[race.qIndex];
+    out.qId = q.id;
+    out.openAt = race.openAt;
+    out.deadline = race.deadline;
+    out.remainingMs = Math.max(0, (race.deadline || now) - now);
+    out.timeSec = q.timeSec;
+  }
+  if (race.lastReveal) {
+    // The standings board rides EVERY snapshot (not just reveal/explain/
+    // podium): a console reloading mid-question re-stamps each card's race
+    // points from it, so an end-before-next-reveal (teacher End, 45-min
+    // clock) still autosaves the points earned so far. correct/dist stay
+    // gated to the post-close phases — they describe the CLOSED question and
+    // must not sit next to an open one.
+    out.board = race.lastReveal.board;
+    if (race.phase === 'reveal' || race.phase === 'explain' || race.phase === 'podium') {
+      out.correct = race.lastReveal.correct;
+      out.dist = race.lastReveal.dist;
+    }
+  }
+  return out;
+}
+
 // ─── Auth gate (PLAN.md "Gate 2") ──────────────────────────────────────────
 // Token format: base64url(JSON {uid, exp}) + '.' + base64url(HMAC-SHA256).
 // Issued by the website's /api/quiz-token for signed-in teachers; verified
@@ -327,6 +1057,8 @@ function checkAutoEnd(session) {
   if (session.status === 'active' && session.startedAt) {
     if (Date.now() - session.startedAt >= SESSION_DURATION) {
       session.status = 'ended';
+      // v8: a pending race timer must never reveal/advance into an ended room.
+      if (session.race) clearRaceTimers(session.race);
       broadcast(session, { type: 'ended', reason: 'timeout' });
     }
   }
@@ -350,6 +1082,17 @@ setInterval(() => {
   const cutoff = Date.now() - 4 * 60 * 60 * 1000;
   for (const [code, session] of sessions.entries()) {
     if (session.createdAt < cutoff && session.teachers.size === 0) {
+      // v8: kill race timers and close any student race streams still open —
+      // a lingering socket in `watchers` would pin the evicted session (and
+      // its per-IP SSE slot) in memory forever.
+      if (session.race) {
+        clearRaceTimers(session.race);
+        for (const set of session.race.watchers.values()) {
+          for (const res of set) {
+            try { res.end(); } catch (_) {}
+          }
+        }
+      }
       sessions.delete(code);
     }
   }
@@ -399,6 +1142,14 @@ app.post('/session', (req, res) => {
     return res.status(503).json({ error: 'Server full' });
   }
 
+  // v8: optional race config. Malformed SHAPE → not stored (self-paced room;
+  // the console detects the missing race ack below). Cap violations → loud
+  // 400s, never a silent downgrade (spec §2.2).
+  const raceResult = sanitizeRaceConfig(req.body.race);
+  if (raceResult.error) {
+    return res.status(400).json({ error: raceResult.error });
+  }
+
   const code = generateCode();
   if (!code) return res.status(503).json({ error: 'Server full' });
 
@@ -417,10 +1168,21 @@ app.post('/session', (req, res) => {
     startedAt: null,
     students: new Map(),
     kicked: new Set(),
-    teachers: new Set()
+    teachers: new Set(),
+    // v8: race rooms carry the whole lockstep state machine; absent for
+    // self-paced rooms so every existing code path sees the exact v7 shape.
+    ...(raceResult.race ? { race: newRaceState(raceResult.race) } : {})
   });
   // hostSecret goes ONLY to the creator here; students never receive it.
-  res.json({ code, hostSecret });
+  // The race ack is load-bearing: the console REQUIRES race.qCount to equal
+  // the question count it sent — a v7 server (which ignores the field) omits
+  // it and the console fails room creation loudly instead of opening a
+  // self-paced room behind a race board (spec §1).
+  res.json({
+    code,
+    hostSecret,
+    ...(raceResult.race ? { race: { qCount: raceResult.race.questions.length } } : {})
+  });
 });
 
 // Teacher starts the quiz (waiting → active)
@@ -436,6 +1198,9 @@ app.post('/start', (req, res) => {
 
   session.status = 'active';
   session.startedAt = Date.now();
+  // v8: a race room starts in the 'idle' race phase — the teacher opens the
+  // first question explicitly via POST /race/advance {action:'next'}.
+  if (session.race) session.race.phase = 'idle';
 
   // Broadcast to all teacher SSE streams
   broadcast(session, { type: 'started', startedAt: session.startedAt });
@@ -460,6 +1225,8 @@ app.post('/end', (req, res) => {
   }
 
   session.status = 'ended';
+  // v8: a pending race timer must never reveal/advance into an ended room.
+  if (session.race) clearRaceTimers(session.race);
 
   // Broadcast to all teacher SSE streams
   broadcast(session, { type: 'ended', reason: 'teacher' });
@@ -507,6 +1274,9 @@ app.get('/status', (req, res) => {
     status: session.status,
     timeLeft: getTimeLeft(session),
     ...(session.features ? { features: session.features } : {}),
+    // v8: the race summary is the poll-level resync channel (spec §2.7) —
+    // it's also how the student page learns the room is a race at all.
+    ...(session.race ? { race: raceSummary(session, studentId) } : {}),
     ...(kicked ? { kicked: true } : {})
   });
 });
@@ -529,7 +1299,9 @@ app.get('/resolve', (req, res) => {
     title: session.title,
     // null for rooms opened by pre-v5 consoles — the join page tells those
     // students to use the teacher's QR instead.
-    studentPath: session.studentPath || null
+    studentPath: session.studentPath || null,
+    // v8: lets the /join page show that this room is a race (no UI required).
+    ...(session.race ? { race: true } : {})
   });
 });
 
@@ -558,7 +1330,8 @@ app.post('/submit', (req, res) => {
         kicked: true,
         status: session.status,
         timeLeft: getTimeLeft(session),
-        ...(session.features ? { features: session.features } : {})
+        ...(session.features ? { features: session.features } : {}),
+        ...(session.race ? { race: raceSummary(session, studentId) } : {})
       });
     }
   }
@@ -568,10 +1341,16 @@ app.post('/submit', (req, res) => {
     return res.status(429).json({ error: 'Session full' });
   }
 
+  // v8: in race rooms score/total/answers are SERVER-owned — doReveal()
+  // writes the graded results into these fields, so client-sent values are
+  // ignored (a tampered phone can't inflate the board). Everything else —
+  // heartbeat, presence, away clock, focus, sticky finished, kick/re-join —
+  // behaves exactly as v7 in both modes.
+  const isRace = Boolean(session.race);
   const student = {
     name:        String(name || 'Student').slice(0, MAX_NAME_LENGTH),
-    score:       cleanNumber(score, MAX_SCORE_VALUE),
-    total:       cleanNumber(total, MAX_SCORE_VALUE),
+    score:       isRace ? (prev ? prev.score : 0) : cleanNumber(score, MAX_SCORE_VALUE),
+    total:       isRace ? (prev ? prev.total : 0) : cleanNumber(total, MAX_SCORE_VALUE),
     // Sticky: once a student reported finished, a later heartbeat (which
     // defaults the field to false) can't silently un-finish them.
     finished:    Boolean(finished) || Boolean(prev && !joining && prev.finished),
@@ -582,7 +1361,9 @@ app.post('/submit', (req, res) => {
     connected:   true,
     // Keep the last known map when a heartbeat omits/garbles the field, so a
     // brief bad submit can't wipe detail the console already relies on.
-    answers:     cleanAnswers(answers) || (prev ? prev.answers : undefined),
+    answers:     isRace
+      ? (prev ? prev.answers : undefined)
+      : cleanAnswers(answers) || (prev ? prev.answers : undefined),
     updatedAt:   Date.now()
   };
 
@@ -612,7 +1393,10 @@ app.post('/submit', (req, res) => {
     ok: true,
     status: session.status,
     timeLeft: getTimeLeft(session),
-    ...(session.features ? { features: session.features } : {})
+    ...(session.features ? { features: session.features } : {}),
+    // v8: heartbeat responses double as the race resync channel (spec §2.7) —
+    // screen lock kills the SSE stream, the next heartbeat re-anchors the UI.
+    ...(session.race ? { race: raceSummary(session, studentId) } : {})
   });
 });
 
@@ -694,7 +1478,12 @@ app.get('/live', (req, res) => {
     type: 'snapshot',
     students: snapshot,
     status: session.status,
-    timeLeft: getTimeLeft(session)
+    timeLeft: getTimeLeft(session),
+    // v8: mid-race console reload — the snapshot carries the full teacher
+    // race view (phase, timing, and the current dist+board when revealed) so
+    // the board is restored exactly. Absent for self-paced rooms; old
+    // consoles ignore unknown snapshot fields safely.
+    ...(session.race ? { race: teacherRaceState(session) } : {})
   })}\n\n`);
 
   // Keep-alive ping every 25 seconds
@@ -716,13 +1505,279 @@ app.get('/live', (req, res) => {
   });
 });
 
+// ─── Race mode (v8) — routes ────────────────────────────────────────────────
+// All three live under the single `/race` prefix ON PURPOSE: the prod nginx
+// allowlist needs exactly ONE new entry for the whole feature (spec §2.1).
+
+// Student race stream. Individualized SSE: the connect snapshot and every
+// reveal/podium event are computed PER student — a phone's stream never
+// carries classmates' picks or scores, only its own result + shared phase
+// timing. Public like /status (knowing the code + a studentId reveals no
+// more than the phone already shows its holder).
+app.get('/race/stream', (req, res) => {
+  const code = String(req.query.code || '');
+  const studentId = String(req.query.studentId || '');
+  if (!code || !studentId) return res.status(400).json({ error: 'Missing fields' });
+
+  const session = sessions.get(code);
+  if (!session) return res.status(404).json({ error: 'Session not found', status: 'not_found' });
+  if (!session.race) return res.status(400).json({ error: 'not_race' });
+
+  checkAutoEnd(session);
+  const race = session.race;
+
+  // Own per-IP counter, SEPARATE from /live's teacher cap: every student
+  // phone holds one of these, and one school NAT fronts several classes.
+  const ip = req.clientIp || clientIpOf(req);
+  const openForIp = raceSseByIp.get(ip) || 0;
+  if (openForIp >= MAX_RACE_SSE_PER_IP) {
+    return res.status(429).json({ error: 'Too many race streams' });
+  }
+  // Per-room cap mirrors the /submit roster cap: no more distinct streaming
+  // students than the room can hold students (reconnects of a known student
+  // are always allowed — that's the screen-lock recovery path).
+  if (!race.watchers.has(studentId) && race.watchers.size >= MAX_STUDENTS_PER_SESSION) {
+    return res.status(429).json({ error: 'Session full' });
+  }
+  raceSseByIp.set(ip, openForIp + 1);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  // Individualized connect snapshot — also THE resync path after a dropped
+  // stream: reopening restores the exact phase, own answered flag and totals.
+  res.write(`data: ${JSON.stringify(buildStudentState(session, studentId))}\n\n`);
+
+  // Keep-alive ping every 25 seconds (same cadence as /live)
+  const ping = setInterval(() => {
+    try {
+      res.write(`: ping\n\n`);
+    } catch (_) { clearInterval(ping); }
+  }, 25000);
+
+  let set = race.watchers.get(studentId);
+  if (!set) {
+    set = new Set();
+    race.watchers.set(studentId, set);
+  }
+  set.add(res);
+
+  req.on('close', () => {
+    set.delete(res);
+    if (set.size === 0) race.watchers.delete(studentId);
+    clearInterval(ping);
+    const n = (raceSseByIp.get(ip) || 1) - 1;
+    if (n <= 0) raceSseByIp.delete(ip);
+    else raceSseByIp.set(ip, n);
+  });
+});
+
+// Student answers the open race question. Graded AT ACCEPT (a replayed
+// request can't be re-scored against a different clock); the verdict stays
+// on the server until reveal — the response deliberately never echoes it.
+app.post('/race/answer', (req, res) => {
+  const { code } = req.body;
+  const studentId = req.body.studentId != null ? String(req.body.studentId) : '';
+  if (!code || !studentId) return res.status(400).json({ error: 'Missing fields' });
+
+  const session = sessions.get(code);
+  if (!session) return res.status(404).json({ error: 'Session not found', status: 'not_found' });
+  if (!session.race) return res.status(400).json({ error: 'not_race' });
+
+  checkAutoEnd(session);
+  const race = session.race;
+
+  // Kicked students can't score points passively — same rule as /submit
+  // heartbeats (an explicit re-join via /submit is their way back in).
+  if (session.kicked && session.kicked.has(studentId)) {
+    return res.json({ ok: false, kicked: true });
+  }
+
+  // Only students actually in the room may score. /submit (joining:true) is
+  // the front door and enforces MAX_STUDENTS_PER_SESSION — an id the roster
+  // has never seen must not mint totals rows or move the answered count
+  // (phantom students would also grow race memory without bound).
+  if (!session.students.has(studentId)) {
+    return res.status(404).json({ error: 'not_joined' });
+  }
+
+  // Accept window: right question, 'question' phase, openAt..deadline+grace.
+  // A stale answer (a page lagging one transition behind, or landing just
+  // after the reveal fired) gets a 409 that tells the phone where the room
+  // really is — harmless to retry-happy clients.
+  const qIndex = Number(req.body.qIndex);
+  const now = Date.now();
+  if (
+    session.status !== 'active' ||
+    race.phase !== 'question' ||
+    !Number.isInteger(qIndex) ||
+    qIndex !== race.qIndex ||
+    now < race.openAt ||
+    now > race.deadline + RACE_ANSWER_GRACE_MS
+  ) {
+    return res.status(409).json({ error: 'bad_phase', phase: race.phase, qIndex: race.qIndex });
+  }
+
+  const ansMap = race.answers[race.qIndex];
+  // One answer per student per question — the FIRST wins. A duplicate
+  // (double-tap, retry after a flaky response) is acknowledged, not re-graded.
+  if (ansMap.has(studentId)) return res.json({ ok: true, already: true });
+
+  const q = race.questions[race.qIndex];
+  const ms = Math.min(Math.max(now - race.openAt, 0), q.timeSec * 1000);
+  const rec = { at: now, ms, ok: false, base: 0, bonus: 0, points: 0 };
+  if (q.type === 'mcq') {
+    const pick = Number(req.body.pick);
+    if (!Number.isInteger(pick) || pick < 0 || pick >= q.optionCount) {
+      return res.status(400).json({ error: 'bad_answer' });
+    }
+    rec.pick = pick;
+    rec.ok = pick === q.correct;
+  } else {
+    const given = typeof req.body.given === 'string'
+      ? req.body.given.slice(0, MAX_RACE_ACCEPT_LENGTH)
+      : '';
+    rec.given = given;
+    rec.ok = checkInputAnswerServer(given, q.accept);
+  }
+  // Speed points are fixed now (§2.6: 500 base + up to 500 for speed); the
+  // history-dependent streak bonus is settled in doReveal().
+  if (rec.ok) {
+    rec.base = Math.round(500 + 500 * Math.max(0, 1 - ms / (q.timeSec * 1000)));
+  }
+  ansMap.set(studentId, rec);
+
+  const existing = session.students.get(studentId);
+  ensureRaceTotals(race, studentId, existing ? existing.name : undefined);
+  // An answer proves the page is open — refresh presence like a heartbeat
+  // would, so the 45s sweep can't mark an actively racing student "left".
+  if (existing) {
+    existing.updatedAt = now;
+    if (existing.connected === false) {
+      existing.connected = true;
+      broadcast(session, { type: 'update', studentId, ...existing });
+    }
+  }
+
+  const answeredCount = raceAnsweredCount(session);
+  const activeCount = raceActiveCount(session);
+  broadcast(session, { type: 'race_answer', qIndex: race.qIndex, answeredCount, activeCount });
+
+  // All-answered early close: don't make the class stare at a dead countdown.
+  // 700ms feels instant on the board but still absorbs a straggler answer
+  // already on the wire. Replaces the deadline timer — doReveal is idempotent
+  // anyway, so even a missed clear here couldn't double-reveal.
+  let allAnswered = activeCount > 0;
+  for (const [sid, s] of session.students.entries()) {
+    if (s.connected === false) continue;
+    if (!ansMap.has(String(sid))) {
+      allAnswered = false;
+      break;
+    }
+  }
+  if (allAnswered) {
+    if (race.closeTimer) clearTimeout(race.closeTimer);
+    race.closeTimer = setTimeout(() => {
+      race.closeTimer = null;
+      doReveal(session);
+    }, RACE_EARLY_CLOSE_MS);
+  }
+
+  // NEVER echo rec.ok — correctness stays secret until the reveal phase.
+  res.json({ ok: true });
+});
+
+// Teacher drives the race state machine. hostSecret-gated like /start; every
+// action is validated against the CURRENT phase and an illegal one gets a 409
+// so a double-clicked button (or an auto-timer racing a click) is harmless —
+// the console silently drops bad_phase responses (spec §2.4).
+app.post('/race/advance', (req, res) => {
+  const { code, action } = req.body;
+  if (!code || !action) return res.status(400).json({ error: 'Missing fields' });
+
+  const session = sessions.get(code);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!session.race) return res.status(400).json({ error: 'not_race' });
+  if (!verifyHostSecret(session, req.body.hostSecret)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  checkAutoEnd(session);
+  const race = session.race;
+  const badPhase = () =>
+    res.status(409).json({ error: 'bad_phase', phase: race.phase, qIndex: race.qIndex });
+
+  // `auto` is a toggle, not a transition — legal in ANY phase (including an
+  // ended room, where it's a no-op setting). Turning it on mid-reveal arms
+  // the timer as if the reveal had just happened; turning it off disarms.
+  if (action === 'auto') {
+    race.auto = Boolean(req.body.value);
+    if (race.auto && race.phase === 'reveal' && session.status === 'active') {
+      armAutoTimer(session);
+    }
+    if (!race.auto && race.autoTimer) {
+      clearTimeout(race.autoTimer);
+      race.autoTimer = null;
+    }
+    return res.json({ ok: true, auto: race.auto, phase: race.phase, qIndex: race.qIndex });
+  }
+
+  // Every real transition needs a live room — a waiting or ended room has no
+  // legal race moves, and 409 (not 403/404) keeps the console's handling
+  // uniform: drop and resync.
+  if (session.status !== 'active') return badPhase();
+
+  switch (action) {
+    case 'next':
+      if (race.phase !== 'idle' && race.phase !== 'reveal' && race.phase !== 'explain') {
+        return badPhase();
+      }
+      if (race.qIndex + 1 < race.questions.length) {
+        openQuestion(session, race.qIndex + 1);
+      } else if (race.phase === 'reveal' || race.phase === 'explain') {
+        goPodium(session); // past the last question, «Келесі» means podium
+      } else {
+        return badPhase(); // idle with nothing to open (can't happen: ≥1 q)
+      }
+      break;
+    case 'reveal':
+      if (race.phase !== 'question') return badPhase();
+      doReveal(session); // teacher's early-close button
+      break;
+    case 'explain': {
+      if (race.phase !== 'reveal') return badPhase();
+      // No solution content → no explain phase (console hides the button;
+      // this guard covers a stale console).
+      if (!raceHasExplainContent(race.questions[race.qIndex])) return badPhase();
+      doExplain(session);
+      break;
+    }
+    case 'podium':
+      if (
+        (race.phase !== 'reveal' && race.phase !== 'explain') ||
+        race.qIndex + 1 < race.questions.length
+      ) {
+        return badPhase(); // podium only after the LAST question's reveal
+      }
+      goPodium(session);
+      break;
+    default:
+      return res.status(400).json({ error: 'bad_action' });
+  }
+
+  res.json({ ok: true, phase: race.phase, qIndex: race.qIndex });
+});
+
 // Quick health check. Public response is liveness only — `version` is what the
 // deploy step verifies. The live counts and which security gates are on are a
 // reconnaissance aid (they tell an attacker exactly what's off), so they're
 // disclosed only to a request carrying the operator key. With LIVE_STATUS_KEY
 // unset the detail is unavailable to everyone, which is the safe default.
 app.get('/health', (req, res) => {
-  const body = { ok: true, version: 7 };
+  const body = { ok: true, version: 8 };
   const statusKey = process.env.LIVE_STATUS_KEY;
   if (statusKey && req.query.key === statusKey) {
     body.sessions = sessions.size;
@@ -736,8 +1791,9 @@ app.get('/health', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ MathSabaq server v7 running on port ${PORT}`);
+  console.log(`✅ MathSabaq server v8 running on port ${PORT}`);
   console.log(`   class history: not saved HERE — the teacher console saves to Supabase`);
+  console.log(`   race streams:       ${MAX_RACE_SSE_PER_IP}/IP (LIVE_MAX_RACE_SSE_PER_IP)`);
   console.log(`   /session auth gate: ${AUTH_ENFORCED ? 'ENFORCED' : 'OPEN — set QUIZ_TOKEN_SECRET to enforce'}`);
   console.log(`   host-secret gate:   ${HOST_SECRET_ENFORCED ? 'ENFORCED' : 'DORMANT — set LIVE_HOST_SECRET_ENFORCED to enforce'}`);
   console.log(`   CORS:               ${CORS_LOCKED ? `locked to ${ALLOWED_ORIGINS.join(', ')}` : 'OPEN — set LIVE_ALLOWED_ORIGINS to lock'}`);

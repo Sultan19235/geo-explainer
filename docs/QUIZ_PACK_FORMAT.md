@@ -111,6 +111,8 @@ Display math uses `$$…$$`. Remember to double backslashes in JSON:
     "tri = Polygon((0,0,0), (12,12,0), (12,12,14))",
     "SetColor(tri, \"#dc2626\")", "SetFilling(tri, 0.25)"
   ],
+  "solutionSteps": [ /* race explain phase, lesson-style steps — see below */ ],
+  "timeSec": 60,            // race mode: suggested time limit, whole seconds 5–600
   "tags": ["cube", "easy"]  // ids from tagGroups (see below)
 }
 ```
@@ -127,6 +129,73 @@ Display math uses `$$…$$`. Remember to double backslashes in JSON:
 - **`solutionGeogebra`** requires `geogebra` and runs once when the solution
   is revealed — highlight the triangle the solution uses, draw the height,
   mark the angle. The figure auto-opens at reveal when this field exists.
+
+### Race mode fields (`solutionSteps`, `timeSec`)
+
+Race rooms (Жарыс) run every phone on a shared timer and end each question
+with a teacher-triggered **explain phase** (Түсіндіру): a worked solution
+shown big on the class board (under the teacher pen) and on every student's
+phone. Two optional per-question fields feed it. Self-paced rooms ignore
+both, so adding them never changes how an existing quiz behaves.
+
+- **`timeSec`** — suggested time limit for this question in a race, a whole
+  number of seconds from **5 to 600**. The teacher console pre-fills the
+  per-question timer with it (the teacher can still change it per room).
+  Rule of thumb: ~20–30 s for a conceptual choice, 45–90 s for a computation.
+- **`solutionSteps`** — the worked solution in the lesson-player step format
+  (max **12 steps**, **30 blocks per step**). When present it is shown in the
+  explain phase instead of the flat `solution` list; when absent the flat
+  `solution` is shown; a question with neither has no explain button. The
+  flat `solution` keeps its normal self-paced role either way.
+
+Each step is `{"name": …, "blocks": […]}` — `name` is the step title
+(«Берілгені» / «Шешуі» / «Жауабы»). Block types: `p` (paragraph), `given`
+(a "дано" line in KaTeX), `find` (what must be found), `formula` (a display
+formula, optional `label`), `callout` (highlighted note, optional `title`),
+`answer` (the final boxed answer). `name`/`text`/`label`/`title` localize
+like every other text field; `given`/`formula` carry raw KaTeX in `latex`
+(math is language-neutral, so it is written once).
+
+```jsonc
+{
+  "text": { "kz": "Кубтың қыры $3$-ке тең. Кубтың көлемін табыңдар.",
+            "ru": "Ребро куба равно $3$. Найдите объём куба." },
+  "options": ["$27$", "$9$", "$18$", "$81$"],
+  "correct": 0,
+  "timeSec": 30,
+  "solutionSteps": [
+    {
+      "name": { "kz": "Берілгені", "ru": "Дано" },
+      "blocks": [
+        { "type": "given", "latex": "a = 3" },
+        { "type": "find", "text": { "kz": "кубтың көлемін ($V$).",
+                                     "ru": "объём куба ($V$)." } }
+      ]
+    },
+    {
+      "name": { "kz": "Шешуі", "ru": "Решение" },
+      "blocks": [
+        { "type": "p", "text": { "kz": "Кубтың көлемі қырының кубына тең:",
+                                  "ru": "Объём куба равен кубу его ребра:" } },
+        { "type": "formula", "latex": "V = a^3",
+          "label": { "kz": "Куб көлемі", "ru": "Объём куба" } },
+        { "type": "formula", "latex": "V = 3^3 = 27" }
+      ]
+    },
+    {
+      "name": { "kz": "Жауабы", "ru": "Ответ" },
+      "blocks": [ { "type": "answer", "text": "$V = 27$" } ]
+    }
+  ]
+}
+```
+
+> **Deploy order matters.** The validator strips unknown fields from every
+> pack it loads, so a site build that predates `solutionSteps` silently
+> deletes the field on download — the quiz works, but the explain phase shows
+> only the flat `solution` (or nothing). Upload packs that use
+> `solutionSteps`/`timeSec` **only after** the release documenting this
+> section is live in production.
 
 ### Figure style (colors that survive a phone screen)
 

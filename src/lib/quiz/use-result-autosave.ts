@@ -11,6 +11,13 @@ import { isRoomResultSaved, markRoomResultSaved } from "./result-claims";
 import type { ResultStudent } from "./quiz-result";
 import type { LiveStudent, TeacherPhase } from "./use-teacher-session";
 
+// Race rooms additionally freeze each student's speed-points total. Kept as a
+// local intersection (not on ResultStudent itself): the students column is
+// jsonb, so an extra optional key is invisible to every existing reader, and
+// quiz-result.ts stays the self-paced shape it documents. Mirrored by the
+// same intersection in quiz-result-actions.ts's cleanStudents — keep in sync.
+type ResultStudentRow = ResultStudent & { racePoints?: number };
+
 // off → this console can't save (signed-out / dev-preview); the results
 // screen falls back to the old "write it down" note.
 export type ResultSaveStatus = "idle" | "saving" | "saved" | "error" | "off";
@@ -78,7 +85,11 @@ export function useResultAutosave({
       return;
     }
     setStatus("saving");
-    const list: ResultStudent[] = Array.from(students.values())
+    // Race rooms: score/total stay correct/asked (the server writes them into
+    // the regular student records at every reveal — spec §2.4 step 3), so
+    // quiz_results and the admin analytics read identically for both modes;
+    // racePoints is the only race-shaped addition to a row.
+    const list: ResultStudentRow[] = Array.from(students.values())
       .sort((a, b) => {
         const pA = a.total > 0 ? a.score / a.total : 0;
         const pB = b.total > 0 ? b.score / b.total : 0;
@@ -92,6 +103,7 @@ export function useResultAutosave({
         tabSwitches: s.tabSwitches,
         awaySeconds: s.awaySeconds,
         answers: s.answers,
+        ...(s.racePoints !== undefined ? { racePoints: s.racePoints } : {}),
       }));
     try {
       const res = await saveQuizResultAction({

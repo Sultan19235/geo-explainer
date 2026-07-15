@@ -229,7 +229,9 @@ function SetupScreen({
   sections: Set<SectionId>;
   setSections: (s: Set<SectionId>) => void;
   creating: boolean;
-  createError: "unauthorized" | "network" | null;
+  // "race_unsupported" rides along from the shared hook's union but can never
+  // occur here — this console never sends a race config on create.
+  createError: "unauthorized" | "network" | "race_unsupported" | null;
   onCreate: () => void;
   resumable: ResumableRoom | null;
   onResume: () => void;
