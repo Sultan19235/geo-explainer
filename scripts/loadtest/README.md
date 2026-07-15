@@ -22,15 +22,14 @@ auto-ends anything left after 45 minutes anyway).
 ## One-time preparation
 
 1. **You need the quiz token secret** (the same `QUIZ_TOKEN_SECRET` the server
-   uses). On the Hetzner box:
+   uses). SSH into the box (`ssh root@89.167.9.192`) and run:
 
    ```
-   grep QUIZ_TOKEN_SECRET /root/mathsabaq-live/.env
+   grep QUIZ_TOKEN_SECRET /root/.env
    ```
 
-   (adjust the path if the server lives elsewhere — `pm2 describe
-   mathsabaq-live` shows it). Copy the value; you'll paste it into the Mac
-   commands below. **Never commit it anywhere.**
+   Copy the value after the `=`; you'll paste it into the Mac commands below.
+   **Never commit it anywhere.**
 
 2. **On your Mac**, open Terminal in this folder and raise the open-files
    limit (needed once per terminal window):
@@ -106,7 +105,7 @@ whole game and answer every question within seconds of each other.
    to your Mac (run this **on the Mac**):
 
    ```
-   scp root@<server-ip>:~/quiz-load-*.csv ~/Desktop/
+   scp root@89.167.9.192:~/quiz-load-*.csv ~/Desktop/
    ```
 
 2. On the Mac, each test also wrote a `loadtest-report-*.json` in this folder
