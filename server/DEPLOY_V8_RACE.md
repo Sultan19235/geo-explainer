@@ -44,71 +44,36 @@ Nothing prints — that's fine. This is your undo button for later.
 
 ---
 
-## Step 3 — Add the `/race` rule to nginx (one safe command)
+## Step 3 — Add the `/race` rule to nginx (two short commands)
 
-This finds the right file, adds the rule, and **checks itself**. If the rule
-is already there it does nothing. Paste this whole block as one piece
-(copy all of it, paste, Enter):
+Instead of typing anything tricky, you download a tiny ready-made helper and
+run it. It adds the `/race` rule, checks the config is valid, and turns it on
+— and if anything's off it undoes itself. It's safe to run more than once.
+
+**Command 1 of 2** — download the helper. Paste, Enter:
 
 ```
-FILE=$(grep -rl "127.0.0.1:3001" /etc/nginx/ | head -1); \
-cp "$FILE" "$FILE.bak"; \
-python3 - "$FILE" <<'PY'
-import sys, re
-f = sys.argv[1]; s = open(f).read()
-if re.search(r'location\s*=?\s*/race\b', s):
-    print("Already has /race — nothing to do."); sys.exit(0)
-block = """    location /race {
-        proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Connection '';
-        proxy_buffering off;
-        proxy_read_timeout 24h;
-    }
-"""
-lines = s.splitlines(keepends=True)
-start = next((i for i,l in enumerate(lines) if re.search(r'location\s*=?\s*/live\b', l)), None)
-if start is None:
-    print("ERROR: could not find the /live rule to add next to. Stop and ask."); sys.exit(2)
-depth = lines[start].count('{') - lines[start].count('}'); end = start
-while depth > 0 and end+1 < len(lines):
-    end += 1; depth += lines[end].count('{') - lines[end].count('}')
-open(f,'w').write("".join(lines[:end+1] + [block] + lines[end+1:]))
-print("Added /race to", f)
-PY
+curl -o /root/add-race-to-nginx.sh https://raw.githubusercontent.com/Sultan19235/geo-explainer/main/server/add-race-to-nginx.sh
 ```
 
-You should see either **"Added /race to ..."** or **"Already has /race..."**.
-Either one is good. If you see **ERROR** in that output, stop and send it to me.
+**Command 2 of 2** — run it. Paste, Enter:
+
+```
+bash /root/add-race-to-nginx.sh
+```
+
+Watch the last line it prints:
+
+- ✅ **"SUCCESS: /race is added and nginx reloaded."** → done, go to Step 4.
+- ❌ Any line starting with **ERROR** → it already put things back the way they
+  were (nothing broken). Copy everything it printed and send it to me.
+
+That's the whole nginx part — the helper already did the "check and apply"
+that used to be a separate step.
 
 ---
 
-## Step 4 — Check the nginx change is valid, then apply it
-
-Paste, Enter:
-
-```
-nginx -t
-```
-
-You want to see **"syntax is ok"** and **"test is successful"**.
-
-- ✅ If you see those two lines, apply it — paste, Enter:
-
-  ```
-  systemctl reload nginx
-  ```
-
-- ❌ If it shows an error instead, your config wasn't changed in a working way.
-  Undo it with this (paste, Enter) and send me the error:
-
-  ```
-  FILE=$(grep -rl "127.0.0.1:3001" /etc/nginx/ | head -1); cp "$FILE.bak" "$FILE"
-  ```
-
----
-
-## Step 5 — Get the new server file (pulled from GitHub)
+## Step 4 — Get the new server file (pulled from GitHub)
 
 Paste, Enter:
 
@@ -121,7 +86,7 @@ returned to the prompt, it worked.
 
 ---
 
-## Step 6 — Restart the app
+## Step 5 — Restart the app
 
 ⚠️ This clears any quiz room that's live right now. Do it when no class is
 running. Paste, Enter:
@@ -134,7 +99,7 @@ You'll see a small table from pm2. That's normal.
 
 ---
 
-## Step 7 — Confirm it worked
+## Step 6 — Confirm it worked
 
 Paste, Enter:
 
@@ -145,8 +110,8 @@ curl -s https://mathsabaq.online/health
 You want to see **`"version":8`** in the output. 🎉 If you see that, race mode
 is ON.
 
-- If it still says `"version":7`, the file didn't update — redo Step 5, then
-  Step 6, then this check.
+- If it still says `"version":7`, the file didn't update — redo Step 4, then
+  Step 5, then this check.
 
 One more check that nginx is letting `/race` through. Paste, Enter:
 
@@ -155,12 +120,12 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST https://mathsabaq.online/race/a
 ```
 
 - Seeing **400** or **404** = ✅ good (the server answered).
-- Seeing **502** = nginx didn't pick up the change. Re-run Step 4
-  (`systemctl reload nginx`) and try again.
+- Seeing **502** = nginx didn't pick up the change. Re-run Step 3 (download and
+  run the helper again) and try this check again.
 
 ---
 
-## Step 8 — Leave the server
+## Step 7 — Leave the server
 
 Paste, Enter:
 
@@ -172,12 +137,12 @@ You're back on your Mac. **The server part is done.**
 
 ---
 
-## Step 9 — Re-upload your quiz packs (on the website, not the server)
+## Step 8 — Re-upload your quiz packs (on the website, not the server)
 
 This is the last thing, and it's only so the worked-solution explanations
 show up. In your website admin, go to **/admin/quizzes** and re-upload the
 packs you want explanations for — start with the cylinder pack (it already has
-solutions for all 40 questions built in). Do this **only after** Step 7 showed
+solutions for all 40 questions built in). Do this **only after** Step 6 showed
 `"version":8`.
 
 ---
@@ -199,10 +164,10 @@ working, and you lose nothing. You can try the steps again later.
 
 1. `ssh root@89.167.9.192`
 2. `cp /root/server.js /root/server.js.bak`
-3. Paste the big `/race` command block (Step 3)
-4. `nginx -t` → if ok → `systemctl reload nginx`
-5. `curl -o /root/server.js https://raw.githubusercontent.com/Sultan19235/geo-explainer/main/server/server.js`
-6. `pm2 restart mathsabaq-live && pm2 save`
-7. `curl -s https://mathsabaq.online/health` → want `"version":8`
-8. `exit`
-9. Re-upload packs at /admin/quizzes
+3. `curl -o /root/add-race-to-nginx.sh https://raw.githubusercontent.com/Sultan19235/geo-explainer/main/server/add-race-to-nginx.sh`
+   then `bash /root/add-race-to-nginx.sh` → want **SUCCESS**
+4. `curl -o /root/server.js https://raw.githubusercontent.com/Sultan19235/geo-explainer/main/server/server.js`
+5. `pm2 restart mathsabaq-live && pm2 save`
+6. `curl -s https://mathsabaq.online/health` → want `"version":8`
+7. `exit`
+8. Re-upload packs at /admin/quizzes
