@@ -109,14 +109,20 @@ export async function fetchStatus(
 }
 
 // Registers presence and reports the score; the response doubles as a status
-// check so an ended session is noticed on the next heartbeat.
+// check so an ended session is noticed on the next heartbeat. keepalive lets
+// a report outlive the page: a phone backgrounded via the back button (QR
+// students have no in-app history, so back leaves the browser) freezes the
+// page right after visibilitychange and a plain fetch dies mid-flight — the
+// teacher's board then never learns the student went off-screen.
 export async function submitScore(
   payload: SubmitPayload,
+  opts?: { keepalive?: boolean },
 ): Promise<StatusResponse> {
   const res = await fetch(`${BACKEND}/submit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    keepalive: opts?.keepalive === true,
   });
   const data = (await res.json()) as Partial<StatusResponse & { ok: boolean }>;
   return parseStatus(data, res.status);

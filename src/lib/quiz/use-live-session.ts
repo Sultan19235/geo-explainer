@@ -117,6 +117,11 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     tabSwitches: 0,
     awaySeconds: 0,
     awayStart: null as number | null,
+    // The parting /leave beacon went out (pagehide or unmount). markAway must
+    // dispatch nothing after that: its keepalive report would outlive the
+    // page, land AFTER the beacon, and resurrect the student to "off-screen"
+    // on the teacher's board. Cleared when the page proves alive again.
+    leaving: false,
     phase: "join" as QuizPhase,
   });
 
@@ -186,25 +191,28 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
   }, [clearSaved]);
 
   const sendScore = useCallback(
-    async (opts?: { joining?: boolean }) => {
+    async (opts?: { joining?: boolean; keepalive?: boolean }) => {
       const s = session.current;
       if (!s.code || !s.name) return;
       let away = s.awaySeconds;
       if (s.awayStart) away += Math.round((Date.now() - s.awayStart) / 1000);
       try {
-        const res = await submitScore({
-          code: s.code,
-          studentId: s.studentId,
-          name: s.name,
-          score: s.stats.correct,
-          total: s.stats.correct + s.stats.wrong,
-          finished: s.finished,
-          focused: s.focused,
-          tabSwitches: s.tabSwitches,
-          awaySeconds: away,
-          answers: Object.keys(s.answers).length > 0 ? s.answers : undefined,
-          joining: opts?.joining || undefined,
-        });
+        const res = await submitScore(
+          {
+            code: s.code,
+            studentId: s.studentId,
+            name: s.name,
+            score: s.stats.correct,
+            total: s.stats.correct + s.stats.wrong,
+            finished: s.finished,
+            focused: s.focused,
+            tabSwitches: s.tabSwitches,
+            awaySeconds: away,
+            answers: Object.keys(s.answers).length > 0 ? s.answers : undefined,
+            joining: opts?.joining || undefined,
+          },
+          { keepalive: opts?.keepalive },
+        );
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
         if (res.features) setFeatures(res.features);
         if (res.kicked) kickedOut();
@@ -325,6 +333,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
       s.stats = { correct: 0, wrong: 0, streak: 0 };
       s.answers = {};
       s.finished = false;
+      s.leaving = false;
       setStats(s.stats);
       setStudentName(trimmed);
 
@@ -362,15 +371,19 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
   useEffect(() => {
     const markAway = () => {
       const s = session.current;
-      if (!s.focused || s.phase === "ended") return;
+      if (!s.focused || s.phase === "ended" || s.leaving) return;
       s.focused = false;
       s.tabSwitches++;
       s.awayStart = Date.now();
       saveState(); // persist before a possible tab close
-      void sendScore();
+      // keepalive: backgrounding (phone back button out of a QR-opened tab)
+      // freezes the page right after this handler — a plain fetch would die
+      // mid-flight and the teacher's board would keep showing "on screen".
+      void sendScore({ keepalive: true });
     };
     const markBack = () => {
       const s = session.current;
+      s.leaving = false; // page proved alive (bfcache return)
       if (s.focused) return;
       s.focused = true;
       if (s.awayStart) {
@@ -481,47 +494,55 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
   }, []);
 
   // ── Leaving: tell the teacher's board instead of silently freezing ───────
+  // One parting shot for every way the page can go away. Sets `leaving` FIRST
+  // so markAway (visibilitychange fires after pagehide during an unload)
+  // dispatches nothing more — its keepalive report would land after this
+  // beacon and resurrect the student. The away-accounting normally done by
+  // markAway happens here instead, so a bfcache return (markBack) and the
+  // saved wasAway flag still add up to exactly one counted exit.
+  const performLeave = useCallback(() => {
+    const s = session.current;
+    if (!s.code || !s.studentId || s.leaving) return;
+    if (s.phase !== "active" && s.phase !== "waiting") return;
+    s.leaving = true;
+    if (s.focused) {
+      s.focused = false;
+      s.tabSwitches++;
+      s.awayStart = Date.now();
+    }
+    saveState(); // a reload/return resumes exactly here
+    sendLeaveBeacon(s.code, s.studentId);
+  }, [saveState]);
+
   // pagehide covers browser-back, tab close and reloads; the beacon flips the
   // card to "left" instantly (the server's 45s sweep is the fallback). On a
   // bfcache restore (back INTO the page) one heartbeat flips it back.
   useEffect(() => {
-    const onHide = () => {
-      const s = session.current;
-      if (!s.code || !s.studentId) return;
-      if (s.phase !== "active" && s.phase !== "waiting") return;
-      saveState(); // a reload/return resumes exactly here
-      sendLeaveBeacon(s.code, s.studentId);
-    };
     const onShow = (e: PageTransitionEvent) => {
       const s = session.current;
       if (!e.persisted || !s.code) return;
       if (s.phase !== "active" && s.phase !== "waiting") return;
+      s.leaving = false; // page proved alive again
       void sendScore();
     };
-    window.addEventListener("pagehide", onHide);
+    window.addEventListener("pagehide", performLeave);
     window.addEventListener("pageshow", onShow);
     return () => {
-      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("pagehide", performLeave);
       window.removeEventListener("pageshow", onShow);
     };
-  }, [saveState, sendScore]);
+  }, [performLeave, sendScore]);
 
-  // Browser-back on the phone is a soft Next.js route change — the document
-  // never unloads, pagehide never fires, and the quiz page just unmounts. Send
-  // the same parting shot from the unmount cleanup so the teacher's board
-  // flips to "left" instantly on that path too. Refs keep this effect
-  // mount-once (no re-runs re-arming the cleanup), and the phase guard makes
-  // the StrictMode dev double-mount a no-op (code is still empty then).
-  const saveStateRef = useRef(saveState);
-  saveStateRef.current = saveState;
+  // Browser-back on the phone can be a soft Next.js route change — the
+  // document never unloads, pagehide never fires, and the quiz page just
+  // unmounts. Send the same parting shot from the unmount cleanup so the
+  // teacher's board flips to "left" instantly on that path too. The ref keeps
+  // this effect mount-once (no re-runs re-arming the cleanup), and the phase
+  // guard makes the StrictMode dev double-mount a no-op (code is empty then).
+  const performLeaveRef = useRef(performLeave);
+  performLeaveRef.current = performLeave;
   useEffect(() => {
-    return () => {
-      const s = session.current;
-      if (!s.code || !s.studentId) return;
-      if (s.phase !== "active" && s.phase !== "waiting") return;
-      saveStateRef.current(); // a return through /join resumes exactly here
-      sendLeaveBeacon(s.code, s.studentId);
-    };
+    return () => performLeaveRef.current();
   }, []);
 
   return {
