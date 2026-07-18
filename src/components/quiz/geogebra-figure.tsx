@@ -2,7 +2,7 @@
 
 // GeoGebra applet for pack questions: loads deployggb.js once, injects an
 // applet and replays the pack's command list. Same parameters as the legacy
-// uploaded quizzes (toolbars off, zoom on).
+// uploaded quizzes (toolbars off, zoom on), plus draggable labels.
 
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
@@ -86,7 +86,9 @@ export function GeoGebraFigure({
               showResetIcon: false,
               enableShiftDragZoom: true,
               enableRightClick: false,
-              enableLabelDrags: false,
+              // Labels often overlap edges on a phone screen — let students
+              // drag them aside (view rotate/pan still works elsewhere).
+              enableLabelDrags: true,
               showZoomButtons: true,
               capturingThreshold: null,
               language: "en",

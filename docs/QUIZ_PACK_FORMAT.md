@@ -197,6 +197,123 @@ like every other text field; `given`/`formula` carry raw KaTeX in `latex`
 > `solutionSteps`/`timeSec` **only after** the release documenting this
 > section is live in production.
 
+### Drawing figures with GeoGebra commands
+
+The `geogebra.commands` list is replayed one-by-one into a live GeoGebra
+applet (`view: "3d"` → the 3D app, otherwise the classic 2D app). **An invalid
+command makes GeoGebra show an error popup on the student's screen** — the
+engine cannot suppress it — so every command must be real GeoGebra syntax.
+AI assistants routinely invent commands that look right but don't exist;
+follow this recipe instead of improvising.
+
+**1. Start every 3D figure with the camera boilerplate:**
+
+```json
+"commands": [
+  "SetPerspective(\"T\")",
+  "SetViewDirection((1.2, -1.5, 0.8))",
+  "ShowAxes(false)",
+  "ShowGrid(false)",
+  "ZoomIn(-2, -2, -2, 14, 14, 16)"
+]
+```
+
+`ZoomIn(xmin, ymin, zmin, xmax, ymax, zmax)` is the bounding box of your
+figure plus ~2 units of margin on every side — get this wrong and the solid
+is cropped or tiny. For 2D figures use `ZoomIn(xmin, ymin, xmax, ymax)` and
+keep axes/grid only if the question needs them.
+
+**2. One command per array element.** Never join commands with semicolons or
+newlines inside one string.
+
+**3. Name everything, then style it.** Styling commands only work on objects
+that already have a name:
+
+```json
+"prism = Prism((0,0,0), (12,0,0), (12,12,0), (0,12,0), (0,0,14))",
+"SetColor(prism, \"#3b82f6\")",
+"SetFilling(prism, 0.12)"
+```
+
+**4. Use only the verified vocabulary.** These are proven to work in the
+engine — anything outside this list must be tested in preview first:
+
+- *Solids & shapes:* `Prism(pt, pt, …, apexOrTopPt)`, `Pyramid(…)`,
+  `Cylinder((0,0,0), (0,0,8), 3)`, `Cone((0,0,0), (0,0,6), 4)`,
+  `Sphere((0,0,0), 5)`, `Cube`, `Polygon(pt, pt, …)`, `Segment(pt, pt)`,
+  `Angle(pt, vertexPt, pt)`, `Circle`, `Text("…", pt)`
+- *Styling:* `SetColor`, `SetFilling`, `SetLineThickness`, `SetLineStyle`,
+  `SetCaption`, `SetLabelMode`, `ShowLabel`, `SetPointSize`
+- *View:* `SetPerspective("T")`, `SetViewDirection`, `ShowAxes`, `ShowGrid`,
+  `ZoomIn`
+
+**5. Write literal coordinates.** Compute every vertex yourself and write
+numbers like `(12,0,14)` — never ask GeoGebra to intersect, reflect or
+otherwise derive points. Don't mix 2D points into a 3D view or vice versa.
+
+**6. Label measurements the standard way.** A length on a segment:
+
+```json
+"hSeg = Segment((12,0,0), (12,0,14))",
+"SetCaption(hSeg, \"14\")",
+"SetLabelMode(hSeg, 3)",
+"ShowLabel(hSeg, true)"
+```
+
+A free-floating value: `"lbl = Text(\"S = 144\", (6, 6, 0.4))"` plus
+`SetColor(lbl, "#111827")`. `Text` takes **plain Unicode** (`"8√2"`, `"60°"`),
+not LaTeX. Mark a right angle with `Angle(A, B, C)` and `ShowLabel(ang, false)`.
+
+**7. Mind the JSON escaping.** Color values and captions are quoted *inside*
+a JSON string: `"SetColor(prism, \"#2563eb\")"`. Unescaped inner quotes are
+the most common way a generated pack breaks.
+
+**8. Proof every figure before upload.** Save the pack as
+`packs/dev-preview.json` and open `/play/dev-preview?preview=1` — click
+through every question. A figure must render **with zero popups**; any popup
+means one of the commands is invalid.
+
+A complete verified figure (working example from the production prism pack —
+give it to your AI assistant as the pattern to copy):
+
+```json
+"geogebra": {
+  "view": "3d",
+  "height": 360,
+  "commands": [
+    "SetPerspective(\"T\")",
+    "SetViewDirection((1.2, -1.5, 0.8))",
+    "ShowAxes(false)",
+    "ShowGrid(false)",
+    "ZoomIn(-2, -2, -2, 10, 10, 8)",
+    "prism = Prism((0,0,0), (8,0,0), (0,8,0), (0,0,6))",
+    "SetColor(prism, \"#2563eb\")",
+    "SetFilling(prism, 0.12)",
+    "SetLineThickness(prism, 1)",
+    "hypSeg = Segment((8,0,0), (0,8,0))",
+    "SetColor(hypSeg, \"#1e293b\")",
+    "SetLineThickness(hypSeg, 2)",
+    "SetCaption(hypSeg, \"8√2\")",
+    "SetLabelMode(hypSeg, 3)",
+    "ShowLabel(hypSeg, true)",
+    "faceDiag = Segment((0,0,0), (8,0,6))",
+    "SetColor(faceDiag, \"#dc2626\")",
+    "SetLineThickness(faceDiag, 4)",
+    "SetCaption(faceDiag, \"10\")",
+    "SetLabelMode(faceDiag, 3)",
+    "ShowLabel(faceDiag, true)",
+    "rightAng = Angle((8,0,0), (0,0,0), (0,8,0))",
+    "SetLineThickness(rightAng, 1)",
+    "ShowLabel(rightAng, false)"
+  ]
+},
+"solutionGeogebra": [
+  "triSol = Polygon((0,0,0), (8,0,0), (8,0,6))",
+  "SetColor(triSol, \"#7c3aed\")",
+  "SetFilling(triSol, 0.2)"
+]
+```
+
 ### Figure style (colors that survive a phone screen)
 
 The figure is redrawn from your commands, so readability is an authoring
@@ -207,7 +324,7 @@ convention. Every pack must follow this palette:
 | Solid bodies / fills | `SetColor(obj, "#3b82f6")` + `SetFilling(obj, 0.12)` | light blue, nearly transparent |
 | Secondary edges, dashed helpers | `SetColor(obj, "#2563eb")` + `SetLineThickness(obj, 3)` | medium blue, thin |
 | THE key element (the segment/angle being asked about) | `SetColor(obj, "#dc2626")` + `SetLineThickness(obj, 6)` | red, thick — **only one red thing per figure** |
-| Labels & measurements (`S = 144`, `14`, angles) | `SetColor(txt, "#111827")` + `Text(...)` with `SetTextSize`/large font | near-black, bold, never yellow/pastel |
+| Labels & measurements (`S = 144`, `14`, angles) | `Text(...)` + `SetColor(txt, "#111827")`, or segment `SetCaption` | near-black, never yellow/pastel |
 
 Rules of thumb: fills must never hide what is behind them (≤ 0.15 filling);
 every number a student needs must be a dark text object big enough to read on
