@@ -21,12 +21,34 @@ export function canAppend(value: string, glyph: string): boolean {
   if (value.length >= MAX_LENGTH) return false;
   switch (glyph) {
     case ",":
-      return /\d$/.test(value) && !value.includes(",") && !value.includes("/");
+      return (
+        /\d$/.test(value) &&
+        !value.includes(",") &&
+        !value.includes("/") &&
+        !value.includes("√")
+      );
     case "−":
       return value === "";
     case "π":
-      return !value.includes("π") && !value.includes(",") && !value.includes("/");
+      return (
+        !value.includes("π") &&
+        !value.includes("√") &&
+        !value.includes(",") &&
+        !value.includes("/")
+      );
+    case "√":
+      // √ starts a radical: at the start, after the sign, or after a whole
+      // coefficient (2√3) — never in a denominator, never with a comma.
+      return (
+        !value.includes("√") &&
+        !value.includes("π") &&
+        !value.includes(",") &&
+        !value.includes("/") &&
+        (value === "" || /[−\d]$/.test(value))
+      );
     case "/":
+      // Needs a digit or π before it — "√3/…" ends with a digit, a bare "√"
+      // doesn't, so radicals are complete before the bar.
       return /[\dπ]$/.test(value) && !value.includes("/") && !value.includes(",");
     default: // digit
       return !value.endsWith("π");
@@ -75,6 +97,14 @@ export function DrillKeypad({
 }) {
   const answering = submitMode === "check";
 
+  // π and √ share one slot — a topic never needs both in one answer, and a
+  // stable 4×4 grid beats a five-column special case.
+  const layout: PadKey[] = LAYOUT.map((key) =>
+    "need" in key && key.need === "pi" && !keys.includes("pi") && keys.includes("sqrt")
+      ? { glyph: "√", need: "sqrt", kind: "extra" }
+      : key,
+  );
+
   const press = (glyph: string) => {
     if (!answering || !canAppend(value, glyph)) return;
     onChange(value + glyph);
@@ -105,12 +135,14 @@ export function DrillKeypad({
         : e.key === "-" ? "−"
         : e.key === "/" ? "/"
         : e.key === "p" || e.key === "π" ? "π"
+        : e.key === "s" || e.key === "√" ? "√"
         : null;
       if (!glyph) return;
       const enabled =
         glyph === "," ? keys.includes("comma")
         : glyph === "−" ? keys.includes("minus")
         : glyph === "π" ? keys.includes("pi")
+        : glyph === "√" ? keys.includes("sqrt")
         : glyph === "/" ? keys.includes("frac")
         : true;
       if (enabled) {
@@ -124,7 +156,7 @@ export function DrillKeypad({
 
   return (
     <div className="grid grid-cols-4 gap-1.5">
-      {LAYOUT.map((key, i) => {
+      {layout.map((key, i) => {
         if (key.kind === "backspace") {
           return (
             <button

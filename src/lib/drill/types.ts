@@ -10,10 +10,11 @@ import type { Rng } from "./rng";
 
 export type DrillText = { kz: string; ru: string };
 
-/** Extra keypad keys beyond the always-present digits and backspace. */
-export type DrillKey = "comma" | "minus" | "pi" | "frac";
+/** Extra keypad keys beyond the always-present digits and backspace.
+ * (π and √ share one physical keypad slot — no answer ever needs both.) */
+export type DrillKey = "comma" | "minus" | "pi" | "frac" | "sqrt";
 
-export const DRILL_KEYS: DrillKey[] = ["comma", "minus", "pi", "frac"];
+export const DRILL_KEYS: DrillKey[] = ["comma", "minus", "pi", "frac", "sqrt"];
 
 export function isDrillKey(value: unknown): value is DrillKey {
   return DRILL_KEYS.includes(value as DrillKey);
@@ -30,6 +31,7 @@ export function keysForAnswer(answer: string): DrillKey[] {
   if (answer.includes("-") || answer.includes("−")) keys.push("minus");
   if (answer.includes("π")) keys.push("pi");
   if (answer.includes("/")) keys.push("frac");
+  if (answer.includes("√")) keys.push("sqrt");
   return keys;
 }
 

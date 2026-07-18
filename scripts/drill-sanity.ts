@@ -9,7 +9,7 @@ import {
   encodeDrillConfig,
 } from "../src/lib/drill/types";
 import { radianDegreeTopic } from "../src/lib/drill/topics/radian-degree";
-import { decimalAddTopic } from "../src/lib/drill/topics/decimal-add";
+import { DRILL_TOPICS } from "../src/lib/drill/registry";
 import { checkInputAnswer, validatePack } from "../src/lib/quiz/pack";
 
 let failures = 0;
@@ -37,6 +37,12 @@ const cases: Array<[string, ReturnType<typeof exact> | null]> = [
   ["−π/2", exact(-1, 2, "pi")], // unicode minus from the keypad
   ["0", exact(0)],
   ["4/6", exact(2, 3)], // equivalent fraction accepted
+  ["√2", exact(1, 1, "one", 2)],
+  ["2√3", exact(2, 1, "one", 3)],
+  ["√2/2", exact(1, 2, "one", 2)],
+  ["-√3/3", exact(-1, 3, "one", 3)],
+  ["√12/2", exact(1, 1, "one", 3)], // √12 = 2√3 → 2√3/2 = √3
+  ["√4", exact(2)], // perfect square folds away
   ["", null],
   [",5", null],
   ["3,", null],
@@ -47,6 +53,9 @@ const cases: Array<[string, ReturnType<typeof exact> | null]> = [
   ["5/0", null],
   ["-", null],
   ["π5", null], // digit after π
+  ["√", null], // radical needs its number
+  ["1,5√2", null], // comma never mixes with a radical
+  ["√1", null],
 ];
 for (const [raw, want] of cases) {
   const got = parseExact(raw);
@@ -59,6 +68,9 @@ check("2π/3 ≠ 2,09", !equalsExact(parseExact("2π/3")!, exact(209, 100)));
 check("120 ≠ 120π", !equalsExact(exact(120), exact(120, 1, "pi")));
 check("0 = 0π", equalsExact(exact(0), exact(0, 1, "pi")));
 check("43,50 = 43,5", equalsExact(parseExact("43,50")!, parseExact("43,5")!));
+check("√2/2 ≠ 0,7", !equalsExact(parseExact("√2/2")!, exact(7, 10)));
+check("√2 ≠ √3", !equalsExact(parseExact("√2")!, parseExact("√3")!));
+check("2√3/2 = √3", equalsExact(parseExact("2√3/2")!, parseExact("√3")!));
 
 // ── formatting ──
 check("katex 2π/3", toKatex(exact(2, 3, "pi")) === "\\frac{2\\pi}{3}");
@@ -67,9 +79,12 @@ check("katex -7/18", toKatex(exact(-7, 18)) === "-\\frac{7}{18}");
 check("katex 43,5 dec", toKatex(exact(87, 2), "decimal") === "43{,}5");
 check("plain 5π/6", toPlain(exact(150, 180, "pi")) === "5π/6");
 check("plain 0,3 dust", toPlain(exact(3, 10), "decimal") === "0,3");
+check("katex √2/2", toKatex(exact(1, 2, "one", 2)) === "\\frac{\\sqrt{2}}{2}");
+check("katex -√3", toKatex(exact(-1, 1, "one", 3)) === "-\\sqrt{3}");
+check("plain 2√3", toPlain(exact(2, 1, "one", 3)) === "2√3");
 
 // ── generators: 500 seeded problems each, invariants must hold ──
-for (const topic of [radianDegreeTopic, decimalAddTopic]) {
+for (const topic of DRILL_TOPICS) {
   const config = defaultConfig(topic);
   for (let i = 0; i < 500; i++) {
     const p = topic.generate(mulberry32(i * 2654435761 + 1), config);
@@ -122,7 +137,7 @@ const drillQ = (extra: object) => ({
   );
   check(
     "pack: bad keys rejected",
-    validatePack(drillQ({ answer: "2", keys: ["sqrt"] })).errors.length > 0,
+    validatePack(drillQ({ answer: "2", keys: ["percent"] })).errors.length > 0,
   );
 
   // grading dispatch

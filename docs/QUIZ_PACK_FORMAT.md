@@ -97,14 +97,15 @@ Display math uses `$$…$$`. Remember to double backslashes in JSON:
 - Students answer on a **keypad** (digits + only the extra keys the answer
   needs), not a text field — built for phones.
 - **Write `answer` exactly as a student would type it**: `"120"`, `"-8"`,
-  `"43,5"` (decimal comma), `"7/18"`, `"2π/3"`, `"π"`, `"3π"`. The validator
-  rejects anything not typeable on the keypad.
-- Checking is **exact math**, not text: `4/6` = `2/3`, `0,50` = `0,5`, and
-  `2π/3` never equals `2,09`. No `accept` field — equivalents are automatic.
-- The keypad's extra keys (`,` `−` `π` `/`) are inferred from the answer. To
-  offer extra keys (e.g. let students type `1/2` when the answer is written
-  `"0,5"`), add `"keys": ["comma", "frac"]` — choices are `"comma"`,
-  `"minus"`, `"pi"`, `"frac"`.
+  `"43,5"` (decimal comma), `"7/18"`, `"2π/3"`, `"π"`, `"3π"`, `"√2/2"`,
+  `"2√3"`. The validator rejects anything not typeable on the keypad.
+- Checking is **exact math**, not text: `4/6` = `2/3`, `0,50` = `0,5`,
+  `√12/2` = `√3`, and `2π/3` never equals `2,09`. No `accept` field —
+  equivalents are automatic.
+- The keypad's extra keys (`,` `−` `π` `√` `/`) are inferred from the answer.
+  To offer extra keys (e.g. let students type `1/2` when the answer is
+  written `"0,5"`), add `"keys": ["comma", "frac"]` — choices are `"comma"`,
+  `"minus"`, `"pi"`, `"frac"`, `"sqrt"` (π and √ share one keypad slot).
 - In race rooms drill questions grade server-side by normalized text, so the
   canonical form matches but distant equivalents (`4/6` for `2/3`) may not —
   fine in practice since the keypad steers students to the canonical form.
