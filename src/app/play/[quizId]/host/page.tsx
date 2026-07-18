@@ -83,7 +83,7 @@ export default async function PackHostPage({
         savedQuiz={savedQuiz}
         initialSelectedIds={initialSelectedIds}
         initialOrderMode={initialOrderMode}
-        generator={Boolean(data.pack.generator)}
+        generator={data.pack.generator ?? null}
       />
     </main>
   );

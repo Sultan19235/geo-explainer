@@ -26,6 +26,18 @@ import {
 // `Localized` is structurally identical to ours — only `Block` crosses over,
 // keeping the lesson module the single source of truth for the block shapes.
 import type { Block } from "@/lib/lesson/types";
+// Drill questions (keypad + exact-value answers): the answer is stored exactly
+// as a student would type it ("2π/3", "43,5") and validated/graded through
+// the same parser the student page uses — an authored answer that can't be
+// typed can't get into a pack. The registry names the drill generator topics.
+import { equalsExact, parseExact } from "@/lib/drill/exact";
+import { DRILL_TOPICS, getDrillTopic } from "@/lib/drill/registry";
+import {
+  isDrillKey,
+  keysForAnswer,
+  type DrillConfig,
+  type DrillKey,
+} from "@/lib/drill/types";
 
 export type PackLang = "kz" | "ru";
 
@@ -62,7 +74,7 @@ export type SolutionStep = {
 
 export type PackQuestion = {
   id: string;
-  type: "mcq" | "input" | "graph-quadratic";
+  type: "mcq" | "input" | "graph-quadratic" | "drill";
   text: Localized;
   image?: string;
   geogebra?: PackGeoGebra;
@@ -70,9 +82,12 @@ export type PackQuestion = {
   // mcq
   options?: Localized[];
   correct?: number; // index into options (letters are normalized on validate)
-  // input
+  // input & drill (drill: the answer as the student would type it — "2π/3")
   answer?: string;
   accept?: string[];
+  // drill: keypad extras beyond digits; inferred from `answer` on validate,
+  // authors may add more (e.g. allow "1/2" for an answer written "0,5")
+  keys?: DrillKey[];
   // graph-quadratic
   graph?: PackGraphQuadratic;
   // "Формулалар" panel for THIS question: what the figure shows + the GENERAL
@@ -122,14 +137,23 @@ export type PackTagGroup = {
   tags: PackTag[];
 };
 
-// A generator quiz's settings card: which of the six quadratic sections and
-// which of the four interaction modes are in play. A pack carrying this needs
-// no question list — every student's device generates its own endless stream.
-export type PackGenerator = {
-  type: "graph-quadratic";
-  sections: SectionId[];
-  modes: GraphQuizMode[];
-};
+// A generator quiz's settings card. A pack carrying this needs no question
+// list — every student's device generates its own endless stream.
+//   graph-quadratic: which of the six sections / four interaction modes play.
+//   drill: which registered drill topic (src/lib/drill/registry.ts) runs, and
+//   optionally a pre-set of its option ticks; omitted groups fall back to the
+//   topic defaults, and the teacher can still adjust ticks at room start.
+export type PackGenerator =
+  | {
+      type: "graph-quadratic";
+      sections: SectionId[];
+      modes: GraphQuizMode[];
+    }
+  | {
+      type: "drill";
+      topic: string;
+      config?: DrillConfig;
+    };
 
 export type QuizPack = {
   version: 1;
@@ -420,9 +444,69 @@ export function validatePack(raw: unknown): {
     const g = data.generator as Record<string, unknown> | null;
     if (typeof g !== "object" || g === null || Array.isArray(g)) {
       errors.push('"generator" must be an object.');
+    } else if (g.type === "drill") {
+      const topic =
+        typeof g.topic === "string" ? getDrillTopic(g.topic) : undefined;
+      if (!topic) {
+        errors.push(
+          `"generator.topic" must name a drill topic: ${DRILL_TOPICS.map((t) => `"${t.id}"`).join(", ")}.`,
+        );
+      } else {
+        let config: DrillConfig | undefined;
+        let configOk = true;
+        if (g.config !== undefined) {
+          if (
+            typeof g.config !== "object" ||
+            g.config === null ||
+            Array.isArray(g.config)
+          ) {
+            errors.push(
+              '"generator.config" must be an object of { optionGroupId: [choiceIds] }.',
+            );
+            configOk = false;
+          } else {
+            config = {};
+            for (const [groupId, rawIds] of Object.entries(
+              g.config as Record<string, unknown>,
+            )) {
+              const group = topic.options.find((o) => o.id === groupId);
+              if (!group) {
+                errors.push(
+                  `"generator.config": unknown option group "${groupId}" for topic "${topic.id}" — groups: ${topic.options.map((o) => o.id).join(", ")}.`,
+                );
+                configOk = false;
+                continue;
+              }
+              if (
+                !Array.isArray(rawIds) ||
+                !rawIds.every((v) => typeof v === "string")
+              ) {
+                errors.push(
+                  `"generator.config.${groupId}" must be a list of choice id strings.`,
+                );
+                configOk = false;
+                continue;
+              }
+              const unknown = (rawIds as string[]).filter(
+                (id) => !group.choices.some((c) => c.id === id),
+              );
+              if (unknown.length > 0) {
+                errors.push(
+                  `"generator.config.${groupId}": unknown choice(s) ${unknown.map((u) => `"${u}"`).join(", ")} — choices: ${group.choices.map((c) => c.id).join(", ")}.`,
+                );
+                configOk = false;
+                continue;
+              }
+              if (rawIds.length > 0) config[groupId] = rawIds as string[];
+            }
+            if (config && Object.keys(config).length === 0) config = undefined;
+          }
+        }
+        if (configOk) generator = { type: "drill", topic: topic.id, config };
+      }
     } else if (g.type !== "graph-quadratic") {
       errors.push(
-        `Unknown generator type "${String(g.type)}" — only "graph-quadratic" exists.`,
+        `Unknown generator type "${String(g.type)}" — use "graph-quadratic" or "drill".`,
       );
     } else {
       let sections: SectionId[] = [...SECTION_IDS];
@@ -484,7 +568,7 @@ export function validatePack(raw: unknown): {
     const hasOptions = q.options !== undefined;
     const type: PackQuestion["type"] = isGraph
       ? "graph-quadratic"
-      : q.type === "mcq" || q.type === "input"
+      : q.type === "mcq" || q.type === "input" || q.type === "drill"
         ? q.type
         : hasOptions
           ? "mcq"
@@ -616,6 +700,43 @@ export function validatePack(raw: unknown): {
       }
       question.options = options;
       question.correct = correct;
+    } else if (type === "drill") {
+      // Keypad question with exact-value checking. The answer is written the
+      // way a student types it; equivalent forms (4/6 = 2/3, 0,50 = 0,5) are
+      // accepted automatically at grading, so "accept" has no meaning here.
+      if (typeof q.answer !== "string" && typeof q.answer !== "number") {
+        errors.push(`${label}: drill questions need an "answer" string.`);
+        return;
+      }
+      const answer = String(q.answer).trim();
+      if (parseExact(answer) === null) {
+        errors.push(
+          `${label}: answer "${answer}" is not typeable on the drill keypad — write it as a student would: "120", "-8", "43,5", "7/18", "2π/3", "π" or "3π".`,
+        );
+        return;
+      }
+      question.answer = answer;
+      if (q.accept !== undefined) {
+        errors.push(
+          `${label}: drill questions don't use "accept" — equivalent forms are matched exactly (4/6 = 2/3, 0,50 = 0,5). Remove it.`,
+        );
+        return;
+      }
+      if (q.keys !== undefined) {
+        if (!Array.isArray(q.keys) || !q.keys.every(isDrillKey)) {
+          errors.push(
+            `${label}: "keys" must be a list from "comma", "minus", "pi", "frac".`,
+          );
+          return;
+        }
+        // Union with the inferred keys: the canonical answer itself must
+        // always stay typeable whatever the author listed.
+        question.keys = Array.from(
+          new Set([...(q.keys as DrillKey[]), ...keysForAnswer(answer)]),
+        );
+      } else {
+        question.keys = keysForAnswer(answer);
+      }
     } else {
       if (typeof q.answer !== "string" && typeof q.answer !== "number") {
         errors.push(`${label}: typed-answer questions need an "answer" string.`);
@@ -807,6 +928,13 @@ function normalizeAnswer(value: string): string {
 }
 
 export function checkInputAnswer(given: string, question: PackQuestion): boolean {
+  // Drill questions grade through the exact-value model: integer arithmetic,
+  // equivalent fractions accepted, no float tolerance, no string matching.
+  if (question.type === "drill") {
+    const g = parseExact(given);
+    const a = parseExact(question.answer ?? "");
+    return g !== null && a !== null && equalsExact(g, a);
+  }
   const normalizedGiven = normalizeAnswer(given);
   if (!normalizedGiven) return false;
   const accepted = [question.answer ?? "", ...(question.accept ?? [])];

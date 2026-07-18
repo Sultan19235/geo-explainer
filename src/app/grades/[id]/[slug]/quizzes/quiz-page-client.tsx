@@ -142,7 +142,7 @@ export function QuizPageClient({
                       questions={quiz.pack.questions}
                       tagGroups={quiz.pack.tagGroups}
                       embedded
-                      generator={Boolean(quiz.pack.generator)}
+                      generator={quiz.pack.generator ?? null}
                     />
                   </div>
                 );

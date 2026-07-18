@@ -50,6 +50,16 @@ import {
   type VertexTriple,
 } from "@/lib/quiz/quadratic";
 import { LanguageToggle } from "@/components/language-toggle";
+import { DrillKeypad } from "@/components/quiz/drill-keypad";
+import { parseExact, toKatex, toPlain } from "@/lib/drill/exact";
+import { mulberry32 as drillRng } from "@/lib/drill/rng";
+import { getDrillTopic } from "@/lib/drill/registry";
+import {
+  decodeDrillConfig,
+  defaultConfig,
+  type DrillConfig,
+  type DrillTopic,
+} from "@/lib/drill/types";
 // Race explain phase renders lesson-format solution steps with the SAME
 // component the lesson player uses — pure presentational ({blocks, lang}),
 // so the quiz bundle gains no lesson runtime beyond it.
@@ -180,14 +190,20 @@ function LiveMode({
     };
   }, [fullPack, qParam, shuffleParam]);
 
-  // Generator quiz: the teacher's ticks arrive on the join link as
-  // `?sec=...&modes=...` (chosen on the console at room start). A link
-  // without them — e.g. an old QR — falls back to the pack's own settings.
+  // Generator quiz: the teacher's ticks arrive on the join link —
+  // `?sec=...&modes=...` for graph-quadratic, `?dopt=...` for drill (chosen
+  // on the console at room start). A link without them — e.g. an old QR —
+  // falls back to the pack's own settings.
   const secParam = searchParams.get("sec");
   const modesParam = searchParams.get("modes");
-  const generator = useMemo(() => {
+  const doptParam = searchParams.get("dopt");
+  const generator = useMemo<PackGenerator | null>(() => {
     const base = fullPack.generator;
     if (!base) return null;
+    if (base.type === "drill") {
+      const config = decodeDrillConfig(doptParam);
+      return config ? { ...base, config } : base;
+    }
     const sections = (secParam ?? "").split(",").filter(isSectionId);
     const modes = (modesParam ?? "").split(",").filter(isGraphMode);
     return {
@@ -195,7 +211,7 @@ function LiveMode({
       sections: sections.length > 0 ? sections : base.sections,
       modes: modes.length > 0 ? modes : base.modes,
     };
-  }, [fullPack.generator, secParam, modesParam]);
+  }, [fullPack.generator, secParam, modesParam, doptParam]);
 
   const questionCount = pack.questions.length;
   const defaultExtra = useMemo<PackExtra>(
@@ -650,6 +666,66 @@ function randomOrder(count: number): number[] {
   return order;
 }
 
+// One drill problem from the registry topic, wrapped as a pack question so
+// QuestionCard and the grading path treat it exactly like an authored drill
+// question. The seed stream makes a student's sequence reproducible per mount.
+function generateDrillPackQuestion(
+  topic: DrillTopic,
+  config: DrillConfig | undefined,
+  seed: number,
+  seq: number,
+): PackQuestion {
+  const problem = topic.generate(
+    drillRng((seed + seq * 2654435761) >>> 0),
+    config ?? defaultConfig(topic),
+  );
+  return {
+    id: `gen-${seq}`,
+    type: "drill",
+    text: problem.prompt,
+    answer: toPlain(problem.answer, problem.answerStyle),
+    keys: problem.keys,
+    solution: problem.solution ? [problem.solution] : undefined,
+  };
+}
+
+// A pack that names a drill topic this build doesn't know (stale deployed
+// client, newer pack) degrades to a visible notice instead of a crash.
+const UNKNOWN_TOPIC_QUESTION = (seq: number): PackQuestion => ({
+  id: `gen-${seq}`,
+  type: "input",
+  text: {
+    kz: "Бұл тақырып қолжетімсіз — бетті жаңартып көріңіз.",
+    ru: "Эта тема недоступна — обновите страницу.",
+  },
+  answer: "",
+});
+
+function generateAnyPackQuestion(
+  generator: PackGenerator,
+  drillSeed: number,
+  seq: number,
+): PackQuestion {
+  if (generator.type === "drill") {
+    const topic = getDrillTopic(generator.topic);
+    if (!topic) return UNKNOWN_TOPIC_QUESTION(seq);
+    return generateDrillPackQuestion(topic, generator.config, drillSeed, seq);
+  }
+  return generateGraphPackQuestion(
+    generator.sections,
+    generator.modes,
+    seq,
+  ) as PackQuestion;
+}
+
+// The correct answer of a drill question, rendered properly for feedback
+// ("2π/3" → KaTeX fraction; the author's comma form keeps decimal style).
+function drillAnswerKatex(answer: string): string {
+  const parsed = parseExact(answer);
+  if (!parsed) return answer;
+  return `$${toKatex(parsed, answer.includes(",") ? "decimal" : "fraction")}$`;
+}
+
 // Endless stream from the pack's generator settings. Each student's device
 // makes its own questions — nothing is stored, matching the old generator
 // page. Runs until the room ends (no finish button).
@@ -667,19 +743,18 @@ function GeneratedFlow({
   const { lang } = useLanguage();
   const t = engineT(lang);
   const [calcOpen, setCalcOpen] = useState(false);
+  // Drill topics generate from a seeded stream (reproducible per mount);
+  // graph-quadratic keeps its own Math.random internals.
+  const [drillSeed] = useState(() => Math.floor(Math.random() * 2 ** 31));
   const [seq, setSeq] = useState(1);
-  const [question, setQuestion] = useState<PackQuestion>(
-    () =>
-      generateGraphPackQuestion(
-        generator.sections,
-        generator.modes,
-        1,
-      ) as PackQuestion,
+  const [question, setQuestion] = useState<PackQuestion>(() =>
+    generateAnyPackQuestion(generator, drillSeed, 1),
   );
   const [optOrder, setOptOrder] = useState<number[]>(() =>
     randomOrder(choiceCount(question)),
   );
   const [record, setRecord] = useState<AnswerRecord | null>(null);
+  const [inputValue, setInputValue] = useState("");
 
   const answer = (rec: AnswerRecord) => {
     if (record) return;
@@ -689,15 +764,12 @@ function GeneratedFlow({
 
   const next = () => {
     const n = seq + 1;
-    const q = generateGraphPackQuestion(
-      generator.sections,
-      generator.modes,
-      n,
-    ) as PackQuestion;
+    const q = generateAnyPackQuestion(generator, drillSeed, n);
     setSeq(n);
     setQuestion(q);
     setOptOrder(randomOrder(choiceCount(q)));
     setRecord(null);
+    setInputValue("");
   };
 
   return (
@@ -726,9 +798,18 @@ function GeneratedFlow({
         record={record}
         features={features}
         packFormulas={pack.formulas}
+        inputValue={inputValue}
+        onInputChange={setInputValue}
         onPick={(displayIndex) => {
           const pick = optOrder[displayIndex];
           answer({ ok: pick === 0, pick });
+        }}
+        onCheckInput={() => {
+          if (!inputValue.trim()) return;
+          answer({
+            ok: checkInputAnswer(inputValue, question),
+            given: inputValue,
+          });
         }}
         onCheckDrag={(ok, given) => answer({ ok, given })}
       />
@@ -1420,6 +1501,10 @@ function QuestionCard({
   // below confirms. Guards against misclicks on phones. Callers remount this
   // card per question (key=question.id), which resets the selection.
   const [selected, setSelected] = useState<number | null>(null);
+  // Drill: a syntactically incomplete answer ("3," or "5/") blocks the check
+  // with a hint instead of counting as wrong. Reset by the per-question
+  // remount and by any further typing.
+  const [drillInvalid, setDrillInvalid] = useState(false);
 
   // ── Student aids: figure / formulas / hints behind collapsible chips ──────
   // Read first, imagine first — the figure starts closed on purpose.
@@ -1754,6 +1839,68 @@ function QuestionCard({
         </div>
       )}
 
+      {/* drill — on-screen keypad, exact-value answers */}
+      {question.type === "drill" && (
+        <div className="mt-4">
+          <div
+            className={cn(
+              "rounded-xl border-[1.5px] bg-background px-4 py-3 text-center",
+              answered
+                ? revealed || record?.ok
+                  ? "border-emerald-500 bg-emerald-50"
+                  : "border-red-400 bg-red-50"
+                : drillInvalid
+                  ? "border-red-400 bg-red-50"
+                  : "border-border",
+            )}
+          >
+            <div
+              className={cn(
+                "min-h-9 font-math text-3xl tabular-nums",
+                !answered &&
+                  (inputValue ?? "") === "" &&
+                  "text-muted-foreground/50",
+              )}
+            >
+              {answered
+                ? revealed
+                  ? (question.answer ?? "")
+                  : (record?.given ?? "")
+                : (inputValue ?? "") === ""
+                  ? t("input_placeholder")
+                  : inputValue}
+            </div>
+          </div>
+          {drillInvalid && !answered && (
+            <p className="mt-1.5 text-xs font-medium text-red-600">
+              {t("input_invalid")}
+            </p>
+          )}
+          {!answered && (
+            <div className="mt-3">
+              <DrillKeypad
+                keys={question.keys ?? []}
+                value={inputValue ?? ""}
+                onChange={(next) => {
+                  setDrillInvalid(false);
+                  onInputChange?.(next);
+                }}
+                onSubmit={() => {
+                  if (!(inputValue ?? "").trim()) return;
+                  if (parseExact(inputValue ?? "") === null) {
+                    setDrillInvalid(true);
+                    return;
+                  }
+                  onCheckInput?.();
+                }}
+                submitLabel={t("check_button")}
+                submitMode="check"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* feedback */}
       {answered && (
         <div className="mt-4">
@@ -1782,7 +1929,9 @@ function QuestionCard({
                   text={
                     question.type === "mcq" && question.options
                       ? loc(question.options[question.correct ?? 0], lang)
-                      : (question.answer ?? "")
+                      : question.type === "drill"
+                        ? drillAnswerKatex(question.answer ?? "")
+                        : (question.answer ?? "")
                   }
                 />
               </span>
@@ -2104,17 +2253,12 @@ function GeneratedPreview({
   const { lang } = useLanguage();
   const t = engineT(lang);
   const [seq, setSeq] = useState(0);
+  const [previewSeed] = useState(() => Math.floor(Math.random() * 2 ** 31));
   const [question, setQuestion] = useState<PackQuestion | null>(null);
 
   useEffect(() => {
-    setQuestion(
-      generateGraphPackQuestion(
-        generator.sections,
-        generator.modes,
-        seq + 1,
-      ) as PackQuestion,
-    );
-  }, [generator, seq]);
+    setQuestion(generateAnyPackQuestion(generator, previewSeed, seq + 1));
+  }, [generator, previewSeed, seq]);
 
   return (
     <main className="quiz-grid-paper min-h-dvh text-foreground">

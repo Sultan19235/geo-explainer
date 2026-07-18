@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useT } from "@/lib/i18n/context";
+import { DRILL_TOPICS } from "@/lib/drill/registry";
 
 export type TopicOption = {
   id: string;
@@ -187,6 +188,13 @@ export function QuizForm({ action, topics, initial, submitLabelKey }: Props) {
               ? "График квадратичной функции"
               : "Квадраттық функция графигі"}
           </option>
+          {DRILL_TOPICS.map((topic) => (
+            <option key={topic.id} value={`drill:${topic.id}`}>
+              {lang === "ru"
+                ? `Тренажёр: ${topic.title.ru}`
+                : `Жаттығу: ${topic.title.kz}`}
+            </option>
+          ))}
         </select>
         <p className="text-xs text-muted-foreground">
           {lang === "ru"

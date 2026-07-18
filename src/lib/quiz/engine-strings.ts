@@ -77,6 +77,7 @@ export const ENGINE_STRINGS = {
     c_selected: "таңдалды",
     c_none_selected: "Кемінде бір сұрақ таңдаңыз.",
     // console — generator setup (teacher ticks sections + question types)
+    input_invalid: "Жауапты толық теріңіз",
     c_gen_sections: "Бөлімдер",
     c_gen_sections_hint: "Қандай функция түрлерінен сұрақ құрылады",
     c_gen_modes: "Сұрақ түрлері",
@@ -267,6 +268,7 @@ export const ENGINE_STRINGS = {
     c_selected: "выбрано",
     c_none_selected: "Выберите хотя бы один вопрос.",
     // console — generator setup (teacher ticks sections + question types)
+    input_invalid: "Введите ответ полностью",
     c_gen_sections: "Разделы",
     c_gen_sections_hint: "Из каких видов функций создавать вопросы",
     c_gen_modes: "Типы вопросов",

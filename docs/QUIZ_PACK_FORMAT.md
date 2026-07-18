@@ -83,6 +83,53 @@ Display math uses `$$…$$`. Remember to double backslashes in JSON:
 - Checking is forgiving: spaces are ignored, case-insensitive, `2,5` = `2.5`.
 - `accept` lists extra accepted spellings (optional).
 
+**3. Drill (`"type": "drill"`) — on-screen keypad, exact math checking:**
+
+```json
+{
+  "type": "drill",
+  "text": "Бұрыштың радиандық өлшемін тап: $120°$",
+  "answer": "2π/3",
+  "solution": ["$120° = 120 \\cdot \\frac{\\pi}{180} = \\frac{2\\pi}{3}$"]
+}
+```
+
+- Students answer on a **keypad** (digits + only the extra keys the answer
+  needs), not a text field — built for phones.
+- **Write `answer` exactly as a student would type it**: `"120"`, `"-8"`,
+  `"43,5"` (decimal comma), `"7/18"`, `"2π/3"`, `"π"`, `"3π"`. The validator
+  rejects anything not typeable on the keypad.
+- Checking is **exact math**, not text: `4/6` = `2/3`, `0,50` = `0,5`, and
+  `2π/3` never equals `2,09`. No `accept` field — equivalents are automatic.
+- The keypad's extra keys (`,` `−` `π` `/`) are inferred from the answer. To
+  offer extra keys (e.g. let students type `1/2` when the answer is written
+  `"0,5"`), add `"keys": ["comma", "frac"]` — choices are `"comma"`,
+  `"minus"`, `"pi"`, `"frac"`.
+- In race rooms drill questions grade server-side by normalized text, so the
+  canonical form matches but distant equivalents (`4/6` for `2/3`) may not —
+  fine in practice since the keypad steers students to the canonical form.
+
+**Drill generator packs** (endless machine-made problems) need no question
+list — name a registered drill topic instead; the teacher picks the option
+ticks at room start, and `config` (optional) narrows what's offered:
+
+```json
+{
+  "version": 1,
+  "title": { "kz": "Ондық бөлшектер", "ru": "Десятичные дроби" },
+  "generator": {
+    "type": "drill",
+    "topic": "decimal-add",
+    "config": { "places": ["1"] }
+  },
+  "questions": []
+}
+```
+
+Topics live in `src/lib/drill/registry.ts` (currently `radian-degree`,
+`decimal-add`); the admin "Интерактив генератор" dropdown builds these packs
+without any file.
+
 ### Optional per-question fields
 
 ```jsonc

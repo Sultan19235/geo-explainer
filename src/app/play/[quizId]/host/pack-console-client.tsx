@@ -47,6 +47,7 @@ import { cn } from "@/lib/utils";
 import {
   loc,
   type Localized,
+  type PackGenerator,
   type PackQuestion,
   type PackTag,
   type PackTagColor,
@@ -60,6 +61,14 @@ import {
   type GraphQuizMode,
   type SectionId,
 } from "@/lib/quiz/quadratic";
+import { getDrillTopic } from "@/lib/drill/registry";
+import { locDrill } from "@/lib/drill/strings";
+import {
+  defaultConfig,
+  encodeDrillConfig,
+  type DrillConfig,
+  type DrillTopic,
+} from "@/lib/drill/types";
 import type { SavedQuizRef } from "@/lib/quiz/saved-quiz";
 import {
   createSavedQuizAction,
@@ -143,6 +152,7 @@ type RoomCtx = {
   orderMode: "custom" | "shuffle";
   genSections: SectionId[];
   genModes: GraphQuizMode[];
+  genDrill?: DrillConfig; // drill generator: the teacher's option ticks
   features?: QuizFeatures;
   mode?: "self" | "race";
   raceSec?: number; // room default seconds per question
@@ -185,7 +195,7 @@ export function PackConsoleClient({
   savedQuiz = null,
   initialSelectedIds,
   initialOrderMode,
-  generator = false,
+  generator = null,
 }: {
   quizId: string;
   title: Localized;
@@ -199,7 +209,9 @@ export function PackConsoleClient({
   initialOrderMode?: "custom" | "shuffle";
   // Generator quiz: questions are machine-made endlessly on each student's
   // device, so there is no question picker and the room always can start.
-  generator?: boolean;
+  // The object (not a boolean) because the setup card renders the machine's
+  // own controls: sections/modes for graph-quadratic, option ticks for drill.
+  generator?: PackGenerator | null;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -327,6 +339,20 @@ export function PackConsoleClient({
   // can't open until at least one section and one type are ticked.
   const [genSections, setGenSections] = useState<SectionId[]>([]);
   const [genModes, setGenModes] = useState<GraphQuizMode[]>([]);
+  // Drill generator: the topic's option ticks. Unlike the graph machine these
+  // START at the topic defaults (optionally narrowed by the pack's pre-set
+  // config) — every group must keep ≥1 tick, so an empty start would only
+  // force busywork. The teacher adjusts and opens.
+  const drillTopic: DrillTopic | null =
+    generator?.type === "drill" ? (getDrillTopic(generator.topic) ?? null) : null;
+  const [genDrill, setGenDrill] = useState<DrillConfig>(() =>
+    drillTopic
+      ? {
+          ...defaultConfig(drillTopic),
+          ...(generator?.type === "drill" ? generator.config : undefined),
+        }
+      : {},
+  );
   // Student aids for this room (figure / formulas / hints / calculator).
   // All on by default; the teacher's last choice is restored after mount
   // (not in the initializer — localStorage would desync SSR hydration).
@@ -388,12 +414,14 @@ export function PackConsoleClient({
   // never emitted for race links: option order must stay canonical so the
   // board's distribution letters match every phone (belt and braces — the
   // mode switch already forces orderMode to custom).
+  const doptValue = drillTopic ? encodeDrillConfig(genDrill) : "";
   const joinParams = [
     qParam ? `q=${encodeURIComponent(qParam)}` : null,
     orderMode === "shuffle" && mode !== "race" ? "shuffle=1" : null,
     mode === "race" && !generator ? "race=1" : null,
-    generator ? `sec=${genSections.join(",")}` : null,
-    generator ? `modes=${genModes.join(",")}` : null,
+    generator?.type === "graph-quadratic" ? `sec=${genSections.join(",")}` : null,
+    generator?.type === "graph-quadratic" ? `modes=${genModes.join(",")}` : null,
+    doptValue ? `dopt=${encodeURIComponent(doptValue)}` : null,
     offList.length > 0 ? `off=${offList.join(",")}` : null,
   ]
     .filter(Boolean)
@@ -469,6 +497,27 @@ export function PackConsoleClient({
       if (Array.isArray(ctx.genModes)) {
         const stored = ctx.genModes as unknown[];
         setGenModes(GRAPH_MODES.filter((m) => stored.includes(m)));
+      }
+      // Drill ticks, whitelisted against the topic's real groups/choices so a
+      // stale blob can never smuggle unknown ids into the join link.
+      if (
+        drillTopic &&
+        ctx.genDrill &&
+        typeof ctx.genDrill === "object" &&
+        !Array.isArray(ctx.genDrill)
+      ) {
+        const restored: DrillConfig = {};
+        for (const group of drillTopic.options) {
+          const stored = (ctx.genDrill as Record<string, unknown>)[group.id];
+          if (!Array.isArray(stored)) continue;
+          const ids = group.choices
+            .map((c) => c.id)
+            .filter((id) => stored.includes(id));
+          if (ids.length > 0) restored[group.id] = ids;
+        }
+        if (Object.keys(restored).length > 0) {
+          setGenDrill((cur) => ({ ...cur, ...restored }));
+        }
       }
       if (ctx.features && typeof ctx.features === "object") {
         setFeatures(sanitizeStoredFeatures(ctx.features));
@@ -546,6 +595,7 @@ export function PackConsoleClient({
                 orderMode,
                 genSections,
                 genModes,
+                genDrill: drillTopic ? genDrill : undefined,
                 features,
                 mode,
                 raceSec,
@@ -578,6 +628,9 @@ export function PackConsoleClient({
           setGenSections={setGenSections}
           genModes={genModes}
           setGenModes={setGenModes}
+          drillTopic={drillTopic}
+          genDrill={genDrill}
+          setGenDrill={setGenDrill}
           features={features}
           onToggleFeature={toggleFeature}
           mode={mode}
@@ -708,6 +761,9 @@ function SetupScreen({
   setGenSections,
   genModes,
   setGenModes,
+  drillTopic,
+  genDrill,
+  setGenDrill,
   features,
   onToggleFeature,
   mode,
@@ -739,11 +795,14 @@ function SetupScreen({
   resumable: ResumableRoom | null;
   onResume: () => void;
   onDiscardResume: () => void;
-  generator: boolean;
+  generator: PackGenerator | null;
   genSections: SectionId[];
   setGenSections: React.Dispatch<React.SetStateAction<SectionId[]>>;
   genModes: GraphQuizMode[];
   setGenModes: React.Dispatch<React.SetStateAction<GraphQuizMode[]>>;
+  drillTopic: DrillTopic | null;
+  genDrill: DrillConfig;
+  setGenDrill: React.Dispatch<React.SetStateAction<DrillConfig>>;
   features: QuizFeatures;
   onToggleFeature: (key: keyof QuizFeatures) => void;
   mode: "self" | "race";
@@ -894,9 +953,10 @@ function SetupScreen({
           </div>
         </div>
 
-        {/* generator: the teacher ticks sections + question types for this
-            room. Nothing preticked on purpose — a conscious choice each time. */}
-        {generator && (
+        {/* graph generator: the teacher ticks sections + question types for
+            this room. Nothing preticked on purpose — a conscious choice each
+            time. */}
+        {generator?.type === "graph-quadratic" && (
           <>
             <div className="mt-4">
               <div className="mb-2 flex items-baseline justify-between">
@@ -997,6 +1057,62 @@ function SetupScreen({
               )}
           </>
         )}
+
+        {/* drill generator: the topic's own option groups as tick tiles.
+            Pre-ticked with the topic defaults (each group must keep ≥1), the
+            same rule the /labs/drill setup screen uses. */}
+        {drillTopic &&
+          drillTopic.options.map((group) => (
+            <div key={group.id} className="mt-4">
+              <p className="mb-2 text-sm font-bold">
+                {locDrill(group.label, lang)}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {group.choices.map((choice) => {
+                  const selected = genDrill[group.id] ?? group.defaults;
+                  const active = selected.includes(choice.id);
+                  return (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() =>
+                        setGenDrill((cur) => {
+                          const current = cur[group.id] ?? group.defaults;
+                          if (current.includes(choice.id)) {
+                            if (current.length === 1) return cur; // keep ≥1
+                            return {
+                              ...cur,
+                              [group.id]: current.filter(
+                                (id) => id !== choice.id,
+                              ),
+                            };
+                          }
+                          return {
+                            ...cur,
+                            [group.id]: [...current, choice.id],
+                          };
+                        })
+                      }
+                      className={cn(
+                        "relative rounded-lg border-[1.5px] px-3 py-2.5 text-left text-sm font-semibold transition-colors",
+                        active
+                          ? "border-primary bg-accent text-primary"
+                          : "border-border text-muted-foreground hover:bg-accent/50",
+                      )}
+                    >
+                      {active && (
+                        <span className="absolute right-1.5 top-1.5 grid size-4 place-items-center rounded bg-primary text-white">
+                          <Check className="size-3" aria-hidden />
+                        </span>
+                      )}
+                      {locDrill(choice.label, lang)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
 
         {/* room mode (list quizzes only — generator packs can't race: their
             graph questions structurally leak the answer) */}
@@ -1185,7 +1301,8 @@ function SetupScreen({
           disabled={
             creating ||
             (generator
-              ? genSections.length === 0 || genModes.length === 0
+              ? generator.type === "graph-quadratic" &&
+                (genSections.length === 0 || genModes.length === 0)
               : selectedCount === 0)
           }
           className="mt-4 h-12 w-full text-base font-semibold"

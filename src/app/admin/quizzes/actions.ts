@@ -95,20 +95,34 @@ async function uploadPackFile(quizId: string, file: File): Promise<void> {
   revalidateTag(packCacheTag(packPath(quizId)));
 }
 
+// Dropdown value → the pack's generator object. "graph-quadratic" names the
+// graph machine; "drill:<topicId>" names a drill topic from the registry —
+// validatePack rejects unknown topics, so a stale dropdown fails loudly.
+function parseGeneratorKind(
+  kind: string,
+): { type: string; topic?: string } | null {
+  if (kind === "graph-quadratic") return { type: "graph-quadratic" };
+  if (kind.startsWith("drill:")) {
+    return { type: "drill", topic: kind.slice("drill:".length) };
+  }
+  return null;
+}
+
 // Writes the tiny settings pack of an interactive generator quiz ("Интерактив
-// генератор" in the quiz form). No sections/modes are stored — the teacher
-// ticks them on the console at every room start; this pack only names the
-// machine. The admin picks a dropdown entry instead of uploading any file.
+// генератор" in the quiz form). No sections/modes/ticks are stored — the
+// teacher configures them on the console at every room start; this pack only
+// names the machine. The admin picks a dropdown entry instead of uploading
+// any file.
 async function uploadGeneratorPack(
   quizId: string,
-  generatorType: string,
+  generator: { type: string; topic?: string },
   title_kz: string,
   title_ru: string | null,
 ): Promise<void> {
   const pack = {
     version: 1,
     title: title_ru ? { kz: title_kz, ru: title_ru } : title_kz,
-    generator: { type: generatorType },
+    generator,
     questions: [],
   };
   const json = JSON.stringify(pack, null, 2);
@@ -221,9 +235,9 @@ export async function createQuizAction(formData: FormData) {
     update.is_ready = true;
   } else {
     // Interactive generator (dropdown, no file). An uploaded pack file wins.
-    const generatorKind = getString(formData, "generator");
-    if (generatorKind === "graph-quadratic") {
-      await uploadGeneratorPack(inserted.id, generatorKind, title_kz, title_ru);
+    const generatorSpec = parseGeneratorKind(getString(formData, "generator"));
+    if (generatorSpec) {
+      await uploadGeneratorPack(inserted.id, generatorSpec, title_kz, title_ru);
       update.pack_path = packPath(inserted.id);
       update.is_ready = true;
     }
@@ -356,9 +370,9 @@ export async function updateQuizAction(id: string, formData: FormData) {
     update.is_ready = true;
   } else {
     // Interactive generator (dropdown, no file). An uploaded pack file wins.
-    const generatorKind = getString(formData, "generator");
-    if (generatorKind === "graph-quadratic") {
-      await uploadGeneratorPack(id, generatorKind, title_kz, title_ru);
+    const generatorSpec = parseGeneratorKind(getString(formData, "generator"));
+    if (generatorSpec) {
+      await uploadGeneratorPack(id, generatorSpec, title_kz, title_ru);
       update.pack_path = packPath(id);
       update.is_ready = true;
     }

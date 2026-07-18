@@ -1,0 +1,113 @@
+// Drill topic contract — the "recipe card" interface.
+//
+// A topic is one small pure module: metadata + teacher-facing option groups +
+// a generate() function that invents one problem from a seeded RNG. The shared
+// engine (keypad, checking, feedback, retry queue) never changes when a topic
+// is added; new topics only get registered in registry.ts.
+
+import type { Exact, ExactStyle } from "./exact";
+import type { Rng } from "./rng";
+
+export type DrillText = { kz: string; ru: string };
+
+/** Extra keypad keys beyond the always-present digits and backspace. */
+export type DrillKey = "comma" | "minus" | "pi" | "frac";
+
+export const DRILL_KEYS: DrillKey[] = ["comma", "minus", "pi", "frac"];
+
+export function isDrillKey(value: unknown): value is DrillKey {
+  return DRILL_KEYS.includes(value as DrillKey);
+}
+
+/**
+ * Which extra keys an answer string needs to be typed on the keypad —
+ * "2π/3" → pi + frac, "43,5" → comma, "-8" → minus. Pack authors write the
+ * answer exactly as a student would type it, so the keypad configures itself.
+ */
+export function keysForAnswer(answer: string): DrillKey[] {
+  const keys: DrillKey[] = [];
+  if (answer.includes(",")) keys.push("comma");
+  if (answer.includes("-") || answer.includes("−")) keys.push("minus");
+  if (answer.includes("π")) keys.push("pi");
+  if (answer.includes("/")) keys.push("frac");
+  return keys;
+}
+
+export type DrillProblem = {
+  /** MathText format — plain text with $...$ KaTeX segments. */
+  prompt: DrillText;
+  answer: Exact;
+  /** How the correct answer is rendered in feedback ("fraction" for 2π/3, "decimal" for 43,5). */
+  answerStyle: ExactStyle;
+  keys: DrillKey[];
+  /** One-line "why" shown after a wrong answer, MathText format. */
+  solution?: DrillText;
+  /** Template id inside the topic (e.g. "deg2rad") — retry bookkeeping/analytics. */
+  variant: string;
+};
+
+export type DrillChoice = { id: string; label: DrillText };
+
+/** A tick-tile group on the setup screen; at least one choice stays selected. */
+export type DrillOptionGroup = {
+  id: string;
+  label: DrillText;
+  choices: DrillChoice[];
+  defaults: string[];
+};
+
+/** Selected choice ids per option group id. */
+export type DrillConfig = Record<string, string[]>;
+
+export type DrillTopic = {
+  id: string;
+  title: DrillText;
+  subtitle: DrillText;
+  options: DrillOptionGroup[];
+  generate: (rng: Rng, config: DrillConfig) => DrillProblem;
+};
+
+export function defaultConfig(topic: DrillTopic): DrillConfig {
+  const config: DrillConfig = {};
+  for (const group of topic.options) config[group.id] = [...group.defaults];
+  return config;
+}
+
+// ─── Join-link config codec ─────────────────────────────────────────────────
+// The teacher's option ticks ride the student join link as one `dopt=` param:
+// "direction:deg2rad|rad2deg;range:basic". Ids are [a-z0-9-] by convention so
+// the separators are safe; decode is lenient — unknown ids are dropped later
+// by groupSelection's defaults fallback.
+
+export function encodeDrillConfig(config: DrillConfig): string {
+  return Object.entries(config)
+    .filter(([, ids]) => ids.length > 0)
+    .map(([groupId, ids]) => `${groupId}:${ids.join("|")}`)
+    .join(";");
+}
+
+export function decodeDrillConfig(raw: string | null): DrillConfig | null {
+  if (!raw) return null;
+  const config: DrillConfig = {};
+  for (const part of raw.split(";")) {
+    const colon = part.indexOf(":");
+    if (colon <= 0) continue;
+    const groupId = part.slice(0, colon);
+    const ids = part.slice(colon + 1).split("|").filter(Boolean);
+    if (ids.length > 0) config[groupId] = ids;
+  }
+  return Object.keys(config).length > 0 ? config : null;
+}
+
+/** Selected ids for a group, falling back to defaults so generate() never sees an empty group. */
+export function groupSelection(
+  topic: DrillTopic,
+  config: DrillConfig,
+  groupId: string,
+): string[] {
+  const group = topic.options.find((g) => g.id === groupId);
+  const selected = config[groupId]?.filter((id) =>
+    group?.choices.some((c) => c.id === id),
+  );
+  return selected && selected.length > 0 ? selected : (group?.defaults ?? []);
+}
