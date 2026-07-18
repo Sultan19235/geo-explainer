@@ -43,6 +43,30 @@ export function QuizForm({ action, topics, initial, submitLabelKey }: Props) {
     setError(null);
     startTransition(async () => {
       try {
+        // Uploaded drill-generator .js: run the full validation harness in
+        // the sandbox worker BEFORE anything leaves the browser. On success
+        // the extracted meta (topic id + option snapshot) rides along for
+        // the server to embed in the pack — the server never runs the file.
+        const generatorFile = formData.get("generator_file");
+        if (generatorFile instanceof File && generatorFile.size > 0) {
+          const { UploadedDrillSource } = await import(
+            "@/lib/drill/uploaded/source"
+          );
+          const code = await generatorFile.text();
+          const result = await UploadedDrillSource.load(code, { validate: true });
+          if (!result.ok) {
+            setError(`Generator file:\n${result.errors.join("\n")}`);
+            return;
+          }
+          result.source.dispose();
+          formData.set(
+            "generator_meta",
+            JSON.stringify({
+              topic: result.meta.id,
+              options: result.meta.options,
+            }),
+          );
+        }
         await action(formData);
       } catch (e) {
         if (e instanceof Error) {
@@ -200,6 +224,25 @@ export function QuizForm({ action, topics, initial, submitLabelKey }: Props) {
           {lang === "ru"
             ? "Файл не нужен: вопросы создаются автоматически, разделы и типы выбирает учитель при открытии комнаты. Загруженный pack.json имеет приоритет."
             : "Файл қажет емес: сұрақтар автоматты құрылады, бөлімдер мен түрлерді мұғалім бөлме ашқанда таңдайды. Жүктелген pack.json басым."}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="generator_file">
+          {lang === "ru"
+            ? "Свой генератор (.js файл)"
+            : "Өз генератор (.js файл)"}
+        </Label>
+        <Input
+          id="generator_file"
+          name="generator_file"
+          type="file"
+          accept=".js,text/javascript"
+        />
+        <p className="text-xs text-muted-foreground">
+          {lang === "ru"
+            ? "Загружаемый генератор задач (docs/DRILL_GENERATOR_FORMAT.md). Перед сохранением проверяется автоматически; сначала обкатайте файл на /labs/drill/file. Имеет приоритет над списком выше."
+            : "Жүктелетін есеп генераторы (docs/DRILL_GENERATOR_FORMAT.md). Сақтау алдында автоматты тексеріледі; алдымен файлды /labs/drill/file бетінде байқап көріңіз. Жоғарыдағы тізімнен басым."}
         </p>
       </div>
 

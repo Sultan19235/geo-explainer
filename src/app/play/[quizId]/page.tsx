@@ -100,7 +100,12 @@ export default async function PackPlayPage({
   return (
     // useSearchParams (the room code) requires a Suspense boundary.
     <Suspense fallback={null}>
-      <PackQuizClient quizId={data.id} pack={pack} preview={preview} />
+      <PackQuizClient
+        quizId={data.id}
+        pack={pack}
+        preview={preview}
+        generatorCode={data.generatorCode}
+      />
     </Suspense>
   );
 }

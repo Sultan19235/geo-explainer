@@ -5,7 +5,7 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { validatePack } from "@/lib/quiz/pack";
-import { packCacheTag, packPath } from "@/lib/quiz/pack-server";
+import { drillGenPath, packCacheTag, packPath } from "@/lib/quiz/pack-server";
 
 // Teacher consoles live in the PRIVATE bucket (embedded via signed URL on the
 // gated lesson page). Student files live in a PUBLIC bucket (opened directly by
@@ -92,6 +92,67 @@ async function uploadPackFile(quizId: string, file: File): Promise<void> {
     PACK_CONTENT_TYPE,
   );
   // Serve the new pack immediately — lesson pages cache pack downloads.
+  revalidateTag(packCacheTag(packPath(quizId)));
+}
+
+// Uploaded drill-generator .js file (docs/DRILL_GENERATOR_FORMAT.md). The
+// admin's browser already ran the validation harness in the sandbox worker
+// (quiz-form blocks submit on errors) and put the extracted meta in
+// "generator_meta"; here we re-check shape via validatePack and store the
+// file + a tiny pack that references it. Executing uploaded JS on the server
+// is deliberately avoided — only the student page's sandbox worker runs it.
+const GENERATOR_JS_CONTENT_TYPE = "text/javascript; charset=utf-8";
+const MAX_GENERATOR_BYTES = 200_000;
+
+async function uploadDrillGeneratorFile(
+  quizId: string,
+  file: File,
+  metaRaw: string,
+  title_kz: string,
+  title_ru: string | null,
+): Promise<void> {
+  if (file.size > MAX_GENERATOR_BYTES) {
+    throw new Error(`generator file too large (max ${MAX_GENERATOR_BYTES / 1000} KB)`);
+  }
+  const code = await file.text();
+  if (!code.includes("registerDrillTopic")) {
+    throw new Error("generator file must call registerDrillTopic({...})");
+  }
+  let meta: { topic?: unknown; options?: unknown };
+  try {
+    meta = JSON.parse(metaRaw);
+  } catch {
+    throw new Error(
+      "generator file was not validated by the form — re-select the file and save again",
+    );
+  }
+  const pack = {
+    version: 1,
+    title: title_ru ? { kz: title_kz, ru: title_ru } : title_kz,
+    generator: {
+      type: "drill",
+      topic: meta.topic,
+      file: true,
+      fileOptions: meta.options,
+    },
+    questions: [],
+  };
+  const { errors } = validatePack(pack);
+  if (errors.length > 0) {
+    throw new Error(`generator pack: ${errors.join("; ")}`);
+  }
+  await uploadBlob(
+    STUDENT_BUCKET,
+    drillGenPath(quizId),
+    new Blob([code], { type: GENERATOR_JS_CONTENT_TYPE }),
+    GENERATOR_JS_CONTENT_TYPE,
+  );
+  await uploadBlob(
+    STUDENT_BUCKET,
+    packPath(quizId),
+    new Blob([JSON.stringify(pack, null, 2)], { type: PACK_CONTENT_TYPE }),
+    PACK_CONTENT_TYPE,
+  );
   revalidateTag(packCacheTag(packPath(quizId)));
 }
 
@@ -234,12 +295,26 @@ export async function createQuizAction(formData: FormData) {
     update.pack_path = packPath(inserted.id);
     update.is_ready = true;
   } else {
-    // Interactive generator (dropdown, no file). An uploaded pack file wins.
-    const generatorSpec = parseGeneratorKind(getString(formData, "generator"));
-    if (generatorSpec) {
-      await uploadGeneratorPack(inserted.id, generatorSpec, title_kz, title_ru);
+    // Generator quizzes (no pack file — a pack upload wins over both):
+    // an uploaded generator .js beats the dropdown.
+    const generatorFile = formData.get("generator_file");
+    if (generatorFile instanceof File && generatorFile.size > 0) {
+      await uploadDrillGeneratorFile(
+        inserted.id,
+        generatorFile,
+        getString(formData, "generator_meta"),
+        title_kz,
+        title_ru,
+      );
       update.pack_path = packPath(inserted.id);
       update.is_ready = true;
+    } else {
+      const generatorSpec = parseGeneratorKind(getString(formData, "generator"));
+      if (generatorSpec) {
+        await uploadGeneratorPack(inserted.id, generatorSpec, title_kz, title_ru);
+        update.pack_path = packPath(inserted.id);
+        update.is_ready = true;
+      }
     }
   }
 
@@ -369,12 +444,26 @@ export async function updateQuizAction(id: string, formData: FormData) {
     update.pack_path = packPath(id);
     update.is_ready = true;
   } else {
-    // Interactive generator (dropdown, no file). An uploaded pack file wins.
-    const generatorSpec = parseGeneratorKind(getString(formData, "generator"));
-    if (generatorSpec) {
-      await uploadGeneratorPack(id, generatorSpec, title_kz, title_ru);
+    // Generator quizzes (no pack file — a pack upload wins over both):
+    // an uploaded generator .js beats the dropdown.
+    const generatorFile = formData.get("generator_file");
+    if (generatorFile instanceof File && generatorFile.size > 0) {
+      await uploadDrillGeneratorFile(
+        id,
+        generatorFile,
+        getString(formData, "generator_meta"),
+        title_kz,
+        title_ru,
+      );
       update.pack_path = packPath(id);
       update.is_ready = true;
+    } else {
+      const generatorSpec = parseGeneratorKind(getString(formData, "generator"));
+      if (generatorSpec) {
+        await uploadGeneratorPack(id, generatorSpec, title_kz, title_ru);
+        update.pack_path = packPath(id);
+        update.is_ready = true;
+      }
     }
   }
 

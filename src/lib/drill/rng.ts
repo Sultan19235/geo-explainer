@@ -24,3 +24,13 @@ export function randInt(rng: Rng, lo: number, hi: number): number {
 export function pick<T>(rng: Rng, items: readonly T[]): T {
   return items[Math.floor(rng() * items.length)];
 }
+
+/** New shuffled copy (Fisher–Yates on the seeded stream). */
+export function shuffle<T>(rng: Rng, items: readonly T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}

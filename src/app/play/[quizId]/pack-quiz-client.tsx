@@ -51,13 +51,16 @@ import {
 } from "@/lib/quiz/quadratic";
 import { LanguageToggle } from "@/components/language-toggle";
 import { DrillKeypad } from "@/components/quiz/drill-keypad";
+import { NumberLineVisual } from "@/components/quiz/number-line";
 import { parseExact, toKatex, toPlain } from "@/lib/drill/exact";
 import { mulberry32 as drillRng } from "@/lib/drill/rng";
 import { getDrillTopic } from "@/lib/drill/registry";
+import { UploadedDrillSource } from "@/lib/drill/uploaded/source";
 import {
   decodeDrillConfig,
   defaultConfig,
   type DrillConfig,
+  type DrillProblem,
   type DrillTopic,
 } from "@/lib/drill/types";
 // Race explain phase renders lesson-format solution steps with the SAME
@@ -136,13 +139,17 @@ export function PackQuizClient({
   quizId,
   pack,
   preview,
+  generatorCode = null,
 }: {
   quizId: string;
   pack: QuizPack;
   preview: boolean;
+  // Uploaded drill-generator source (drill file packs) — executed only in
+  // the sandbox worker.
+  generatorCode?: string | null;
 }) {
-  if (preview) return <PreviewMode pack={pack} />;
-  return <LiveMode quizId={quizId} pack={pack} />;
+  if (preview) return <PreviewMode pack={pack} generatorCode={generatorCode} />;
+  return <LiveMode quizId={quizId} pack={pack} generatorCode={generatorCode} />;
 }
 
 // ═══ LIVE (the real classroom flow) ══════════════════════════════════════
@@ -150,9 +157,11 @@ export function PackQuizClient({
 function LiveMode({
   quizId,
   pack: fullPack,
+  generatorCode,
 }: {
   quizId: string;
   pack: QuizPack;
+  generatorCode: string | null;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -351,13 +360,28 @@ function LiveMode({
         session.phase === "active" &&
         (generator ? (
           // Generator quiz: endless machine-made questions, no "done" — the
-          // stream runs until the teacher ends the room.
-          <GeneratedFlow
-            generator={generator}
-            session={session}
-            pack={fullPack}
-            features={features}
-          />
+          // stream runs until the teacher ends the room. Uploaded drill
+          // generators pre-generate their batch in the sandbox worker first.
+          generator.type === "drill" && generator.file && generatorCode ? (
+            <UploadedDrillLoader code={generatorCode} config={generator.config}>
+              {(questionAt) => (
+                <GeneratedFlow
+                  generator={generator}
+                  session={session}
+                  pack={fullPack}
+                  features={features}
+                  questionAt={questionAt}
+                />
+              )}
+            </UploadedDrillLoader>
+          ) : (
+            <GeneratedFlow
+              generator={generator}
+              session={session}
+              pack={fullPack}
+              features={features}
+            />
+          )
         ) : session.extra.done ? (
           <DoneScreen stats={session.stats} timeLeft={session.timeLeft} />
         ) : (
@@ -666,9 +690,23 @@ function randomOrder(count: number): number[] {
   return order;
 }
 
-// One drill problem from the registry topic, wrapped as a pack question so
-// QuestionCard and the grading path treat it exactly like an authored drill
-// question. The seed stream makes a student's sequence reproducible per mount.
+// A drill problem wrapped as a pack question so QuestionCard and the grading
+// path treat it exactly like an authored drill question — shared by the
+// registry generator and the uploaded-file path.
+function drillProblemToPackQuestion(problem: DrillProblem, id: string): PackQuestion {
+  return {
+    id,
+    type: "drill",
+    text: problem.prompt,
+    answer: toPlain(problem.answer, problem.answerStyle),
+    keys: problem.keys,
+    solution: problem.solution ? [problem.solution] : undefined,
+    visual: problem.visual,
+  };
+}
+
+// One drill problem from a registry topic. The seed stream makes a student's
+// sequence reproducible per mount.
 function generateDrillPackQuestion(
   topic: DrillTopic,
   config: DrillConfig | undefined,
@@ -679,14 +717,7 @@ function generateDrillPackQuestion(
     drillRng((seed + seq * 2654435761) >>> 0),
     config ?? defaultConfig(topic),
   );
-  return {
-    id: `gen-${seq}`,
-    type: "drill",
-    text: problem.prompt,
-    answer: toPlain(problem.answer, problem.answerStyle),
-    keys: problem.keys,
-    solution: problem.solution ? [problem.solution] : undefined,
-  };
+  return drillProblemToPackQuestion(problem, `gen-${seq}`);
 }
 
 // A pack that names a drill topic this build doesn't know (stale deployed
@@ -726,6 +757,93 @@ function drillAnswerKatex(answer: string): string {
   return `$${toKatex(parsed, answer.includes(",") ? "decimal" : "fraction")}$`;
 }
 
+// ═══ UPLOADED DRILL GENERATOR (sandbox worker) ═══════════════════════════
+// The .js file runs in a Web Worker, never on this page. Problems are pure
+// data, so one up-front batch (generated under a random seed with the room's
+// config) lets the rest of the flow stay fully synchronous — the students'
+// endless stream just wraps around a 200-problem window.
+
+const UPLOADED_BATCH = 200;
+
+function UploadedDrillLoader({
+  code,
+  config,
+  children,
+}: {
+  code: string;
+  config: DrillConfig | undefined;
+  children: (questionAt: (seq: number) => PackQuestion) => ReactNode;
+}) {
+  const { lang } = useLanguage();
+  const [state, setState] = useState<
+    | { status: "loading" }
+    | { status: "error"; message: string }
+    | { status: "ready"; questions: PackQuestion[] }
+  >({ status: "loading" });
+
+  useEffect(() => {
+    let disposed = false;
+    let source: UploadedDrillSource | null = null;
+    void (async () => {
+      // validate:false — the harness already ran at upload; failures here
+      // still surface via the per-problem spot checks in the worker.
+      const load = await UploadedDrillSource.load(code, { validate: false });
+      if (disposed) {
+        if (load.ok) load.source.dispose();
+        return;
+      }
+      if (!load.ok) {
+        setState({ status: "error", message: load.errors.join("; ") });
+        return;
+      }
+      source = load.source;
+      const seed = Math.floor(Math.random() * 0x7fffffff);
+      const result = await source.generate(seed, config, 1, UPLOADED_BATCH);
+      source.dispose();
+      source = null;
+      if (disposed) return;
+      if (!result.ok) {
+        setState({ status: "error", message: result.errors.join("; ") });
+        return;
+      }
+      setState({
+        status: "ready",
+        questions: result.problems.map((p, i) =>
+          drillProblemToPackQuestion(p, `gen-${i + 1}`),
+        ),
+      });
+    })();
+    return () => {
+      disposed = true;
+      source?.dispose();
+    };
+  }, [code, config]);
+
+  if (state.status === "loading") {
+    return (
+      <CenterFrame>
+        <Loader2 className="size-8 animate-spin text-primary" aria-hidden />
+      </CenterFrame>
+    );
+  }
+  if (state.status === "error") {
+    return (
+      <CenterFrame>
+        <p className="max-w-sm rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-center text-sm text-red-700">
+          {lang === "ru"
+            ? "Задания не загрузились — обновите страницу."
+            : "Есептер жүктелмеді — бетті жаңартыңыз."}
+          <span className="mt-1 block font-mono text-[11px] text-red-500">
+            {state.message}
+          </span>
+        </p>
+      </CenterFrame>
+    );
+  }
+  const questions = state.questions;
+  return <>{children((seq) => questions[(seq - 1) % questions.length])}</>;
+}
+
 // Endless stream from the pack's generator settings. Each student's device
 // makes its own questions — nothing is stored, matching the old generator
 // page. Runs until the room ends (no finish button).
@@ -734,11 +852,15 @@ function GeneratedFlow({
   session,
   pack,
   features,
+  questionAt,
 }: {
   generator: PackGenerator;
   session: Session;
   pack: QuizPack;
   features: QuizFeatures;
+  // Uploaded generators serve from a pre-generated batch (UploadedDrillLoader);
+  // absent → the built-in machines generate synchronously per question.
+  questionAt?: (seq: number) => PackQuestion;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -746,10 +868,9 @@ function GeneratedFlow({
   // Drill topics generate from a seeded stream (reproducible per mount);
   // graph-quadratic keeps its own Math.random internals.
   const [drillSeed] = useState(() => Math.floor(Math.random() * 2 ** 31));
+  const makeQ = questionAt ?? ((n: number) => generateAnyPackQuestion(generator, drillSeed, n));
   const [seq, setSeq] = useState(1);
-  const [question, setQuestion] = useState<PackQuestion>(() =>
-    generateAnyPackQuestion(generator, drillSeed, 1),
-  );
+  const [question, setQuestion] = useState<PackQuestion>(() => makeQ(1));
   const [optOrder, setOptOrder] = useState<number[]>(() =>
     randomOrder(choiceCount(question)),
   );
@@ -764,7 +885,7 @@ function GeneratedFlow({
 
   const next = () => {
     const n = seq + 1;
-    const q = generateAnyPackQuestion(generator, drillSeed, n);
+    const q = makeQ(n);
     setSeq(n);
     setQuestion(q);
     setOptOrder(randomOrder(choiceCount(q)));
@@ -1839,6 +1960,14 @@ function QuestionCard({
         </div>
       )}
 
+      {/* drill visual brick (number line): points from the start, solution
+          arrows revealed with the answer */}
+      {question.type === "drill" && question.visual && (
+        <div className="mt-4 rounded-xl border border-border bg-background px-2 py-2">
+          <NumberLineVisual visual={question.visual} revealed={answered} />
+        </div>
+      )}
+
       {/* drill — on-screen keypad, exact-value answers */}
       {question.type === "drill" && (
         <div className="mt-4">
@@ -2233,9 +2362,25 @@ function ScoreSummary({ stats }: { stats: QuizStats }) {
 
 // ═══ PREVIEW (admin) ══════════════════════════════════════════════════════
 
-function PreviewMode({ pack }: { pack: QuizPack }) {
-  if (pack.generator && pack.questions.length === 0) {
-    return <GeneratedPreview generator={pack.generator} pack={pack} />;
+function PreviewMode({
+  pack,
+  generatorCode,
+}: {
+  pack: QuizPack;
+  generatorCode: string | null;
+}) {
+  const generator = pack.generator;
+  if (generator && pack.questions.length === 0) {
+    if (generator.type === "drill" && generator.file && generatorCode) {
+      return (
+        <UploadedDrillLoader code={generatorCode} config={generator.config}>
+          {(questionAt) => (
+            <GeneratedPreview generator={generator} pack={pack} questionAt={questionAt} />
+          )}
+        </UploadedDrillLoader>
+      );
+    }
+    return <GeneratedPreview generator={generator} pack={pack} />;
   }
   return <ListPreview pack={pack} />;
 }
@@ -2246,9 +2391,11 @@ function PreviewMode({ pack }: { pack: QuizPack }) {
 function GeneratedPreview({
   generator,
   pack,
+  questionAt,
 }: {
   generator: PackGenerator;
   pack: QuizPack;
+  questionAt?: (seq: number) => PackQuestion;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -2257,8 +2404,12 @@ function GeneratedPreview({
   const [question, setQuestion] = useState<PackQuestion | null>(null);
 
   useEffect(() => {
-    setQuestion(generateAnyPackQuestion(generator, previewSeed, seq + 1));
-  }, [generator, previewSeed, seq]);
+    setQuestion(
+      questionAt
+        ? questionAt(seq + 1)
+        : generateAnyPackQuestion(generator, previewSeed, seq + 1),
+    );
+  }, [generator, previewSeed, seq, questionAt]);
 
   return (
     <main className="quiz-grid-paper min-h-dvh text-foreground">

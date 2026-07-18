@@ -127,9 +127,12 @@ ticks at room start, and `config` (optional) narrows what's offered:
 }
 ```
 
-Topics live in `src/lib/drill/registry.ts` (currently `radian-degree`,
-`decimal-add`); the admin "Интерактив генератор" dropdown builds these packs
-without any file.
+Topics live in `src/lib/drill/registry.ts`; the admin "Интерактив генератор"
+dropdown builds these packs without any file. Custom generators can also be
+**uploaded as .js files** (admin form, "generator .js" field) — authored per
+`docs/DRILL_GENERATOR_FORMAT.md`, tested at `/labs/drill/file`, validated
+automatically at upload. Their packs carry `"file": true` plus a
+`fileOptions` snapshot and are written by the admin action — never by hand.
 
 ### Optional per-question fields
 

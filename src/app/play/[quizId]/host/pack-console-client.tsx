@@ -67,8 +67,12 @@ import {
   defaultConfig,
   encodeDrillConfig,
   type DrillConfig,
-  type DrillTopic,
+  type DrillOptionGroup,
 } from "@/lib/drill/types";
+
+// All the console needs from a drill topic is its option groups — built-in
+// topics satisfy this structurally, uploaded ones provide a pack snapshot.
+type DrillTopicTicks = { options: DrillOptionGroup[] };
 import type { SavedQuizRef } from "@/lib/quiz/saved-quiz";
 import {
   createSavedQuizAction,
@@ -342,9 +346,15 @@ export function PackConsoleClient({
   // Drill generator: the topic's option ticks. Unlike the graph machine these
   // START at the topic defaults (optionally narrowed by the pack's pre-set
   // config) — every group must keep ≥1 tick, so an empty start would only
-  // force busywork. The teacher adjusts and opens.
-  const drillTopic: DrillTopic | null =
-    generator?.type === "drill" ? (getDrillTopic(generator.topic) ?? null) : null;
+  // force busywork. The teacher adjusts and opens. Uploaded-file generators
+  // carry their option snapshot in the pack (fileOptions), so the console
+  // renders ticks without ever executing the file.
+  const drillTopic: DrillTopicTicks | null =
+    generator?.type === "drill"
+      ? generator.file
+        ? { options: generator.fileOptions ?? [] }
+        : (getDrillTopic(generator.topic) ?? null)
+      : null;
   const [genDrill, setGenDrill] = useState<DrillConfig>(() =>
     drillTopic
       ? {
@@ -800,7 +810,7 @@ function SetupScreen({
   setGenSections: React.Dispatch<React.SetStateAction<SectionId[]>>;
   genModes: GraphQuizMode[];
   setGenModes: React.Dispatch<React.SetStateAction<GraphQuizMode[]>>;
-  drillTopic: DrillTopic | null;
+  drillTopic: DrillTopicTicks | null;
   genDrill: DrillConfig;
   setGenDrill: React.Dispatch<React.SetStateAction<DrillConfig>>;
   features: QuizFeatures;

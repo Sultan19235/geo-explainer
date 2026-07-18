@@ -10,6 +10,7 @@ import {
 } from "../src/lib/drill/types";
 import { radianDegreeTopic } from "../src/lib/drill/topics/radian-degree";
 import { DRILL_TOPICS } from "../src/lib/drill/registry";
+import { loadAndValidateDrillTopicCode } from "../src/lib/drill/topic-schema";
 import { checkInputAnswer, validatePack } from "../src/lib/quiz/pack";
 
 let failures = 0;
@@ -183,6 +184,50 @@ const drillQ = (extra: object) => ({
   );
   const res = validatePack(raw);
   check(`sample pack valid (${res.errors.join("; ")})`, res.errors.length === 0);
+}
+
+// ── uploaded-generator pipeline (docs example through the real harness) ──
+{
+  const code = readFileSync(
+    new URL("../docs/examples/integer-add.drill.js", import.meta.url),
+    "utf8",
+  );
+  const loaded = loadAndValidateDrillTopicCode(code);
+  check(`example generator passes harness (${loaded.errors.join("; ")})`, loaded.topic !== null);
+  if (loaded.topic) {
+    check("example meta id", loaded.topic.meta.id === "integer-add");
+    const p = loaded.topic.generate(mulberry32(5), { ops: ["add"], range: ["small"] });
+    check("example visual present", p.visual?.type === "number-line");
+  }
+
+  // Harness rejections: broken code, wrong shape, non-determinism.
+  check(
+    "harness: syntax error rejected",
+    loadAndValidateDrillTopicCode("this is not js").topic === null,
+  );
+  check(
+    "harness: no register call rejected",
+    loadAndValidateDrillTopicCode("const x = 1;").topic === null,
+  );
+  check(
+    "harness: built-in id collision rejected",
+    loadAndValidateDrillTopicCode(
+      code.replace('id: "integer-add"', 'id: "logarithm"'),
+    ).topic === null,
+  );
+  const nonDet = `registerDrillTopic({
+    apiVersion: 1, id: "bad-random",
+    title: {kz: "т", ru: "т"}, subtitle: {kz: "т", ru: "т"},
+    options: [{id: "g", label: {kz: "т", ru: "т"}, choices: [{id: "a", label: {kz: "т", ru: "т"}}], defaults: ["a"]}],
+    generate(rng, config) {
+      const n = Math.floor(Math.random() * 10) + 1;
+      return { prompt: {kz: "$1+1$", ru: "$1+1$"}, answer: exact(n), answerStyle: "fraction", keys: [], variant: "x" };
+    },
+  });`;
+  check(
+    "harness: Math.random rejected as non-deterministic",
+    loadAndValidateDrillTopicCode(nonDet).topic === null,
+  );
 }
 
 if (failures === 0) console.log("drill-sanity: ALL OK");

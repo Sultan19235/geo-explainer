@@ -16,14 +16,22 @@ export type QuizWithPack = {
   title_kz: string;
   title_ru: string | null;
   pack: QuizPack;
+  // Uploaded drill-generator file (pack.generator = {type:"drill", file:true}):
+  // the .js source, executed only inside the student page's sandbox worker.
+  generatorCode: string | null;
 };
 
 export function packPath(quizId: string) {
   return `quiz/${quizId}/pack.json`;
 }
 
+export function drillGenPath(quizId: string) {
+  return `quiz/${quizId}/generator.js`;
+}
+
 // Local pack testing without touching Storage: in development only, the id
-// "dev-preview" serves packs/dev-preview.json straight from the repo.
+// "dev-preview" serves packs/dev-preview.json straight from the repo (and
+// packs/dev-preview.generator.js for an uploaded-generator pack).
 // Documented in docs/QUIZ_PACK_FORMAT.md.
 async function loadDevPreview(): Promise<QuizWithPack | null> {
   try {
@@ -36,7 +44,22 @@ async function loadDevPreview(): Promise<QuizWithPack | null> {
       console.error("dev-preview pack invalid:", errors);
       return null;
     }
-    return { id: "dev-preview", title_kz: "Dev preview", title_ru: null, pack };
+    let generatorCode: string | null = null;
+    if (pack.generator?.type === "drill" && pack.generator.file) {
+      generatorCode = await fs
+        .readFile(
+          path.join(process.cwd(), "packs", "dev-preview.generator.js"),
+          "utf8",
+        )
+        .catch(() => null);
+    }
+    return {
+      id: "dev-preview",
+      title_kz: "Dev preview",
+      title_ru: null,
+      pack,
+      generatorCode,
+    };
   } catch {
     return null;
   }
@@ -81,6 +104,27 @@ export async function downloadPack(
   )();
 }
 
+// Uploaded drill-generator source. Cached and tagged with the PACK's cache
+// tag — the admin action revalidates that tag on every (re)upload, and file
+// and pack always change together.
+export async function downloadDrillGeneratorCode(
+  quizId: string,
+): Promise<string | null> {
+  const storagePath = drillGenPath(quizId);
+  return unstable_cache(
+    async () => {
+      const admin = createAdminClient();
+      const { data: file, error } = await admin.storage
+        .from(PACK_BUCKET)
+        .download(storagePath);
+      if (error || !file) return null;
+      return file.text();
+    },
+    ["drill-generator", storagePath],
+    { revalidate: 300, tags: [packCacheTag(packPath(quizId))] },
+  )();
+}
+
 export async function loadQuizWithPack(
   quizId: string,
 ): Promise<QuizWithPack | null> {
@@ -107,10 +151,16 @@ export async function loadQuizWithPack(
   const pack = await downloadPack(quiz.pack_path);
   if (!pack) return null;
 
+  const generatorCode =
+    pack.generator?.type === "drill" && pack.generator.file
+      ? await downloadDrillGeneratorCode(quiz.id)
+      : null;
+
   return {
     id: quiz.id,
     title_kz: quiz.title_kz,
     title_ru: quiz.title_ru,
     pack,
+    generatorCode,
   };
 }

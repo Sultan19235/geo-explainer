@@ -28,6 +28,15 @@ export default function DrillTopicsPage() {
               </div>
             </Link>
           ))}
+          <Link
+            href="/labs/drill/file"
+            className="rounded-xl border-[1.5px] border-dashed border-[#d8dde5] bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-[#2563eb] hover:shadow-[0_4px_12px_rgba(37,99,235,0.12)]"
+          >
+            <div className="text-[15px] font-bold">Generator file previewer</div>
+            <div className="mt-0.5 text-xs text-[#6b7280]">
+              .js генератор файлын тексеру · DRILL_GENERATOR_FORMAT.md
+            </div>
+          </Link>
         </div>
       </div>
     </div>

@@ -35,6 +35,19 @@ export function keysForAnswer(answer: string): DrillKey[] {
   return keys;
 }
 
+/** A visual "brick" a problem can request. Bricks are engine components,
+ * built once and configured declaratively — a generator can only name one
+ * and set its knobs, never draw for itself. */
+export type DrillVisual = {
+  type: "number-line";
+  min: number;
+  max: number;
+  /** Dots marked on the line from the start (e.g. the starting number). */
+  points?: number[];
+  /** Hop arrows revealed together with the answer — the "why" picture. */
+  arrows?: Array<{ from: number; to: number }>;
+};
+
 export type DrillProblem = {
   /** MathText format — plain text with $...$ KaTeX segments. */
   prompt: DrillText;
@@ -46,6 +59,8 @@ export type DrillProblem = {
   solution?: DrillText;
   /** Template id inside the topic (e.g. "deg2rad") — retry bookkeeping/analytics. */
   variant: string;
+  /** Optional visual brick under the prompt (number line, …). */
+  visual?: DrillVisual;
 };
 
 export type DrillChoice = { id: string; label: DrillText };
@@ -69,7 +84,7 @@ export type DrillTopic = {
   generate: (rng: Rng, config: DrillConfig) => DrillProblem;
 };
 
-export function defaultConfig(topic: DrillTopic): DrillConfig {
+export function defaultConfig(topic: Pick<DrillTopic, "options">): DrillConfig {
   const config: DrillConfig = {};
   for (const group of topic.options) config[group.id] = [...group.defaults];
   return config;

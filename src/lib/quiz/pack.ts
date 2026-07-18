@@ -37,7 +37,10 @@ import {
   keysForAnswer,
   type DrillConfig,
   type DrillKey,
+  type DrillOptionGroup,
+  type DrillVisual,
 } from "@/lib/drill/types";
+import { validateOptionGroups, validateVisual } from "@/lib/drill/topic-schema";
 
 export type PackLang = "kz" | "ru";
 
@@ -88,6 +91,8 @@ export type PackQuestion = {
   // drill: keypad extras beyond digits; inferred from `answer` on validate,
   // authors may add more (e.g. allow "1/2" for an answer written "0,5")
   keys?: DrillKey[];
+  // drill: optional visual brick under the prompt (number line, …)
+  visual?: DrillVisual;
   // graph-quadratic
   graph?: PackGraphQuadratic;
   // "Формулалар" panel for THIS question: what the figure shows + the GENERAL
@@ -153,6 +158,12 @@ export type PackGenerator =
       type: "drill";
       topic: string;
       config?: DrillConfig;
+      // Uploaded generator file (admin "generator .js" upload): the code
+      // lives in storage next to the pack (drillGenPath). fileOptions is the
+      // option-groups snapshot taken at upload so the teacher console renders
+      // its ticks without ever executing the file.
+      file?: true;
+      fileOptions?: DrillOptionGroup[];
     };
 
 export type QuizPack = {
@@ -445,64 +456,96 @@ export function validatePack(raw: unknown): {
     if (typeof g !== "object" || g === null || Array.isArray(g)) {
       errors.push('"generator" must be an object.');
     } else if (g.type === "drill") {
-      const topic =
-        typeof g.topic === "string" ? getDrillTopic(g.topic) : undefined;
-      if (!topic) {
-        errors.push(
-          `"generator.topic" must name a drill topic: ${DRILL_TOPICS.map((t) => `"${t.id}"`).join(", ")}.`,
-        );
-      } else {
-        let config: DrillConfig | undefined;
-        let configOk = true;
-        if (g.config !== undefined) {
+      // Validates config choices against a known option-group list; pushes
+      // readable errors, returns the cleaned config (undefined when empty).
+      const cleanConfig = (
+        options: DrillOptionGroup[],
+        ownerLabel: string,
+      ): { config?: DrillConfig; ok: boolean } => {
+        if (g.config === undefined) return { ok: true };
+        if (
+          typeof g.config !== "object" ||
+          g.config === null ||
+          Array.isArray(g.config)
+        ) {
+          errors.push(
+            '"generator.config" must be an object of { optionGroupId: [choiceIds] }.',
+          );
+          return { ok: false };
+        }
+        let ok = true;
+        let config: DrillConfig | undefined = {};
+        for (const [groupId, rawIds] of Object.entries(
+          g.config as Record<string, unknown>,
+        )) {
+          const group = options.find((o) => o.id === groupId);
+          if (!group) {
+            errors.push(
+              `"generator.config": unknown option group "${groupId}" for ${ownerLabel} — groups: ${options.map((o) => o.id).join(", ")}.`,
+            );
+            ok = false;
+            continue;
+          }
           if (
-            typeof g.config !== "object" ||
-            g.config === null ||
-            Array.isArray(g.config)
+            !Array.isArray(rawIds) ||
+            !rawIds.every((v) => typeof v === "string")
           ) {
             errors.push(
-              '"generator.config" must be an object of { optionGroupId: [choiceIds] }.',
+              `"generator.config.${groupId}" must be a list of choice id strings.`,
             );
-            configOk = false;
-          } else {
-            config = {};
-            for (const [groupId, rawIds] of Object.entries(
-              g.config as Record<string, unknown>,
-            )) {
-              const group = topic.options.find((o) => o.id === groupId);
-              if (!group) {
-                errors.push(
-                  `"generator.config": unknown option group "${groupId}" for topic "${topic.id}" — groups: ${topic.options.map((o) => o.id).join(", ")}.`,
-                );
-                configOk = false;
-                continue;
-              }
-              if (
-                !Array.isArray(rawIds) ||
-                !rawIds.every((v) => typeof v === "string")
-              ) {
-                errors.push(
-                  `"generator.config.${groupId}" must be a list of choice id strings.`,
-                );
-                configOk = false;
-                continue;
-              }
-              const unknown = (rawIds as string[]).filter(
-                (id) => !group.choices.some((c) => c.id === id),
-              );
-              if (unknown.length > 0) {
-                errors.push(
-                  `"generator.config.${groupId}": unknown choice(s) ${unknown.map((u) => `"${u}"`).join(", ")} — choices: ${group.choices.map((c) => c.id).join(", ")}.`,
-                );
-                configOk = false;
-                continue;
-              }
-              if (rawIds.length > 0) config[groupId] = rawIds as string[];
-            }
-            if (config && Object.keys(config).length === 0) config = undefined;
+            ok = false;
+            continue;
+          }
+          const unknown = (rawIds as string[]).filter(
+            (id) => !group.choices.some((c) => c.id === id),
+          );
+          if (unknown.length > 0) {
+            errors.push(
+              `"generator.config.${groupId}": unknown choice(s) ${unknown.map((u) => `"${u}"`).join(", ")} — choices: ${group.choices.map((c) => c.id).join(", ")}.`,
+            );
+            ok = false;
+            continue;
+          }
+          if (rawIds.length > 0) config[groupId] = rawIds as string[];
+        }
+        if (config && Object.keys(config).length === 0) config = undefined;
+        return { config, ok };
+      };
+
+      if (g.file === true) {
+        // Uploaded generator: the topic id comes from the file, and the
+        // option snapshot rides in the pack for the console — no registry.
+        const topicId =
+          typeof g.topic === "string" && /^[a-z0-9][a-z0-9-]{1,39}$/.test(g.topic)
+            ? g.topic
+            : null;
+        if (!topicId) {
+          errors.push(
+            '"generator.topic" must be the uploaded file\'s topic id (lowercase letters/digits/dashes).',
+          );
+        }
+        const optionErrors = validateOptionGroups(g.fileOptions ?? []).map(
+          (e) => `"generator.fileOptions": ${e}`,
+        );
+        errors.push(...optionErrors);
+        if (topicId && optionErrors.length === 0) {
+          const fileOptions = g.fileOptions as DrillOptionGroup[];
+          const { config, ok } = cleanConfig(fileOptions, `file topic "${topicId}"`);
+          if (ok) {
+            generator = { type: "drill", topic: topicId, config, file: true, fileOptions };
           }
         }
-        if (configOk) generator = { type: "drill", topic: topic.id, config };
+      } else {
+        const topic =
+          typeof g.topic === "string" ? getDrillTopic(g.topic) : undefined;
+        if (!topic) {
+          errors.push(
+            `"generator.topic" must name a drill topic: ${DRILL_TOPICS.map((t) => `"${t.id}"`).join(", ")} (or set "file": true for an uploaded generator).`,
+          );
+        } else {
+          const { config, ok } = cleanConfig(topic.options, `topic "${topic.id}"`);
+          if (ok) generator = { type: "drill", topic: topic.id, config };
+        }
       }
     } else if (g.type !== "graph-quadratic") {
       errors.push(
@@ -725,7 +768,7 @@ export function validatePack(raw: unknown): {
       if (q.keys !== undefined) {
         if (!Array.isArray(q.keys) || !q.keys.every(isDrillKey)) {
           errors.push(
-            `${label}: "keys" must be a list from "comma", "minus", "pi", "frac".`,
+            `${label}: "keys" must be a list from "comma", "minus", "pi", "frac", "sqrt".`,
           );
           return;
         }
@@ -736,6 +779,14 @@ export function validatePack(raw: unknown): {
         );
       } else {
         question.keys = keysForAnswer(answer);
+      }
+      if (q.visual !== undefined) {
+        const visualErrors = validateVisual(q.visual, label);
+        if (visualErrors.length > 0) {
+          errors.push(...visualErrors);
+          return;
+        }
+        question.visual = q.visual as DrillVisual;
       }
     } else {
       if (typeof q.answer !== "string" && typeof q.answer !== "number") {
