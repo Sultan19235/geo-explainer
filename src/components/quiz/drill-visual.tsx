@@ -27,6 +27,11 @@ const FILLS: Record<FigureColor, string> = {
   slate: "rgba(100,116,139,0.12)",
 };
 
+// Figure text lives in a 640-wide viewBox that scales down to phone width, so
+// this reads on screen at roughly 0.7× — keep it generous. Single knob for
+// every figure label (both `point` captions and `label` shapes).
+const LABEL_FONT_SIZE = 21;
+
 type FigureData = Extract<DrillVisual, { type: "figure" }>;
 
 export function FigureVisual({
@@ -154,7 +159,7 @@ export function FigureVisual({
               <text
                 x={x(shape.at[0]) + 8}
                 y={y(shape.at[1]) - 8}
-                fontSize={14}
+                fontSize={LABEL_FONT_SIZE}
                 fontWeight={600}
                 fill={color}
               >
@@ -171,7 +176,7 @@ export function FigureVisual({
             x={x(shape.at[0])}
             y={y(shape.at[1])}
             textAnchor="middle"
-            fontSize={14}
+            fontSize={LABEL_FONT_SIZE}
             fontWeight={600}
             fill={COLORS[shape.color ?? "slate"]}
           >

@@ -78,9 +78,9 @@ export function NumberLineVisual({
             {(v % labelStep === 0 || v === 0) && (
               <text
                 x={x(v)}
-                y={baseY + 22}
+                y={baseY + 24}
                 textAnchor="middle"
-                fontSize={13}
+                fontSize={16}
                 fontWeight={v === 0 ? 700 : 500}
                 fill="#334155"
               >
