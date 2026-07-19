@@ -110,6 +110,55 @@ Display math uses `$$…$$`. Remember to double backslashes in JSON:
   canonical form matches but distant equivalents (`4/6` for `2/3`) may not —
   fine in practice since the keypad steers students to the canonical form.
 
+**Drill visuals (`"visual"`, optional)** — a drill question can carry a
+lightweight picture under its prompt. Two bricks; the engine owns colors and
+sizes, the pack only describes what to show. Parts listed in `reveal` /
+`arrows` appear **only after the student answers** — the "why" picture.
+
+`number-line` (integer/decimal hops):
+
+```json
+"visual": {
+  "type": "number-line",
+  "min": -10, "max": 10,
+  "points": [-3],
+  "arrows": [{ "from": 0, "to": -3 }, { "from": -3, "to": 2 }]
+}
+```
+
+Span (`max − min`) ≤ 200; `points` and arrow ends must lie inside
+`[min, max]`.
+
+`figure` (any static picture — bar models, unit circle, angles, simple
+geometry) described as a shape list in math coordinates, y grows upward:
+
+```json
+"visual": {
+  "type": "figure",
+  "view": { "xMin": 0, "xMax": 10, "yMin": -2, "yMax": 4 },
+  "shapes": [
+    { "kind": "polygon", "points": [[0,0],[3,0],[3,2],[0,2]], "fill": true, "color": "green" },
+    { "kind": "polygon", "points": [[3,0],[9,0],[9,2],[3,2]] },
+    { "kind": "label", "at": [1.5, 3], "text": "20", "color": "green" },
+    { "kind": "label", "at": [4.5, -1], "text": "?" }
+  ],
+  "reveal": [
+    { "kind": "arrow", "from": [3, 3], "to": [9, 3], "color": "red" },
+    { "kind": "label", "at": [6, 3.6], "text": "60", "color": "red" }
+  ]
+}
+```
+
+Shape kinds: `segment {from,to,dash?}` · `arrow {from,to}` ·
+`circle {center,radius,fill?}` · `arc {center,radius,startDeg,endDeg,arrow?}`
+· `point {at,label?}` · `label {at,text}` (plain text, unicode `π√°` fine,
+≤ 24 chars — **no `$...$`**) · `polygon {points,fill?}`. Every shape takes an
+optional `"color"`: `blue` (default), `red`, `green`, `orange`, `slate`.
+At most 80 shapes (`shapes` + `reveal`). Keep `view` proportions square-ish —
+x and y use the same scale so circles stay round. Add `"grid": true` /
+`"axes": true` for a background grid or x/y axes. `visual` exists on **drill
+questions only** — mcq/input questions use `geogebra` or `image` instead.
+
 **Drill generator packs** (endless machine-made problems) need no question
 list — name a registered drill topic instead; the teacher picks the option
 ticks at room start, and `config` (optional) narrows what's offered:
