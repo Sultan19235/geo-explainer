@@ -12,7 +12,7 @@ import { ArrowLeft, Check, Flame, Loader2, Settings2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MathText } from "@/components/quiz/math-text";
 import { DrillKeypad } from "@/components/quiz/drill-keypad";
-import { NumberLineVisual } from "@/components/quiz/number-line";
+import { DrillVisualView } from "@/components/quiz/drill-visual";
 import { LanguageToggle } from "@/components/language-toggle";
 import { useLanguage } from "@/lib/i18n/context";
 import type {
@@ -263,7 +263,7 @@ export function DrillLoop({
 
               {current.problem.visual && (
                 <div className="mt-3 rounded-xl border border-border bg-background px-2 py-2">
-                  <NumberLineVisual
+                  <DrillVisualView
                     visual={current.problem.visual}
                     revealed={feedback !== null}
                   />

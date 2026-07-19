@@ -124,8 +124,9 @@ the sandbox removes them and the harness rejects non-determinism.
 
 ## Visual bricks — `visual` (optional)
 
-Bricks are engine components; a file only names one and sets its knobs.
-apiVersion 1 has one brick:
+Bricks are engine components; a file only names one and sets its knobs — the
+engine owns colors, stroke widths and phone-tested sizes. apiVersion 1 has
+two bricks:
 
 **`number-line`** — `{ type: "number-line", min, max, points?, arrows? }`
 
@@ -133,6 +134,44 @@ apiVersion 1 has one brick:
 - `points`: dots visible from the start (the given numbers)
 - `arrows`: `{ from, to }` hops drawn **only after answering** — the "why"
   picture (e.g. −3 + 5: an arrow 0→−3, then −3→2)
+
+**`figure`** — a generic picture DESCRIBED as a list of shape parts in math
+coordinates (y grows upward). The file never draws; it lists parts, the
+engine renders them:
+
+```js
+visual: {
+  type: "figure",
+  view: { xMin: -1.4, xMax: 1.4, yMin: -1.4, yMax: 1.4 },
+  grid: false,          // light background grid
+  axes: true,           // x/y axes through 0
+  shapes: [             // visible from the start
+    { kind: "circle", center: [0, 0], radius: 1 },
+    { kind: "segment", from: [0, 0], to: [0.5, 0.866], color: "red" },
+    { kind: "label", at: [0.75, 0.35], text: "60°", color: "red" },
+  ],
+  reveal: [             // shown only after answering — the "why" picture
+    { kind: "segment", from: [0.5, 0.866], to: [0.5, 0], dash: true },
+    { kind: "point", at: [0.5, 0], label: "0,5", color: "green" },
+  ],
+}
+```
+
+Shape kinds (all coordinates `[x, y]` in view units):
+
+- `{ kind: "segment", from, to, color?, dash? }`
+- `{ kind: "arrow", from, to, color? }` — straight arrow with a head
+- `{ kind: "circle", center, radius, color?, fill? }`
+- `{ kind: "arc", center, radius, startDeg, endDeg, color?, arrow? }` —
+  counter-clockwise when `endDeg > startDeg`
+- `{ kind: "point", at, color?, label? }` — dot, optional short label beside
+- `{ kind: "label", at, text, color? }` — plain text (unicode π√° fine, ≤ 24 chars)
+- `{ kind: "polygon", points, color?, fill? }` — ≥ 3 points
+
+`color` is a palette name: `"blue"` (default), `"red"`, `"green"`,
+`"orange"`, `"slate"`. At most 80 shapes per figure (`shapes` + `reveal`).
+Keep figures square-ish — the engine keeps x and y scales equal so circles
+stay round.
 
 ## Rules the harness enforces (upload fails otherwise)
 

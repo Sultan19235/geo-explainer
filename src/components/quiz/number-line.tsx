@@ -12,12 +12,14 @@ import type { DrillVisual } from "@/lib/drill/types";
 
 const ARROW_COLORS = ["#2245c3", "#dc2626", "#059669", "#d97706"];
 
+type NumberLineData = Extract<DrillVisual, { type: "number-line" }>;
+
 export function NumberLineVisual({
   visual,
   revealed,
   className,
 }: {
-  visual: DrillVisual;
+  visual: NumberLineData;
   revealed: boolean;
   className?: string;
 }) {

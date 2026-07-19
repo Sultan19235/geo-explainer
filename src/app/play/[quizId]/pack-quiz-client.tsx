@@ -51,7 +51,7 @@ import {
 } from "@/lib/quiz/quadratic";
 import { LanguageToggle } from "@/components/language-toggle";
 import { DrillKeypad } from "@/components/quiz/drill-keypad";
-import { NumberLineVisual } from "@/components/quiz/number-line";
+import { DrillVisualView } from "@/components/quiz/drill-visual";
 import { parseExact, toKatex, toPlain } from "@/lib/drill/exact";
 import { mulberry32 as drillRng } from "@/lib/drill/rng";
 import { getDrillTopic } from "@/lib/drill/registry";
@@ -1960,11 +1960,11 @@ function QuestionCard({
         </div>
       )}
 
-      {/* drill visual brick (number line): points from the start, solution
+      {/* drill visual brick (number line / figure): base picture from the start, solution
           arrows revealed with the answer */}
       {question.type === "drill" && question.visual && (
         <div className="mt-4 rounded-xl border border-border bg-background px-2 py-2">
-          <NumberLineVisual visual={question.visual} revealed={answered} />
+          <DrillVisualView visual={question.visual} revealed={answered} />
         </div>
       )}
 

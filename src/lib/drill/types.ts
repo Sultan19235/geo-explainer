@@ -35,18 +35,49 @@ export function keysForAnswer(answer: string): DrillKey[] {
   return keys;
 }
 
-/** A visual "brick" a problem can request. Bricks are engine components,
- * built once and configured declaratively — a generator can only name one
- * and set its knobs, never draw for itself. */
-export type DrillVisual = {
-  type: "number-line";
-  min: number;
-  max: number;
-  /** Dots marked on the line from the start (e.g. the starting number). */
-  points?: number[];
-  /** Hop arrows revealed together with the answer — the "why" picture. */
-  arrows?: Array<{ from: number; to: number }>;
-};
+// ─── Visual bricks ──────────────────────────────────────────────────────────
+// A problem can request a visual, declaratively: the engine owns every pixel
+// (colors, stroke widths, phone-tested sizes); the generator only describes
+// WHAT to show. Two bricks:
+//   number-line — the polished special-case for integer/decimal hops;
+//   figure      — a generic picture described as a list of safe shape parts
+//                 (math coordinates; the description is data, so the upload
+//                 harness can check it, and files never touch the screen).
+
+/** Brand-palette color names — the engine maps them to real colors. */
+export type FigureColor = "blue" | "red" | "green" | "orange" | "slate";
+
+export type FigureShape =
+  | { kind: "segment"; from: [number, number]; to: [number, number]; color?: FigureColor; dash?: boolean }
+  | { kind: "arrow"; from: [number, number]; to: [number, number]; color?: FigureColor }
+  | { kind: "circle"; center: [number, number]; radius: number; color?: FigureColor; fill?: boolean }
+  | { kind: "arc"; center: [number, number]; radius: number; startDeg: number; endDeg: number; color?: FigureColor; arrow?: boolean }
+  | { kind: "point"; at: [number, number]; color?: FigureColor; label?: string }
+  | { kind: "label"; at: [number, number]; text: string; color?: FigureColor }
+  | { kind: "polygon"; points: Array<[number, number]>; color?: FigureColor; fill?: boolean };
+
+export type DrillVisual =
+  | {
+      type: "number-line";
+      min: number;
+      max: number;
+      /** Dots marked on the line from the start (e.g. the starting number). */
+      points?: number[];
+      /** Hop arrows revealed together with the answer — the "why" picture. */
+      arrows?: Array<{ from: number; to: number }>;
+    }
+  | {
+      type: "figure";
+      /** Math-coordinate window the shapes live in (y grows upward). */
+      view: { xMin: number; xMax: number; yMin: number; yMax: number };
+      /** Draw a light grid and x/y axes behind the shapes. */
+      grid?: boolean;
+      axes?: boolean;
+      /** Shapes visible from the start. */
+      shapes: FigureShape[];
+      /** Shapes revealed together with the answer — the "why" picture. */
+      reveal?: FigureShape[];
+    };
 
 export type DrillProblem = {
   /** MathText format — plain text with $...$ KaTeX segments. */

@@ -10,7 +10,10 @@ import {
 } from "../src/lib/drill/types";
 import { radianDegreeTopic } from "../src/lib/drill/topics/radian-degree";
 import { DRILL_TOPICS } from "../src/lib/drill/registry";
-import { loadAndValidateDrillTopicCode } from "../src/lib/drill/topic-schema";
+import {
+  loadAndValidateDrillTopicCode,
+  validateVisual,
+} from "../src/lib/drill/topic-schema";
 import { checkInputAnswer, validatePack } from "../src/lib/quiz/pack";
 
 let failures = 0;
@@ -228,6 +231,57 @@ const drillQ = (extra: object) => ({
     "harness: Math.random rejected as non-deterministic",
     loadAndValidateDrillTopicCode(nonDet).topic === null,
   );
+}
+
+// ── figure brick validation ──
+{
+  const good = {
+    type: "figure",
+    view: { xMin: -1.4, xMax: 1.4, yMin: -1.4, yMax: 1.4 },
+    axes: true,
+    shapes: [
+      { kind: "circle", center: [0, 0], radius: 1 },
+      { kind: "segment", from: [0, 0], to: [0.5, 0.866], color: "red" },
+      { kind: "arc", center: [0, 0], radius: 0.3, startDeg: 0, endDeg: 60, arrow: true },
+      { kind: "label", at: [0.7, 0.3], text: "60°" },
+      { kind: "polygon", points: [[0, 0], [1, 0], [0.5, 0.8]], fill: true },
+    ],
+    reveal: [{ kind: "point", at: [0.5, 0], label: "0,5", color: "green" }],
+  };
+  check("figure: valid accepted", validateVisual(good, "t").length === 0);
+  check(
+    "figure: bad view rejected",
+    validateVisual({ type: "figure", view: { xMin: 1, xMax: 0, yMin: 0, yMax: 1 }, shapes: [] }, "t").length > 0,
+  );
+  check(
+    "figure: unknown shape kind rejected",
+    validateVisual(
+      { type: "figure", view: good.view, shapes: [{ kind: "spline", from: [0, 0], to: [1, 1] }] },
+      "t",
+    ).length > 0,
+  );
+  check(
+    "figure: bad color rejected",
+    validateVisual(
+      { type: "figure", view: good.view, shapes: [{ kind: "point", at: [0, 0], color: "pink" }] },
+      "t",
+    ).length > 0,
+  );
+  check(
+    "figure: NaN coords rejected",
+    validateVisual(
+      { type: "figure", view: good.view, shapes: [{ kind: "segment", from: [NaN, 0], to: [1, 1] }] },
+      "t",
+    ).length > 0,
+  );
+  // Through the pack path too: an authored drill question may carry a figure.
+  const packRes = validatePack({
+    title: "t",
+    questions: [
+      { type: "drill", text: "Есепте: $1+1$", answer: "2", visual: good },
+    ],
+  });
+  check(`figure: pack question accepted (${packRes.errors.join("; ")})`, packRes.errors.length === 0);
 }
 
 if (failures === 0) console.log("drill-sanity: ALL OK");

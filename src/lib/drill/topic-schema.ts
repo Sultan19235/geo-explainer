@@ -268,31 +268,115 @@ export function validateProblem(p: unknown, label: string): string[] {
   return errors;
 }
 
+const FIGURE_COLORS = ["blue", "red", "green", "orange", "slate"];
+const MAX_FIGURE_SHAPES = 80;
+const MAX_LABEL_CHARS = 24;
+
+function isPt(p: unknown): p is [number, number] {
+  return (
+    Array.isArray(p) && p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1])
+  );
+}
+
+function validateShape(s: unknown, label: string): string | null {
+  if (typeof s !== "object" || s === null) return `${label}: each shape must be an object.`;
+  const shape = s as Record<string, unknown>;
+  if ("color" in shape && shape.color !== undefined && !FIGURE_COLORS.includes(shape.color as string)) {
+    return `${label}: shape color must be one of ${FIGURE_COLORS.join(", ")}.`;
+  }
+  switch (shape.kind) {
+    case "segment":
+    case "arrow":
+      return isPt(shape.from) && isPt(shape.to)
+        ? null
+        : `${label}: "${shape.kind}" needs "from" and "to" as [x, y] pairs.`;
+    case "circle":
+      return isPt(shape.center) && Number.isFinite(shape.radius) && (shape.radius as number) > 0
+        ? null
+        : `${label}: "circle" needs "center" [x, y] and a positive "radius".`;
+    case "arc":
+      return isPt(shape.center) &&
+        Number.isFinite(shape.radius) &&
+        (shape.radius as number) > 0 &&
+        Number.isFinite(shape.startDeg) &&
+        Number.isFinite(shape.endDeg)
+        ? null
+        : `${label}: "arc" needs "center", "radius", "startDeg", "endDeg".`;
+    case "point":
+    case "label": {
+      if (!isPt(shape.at)) return `${label}: "${shape.kind}" needs "at" as [x, y].`;
+      const text = shape.kind === "label" ? shape.text : shape.label;
+      if (shape.kind === "label" && (typeof text !== "string" || text.length === 0)) {
+        return `${label}: "label" needs a "text" string.`;
+      }
+      if (text !== undefined && (typeof text !== "string" || text.length > MAX_LABEL_CHARS)) {
+        return `${label}: label text must be a string of at most ${MAX_LABEL_CHARS} chars.`;
+      }
+      return null;
+    }
+    case "polygon":
+      return Array.isArray(shape.points) && shape.points.length >= 3 && shape.points.every(isPt)
+        ? null
+        : `${label}: "polygon" needs at least 3 [x, y] points.`;
+    default:
+      return `${label}: unknown shape kind "${String(shape.kind)}" — use segment, arrow, circle, arc, point, label or polygon.`;
+  }
+}
+
 export function validateVisual(v: unknown, label: string): string[] {
   const errors: string[] = [];
   if (typeof v !== "object" || v === null) return [`${label}: "visual" must be an object.`];
   const vis = v as DrillVisual;
-  if (vis.type !== "number-line") {
-    return [`${label}: visual "type" must be "number-line" (the only brick so far).`];
-  }
-  const span = Number(vis.max) - Number(vis.min);
-  if (!Number.isFinite(vis.min) || !Number.isFinite(vis.max) || span <= 0 || span > 200) {
-    errors.push(`${label}: number-line needs finite min < max with a span of at most 200.`);
+
+  if (vis.type === "number-line") {
+    const span = Number(vis.max) - Number(vis.min);
+    if (!Number.isFinite(vis.min) || !Number.isFinite(vis.max) || span <= 0 || span > 200) {
+      errors.push(`${label}: number-line needs finite min < max with a span of at most 200.`);
+      return errors;
+    }
+    const inRange = (n: unknown) =>
+      typeof n === "number" && Number.isFinite(n) && n >= vis.min && n <= vis.max;
+    if (vis.points !== undefined && (!Array.isArray(vis.points) || !vis.points.every(inRange))) {
+      errors.push(`${label}: number-line "points" must be numbers inside [min, max].`);
+    }
+    if (
+      vis.arrows !== undefined &&
+      (!Array.isArray(vis.arrows) ||
+        !vis.arrows.every((a) => a && inRange(a.from) && inRange(a.to) && a.from !== a.to))
+    ) {
+      errors.push(`${label}: number-line "arrows" must be {from, to} pairs inside [min, max].`);
+    }
     return errors;
   }
-  const inRange = (n: unknown) =>
-    typeof n === "number" && Number.isFinite(n) && n >= vis.min && n <= vis.max;
-  if (vis.points !== undefined && (!Array.isArray(vis.points) || !vis.points.every(inRange))) {
-    errors.push(`${label}: number-line "points" must be numbers inside [min, max].`);
+
+  if (vis.type === "figure") {
+    const view = vis.view as { xMin: number; xMax: number; yMin: number; yMax: number } | undefined;
+    if (
+      !view ||
+      !Number.isFinite(view.xMin) ||
+      !Number.isFinite(view.xMax) ||
+      !Number.isFinite(view.yMin) ||
+      !Number.isFinite(view.yMax) ||
+      view.xMax <= view.xMin ||
+      view.yMax <= view.yMin
+    ) {
+      return [`${label}: figure "view" needs finite xMin < xMax and yMin < yMax.`];
+    }
+    const shapes = Array.isArray(vis.shapes) ? vis.shapes : null;
+    if (!shapes) return [`${label}: figure "shapes" must be a list.`];
+    const reveal = vis.reveal === undefined ? [] : Array.isArray(vis.reveal) ? vis.reveal : null;
+    if (reveal === null) return [`${label}: figure "reveal" must be a list of shapes.`];
+    if (shapes.length + reveal.length > MAX_FIGURE_SHAPES) {
+      return [`${label}: at most ${MAX_FIGURE_SHAPES} shapes per figure.`];
+    }
+    [...shapes, ...reveal].forEach((s, i) => {
+      const err = validateShape(s, `${label}: shape ${i + 1}`);
+      if (err && errors.length < 6) errors.push(err);
+    });
+    return errors;
   }
-  if (
-    vis.arrows !== undefined &&
-    (!Array.isArray(vis.arrows) ||
-      !vis.arrows.every((a) => a && inRange(a.from) && inRange(a.to) && a.from !== a.to))
-  ) {
-    errors.push(`${label}: number-line "arrows" must be {from, to} pairs inside [min, max].`);
-  }
-  return errors;
+
+  return [`${label}: visual "type" must be "number-line" or "figure".`];
 }
 
 // ─── The harness ────────────────────────────────────────────────────────────
