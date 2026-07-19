@@ -1,4 +1,12 @@
-// Exact-value answer model for drill topics.
+// Exact-value answer model — SERVER PORT (v9 tournament grading).
+//
+// PORT of exact / equalsExact / parseExact (and their helpers) from
+// src/lib/drill/exact.ts. Tournament answers are graded HERE — the phone only
+// relays the raw keypad string — so the two implementations MUST stay
+// textually in sync: if the rules change in exact.ts, mirror them here (and
+// vice versa). Parity is enforced by scripts/exact-port-parity.ts (seeded
+// fuzz over both implementations). toPlain/toKatex are display-only and
+// deliberately not ported.
 //
 // Every drill answer is a rational number times an optional π factor or an
 // optional square root:
@@ -10,26 +18,18 @@
 // float tolerance and never string matching. `0,50` equals `1/2` equals `0,5`,
 // `√12/2` equals `√3`; `2π/3` never equals `2,09`.
 //
-// Pure module: no React, no DOM — safe to import server-side and in tests.
-//
-// PORTED to server/exact.js (tournament answers are graded on the live
-// server) — keep textually in sync: if `exact`/`equalsExact`/`parseExact` or
-// their helpers change here, mirror them there (and vice versa). Parity is
-// enforced by scripts/exact-port-parity.ts.
+// Pure CommonJS module: no dependencies, no side effects — plain `node` test
+// scripts can require it without starting the server.
 
-export type ExactUnit = "one" | "pi";
+"use strict";
 
-export type Exact = {
-  /** Numerator; carries the sign. */
-  num: number;
-  /** Denominator; always > 0. */
-  den: number;
-  unit: ExactUnit;
-  /** Squarefree radicand ≥ 2 (value × √rad); never combined with π. */
-  rad?: number;
-};
+// Exact shape: { num, den, unit, rad? }
+//   num  — numerator; carries the sign.
+//   den  — denominator; always > 0.
+//   unit — "one" | "pi".
+//   rad  — squarefree radicand ≥ 2 (value × √rad); never combined with π.
 
-function gcd(a: number, b: number): number {
+function gcd(a, b) {
   a = Math.abs(a);
   b = Math.abs(b);
   while (b !== 0) [a, b] = [b, a % b];
@@ -38,12 +38,7 @@ function gcd(a: number, b: number): number {
 
 /** Build a normalized exact value: reduced fraction, positive denominator,
  * squarefree radicand (√12 → 2√3, √4 → plain 2). */
-export function exact(
-  num: number,
-  den = 1,
-  unit: ExactUnit = "one",
-  rad?: number,
-): Exact {
+function exact(num, den = 1, unit = "one", rad) {
   if (den === 0 || !Number.isInteger(num) || !Number.isInteger(den)) {
     throw new Error(`bad exact value ${num}/${den}`);
   }
@@ -74,7 +69,7 @@ export function exact(
   return r > 1 ? { num, den, unit, rad: r } : { num, den, unit };
 }
 
-export function equalsExact(a: Exact, b: Exact): boolean {
+function equalsExact(a, b) {
   const na = exact(a.num, a.den, a.unit, a.rad);
   const nb = exact(b.num, b.den, b.unit, b.rad);
   return (
@@ -97,7 +92,7 @@ export function equalsExact(a: Exact, b: Exact): boolean {
 const MAX_DIGITS = 9;
 const MAX_RADICAND = 999;
 
-export function parseExact(raw: string): Exact | null {
+function parseExact(raw) {
   let s = raw.replace(/\s+/g, "").replace(/−/g, "-").replace(/\./g, ",");
   if (s === "") return null;
 
@@ -142,53 +137,4 @@ export function parseExact(raw: string): Exact | null {
   return exact(sign * coeffNum, coeffDen * den, pi ? "pi" : "one", rad);
 }
 
-// ─── Formatting ─────────────────────────────────────────────────────────────
-
-export type ExactStyle = "fraction" | "decimal";
-
-/** "43,5" — decimal comma, FP-dust guarded (denominator may not be a 10-power). */
-function decimalString(e: Exact): string {
-  return Number((e.num / e.den).toPrecision(12))
-    .toString()
-    .replace(".", ",");
-}
-
-/** Plain-text form: "2π/3", "-7/18", "120", "43,5", "√2/2". Matches what a
- * student would type on the keypad. Used in aria labels/logs/generated packs. */
-export function toPlain(e: Exact, style: ExactStyle = "fraction"): string {
-  const v = exact(e.num, e.den, e.unit, e.rad);
-  if (v.unit === "one" && v.rad === undefined) {
-    if (style === "decimal" || v.den === 1) return decimalString(v);
-    return `${v.num}/${v.den}`;
-  }
-  const sign = v.num < 0 ? "-" : "";
-  const n = Math.abs(v.num);
-  const coeff = n === 1 ? "" : String(n);
-  const factor = v.rad !== undefined ? `√${v.rad}` : "π";
-  return v.den === 1
-    ? `${sign}${coeff}${factor}`
-    : `${sign}${coeff}${factor}/${v.den}`;
-}
-
-/** KaTeX form (goes inside $...$): "\frac{2\pi}{3}", "43{,}5",
- * "-\frac{7}{18}", "\frac{\sqrt{2}}{2}". */
-export function toKatex(e: Exact, style: ExactStyle = "fraction"): string {
-  const v = exact(e.num, e.den, e.unit, e.rad);
-  if (v.unit === "one" && v.rad === undefined) {
-    if (style === "decimal" || v.den === 1) {
-      return decimalString(v).replace(",", "{,}");
-    }
-    const sign = v.num < 0 ? "-" : "";
-    return `${sign}\\frac{${Math.abs(v.num)}}{${v.den}}`;
-  }
-  const sign = v.num < 0 ? "-" : "";
-  const n = Math.abs(v.num);
-  const factor = v.rad !== undefined ? `\\sqrt{${v.rad}}` : "\\pi";
-  const numer = n === 1 ? factor : `${n}${factor}`;
-  return v.den === 1 ? `${sign}${numer}` : `${sign}\\frac{${numer}}{${v.den}}`;
-}
-
-/** "14{,}6" — KaTeX-safe decimal comma for prompt text built from numbers. */
-export function katexDecimal(value: number): string {
-  return Number(value.toPrecision(12)).toString().replace(".", "{,}");
-}
+module.exports = { exact, equalsExact, parseExact };

@@ -27,6 +27,9 @@ export type Quiz = {
     questions: PackQuestion[];
     tagGroups?: PackTagGroup[];
     generator?: PackGenerator;
+    // Uploaded drill-generator source — the tournament console builds its
+    // answer keys from it (null for registry topics and fixed packs).
+    generatorCode: string | null;
   } | null;
 };
 
@@ -143,6 +146,7 @@ export function QuizPageClient({
                       tagGroups={quiz.pack.tagGroups}
                       embedded
                       generator={quiz.pack.generator ?? null}
+                      generatorCode={quiz.pack.generatorCode}
                     />
                   </div>
                 );

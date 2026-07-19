@@ -1,6 +1,9 @@
 import { after } from "next/server";
 import { isPrefetchRequest, logActivity } from "@/lib/analytics/track";
-import { downloadPack } from "@/lib/quiz/pack-server";
+import {
+  downloadDrillGeneratorCode,
+  downloadPack,
+} from "@/lib/quiz/pack-server";
 import {
   createLessonHtmlFrameUrl,
   createSignedUrl,
@@ -83,6 +86,12 @@ export default async function QuizzesPage({
       // tag groups (picker filters) — not the whole pack.
       if (quiz.pack_path) {
         const pack = await downloadPack(quiz.pack_path);
+        // Uploaded drill generators also need their .js source: the
+        // tournament console pre-generates its answer keys from it.
+        const generatorCode =
+          pack?.generator?.type === "drill" && pack.generator.file
+            ? await downloadDrillGeneratorCode(quiz.id)
+            : null;
         return {
           id: quiz.id,
           title_kz: quiz.title_kz,
@@ -94,6 +103,7 @@ export default async function QuizzesPage({
                 questions: pack.questions,
                 tagGroups: pack.tagGroups,
                 generator: pack.generator,
+                generatorCode,
               }
             : null,
         };

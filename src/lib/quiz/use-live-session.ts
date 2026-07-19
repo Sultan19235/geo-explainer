@@ -19,6 +19,7 @@ import {
   type AnswerMap,
   type QuizFeatures,
   type RaceSummary,
+  type TourneySummary,
 } from "./live-client";
 
 const STATE_TTL = 3 * 60 * 60 * 1000; // saved progress expires after 3h
@@ -107,6 +108,15 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
   // dies (phone screen lock). This hook itself never acts on it — all the
   // load-bearing invariants here stay race-blind.
   const [raceSummary, setRaceSummary] = useState<RaceSummary | null>(null);
+  // Tournament-mode summary (v9, docs/TOURNAMENT_MODE_SPEC.md §2.8) — the
+  // exact same pure pass-through contract as raceSummary above: null on
+  // non-tournament rooms and old servers; on a tournament room every /status
+  // poll and /submit heartbeat refreshes it, which is the poll-level resync
+  // channel the tourney hook leans on when its SSE stream dies. This hook
+  // itself never acts on it.
+  const [tourneySummary, setTourneySummary] = useState<TourneySummary | null>(
+    null,
+  );
   const [extra, setExtraState] = useState<TExtra>(opts.defaultExtra);
 
   // Mutable session identity + focus trackers. Refs, not state: sendScore is
@@ -224,6 +234,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
         if (res.features) setFeatures(res.features);
         if (res.race) setRaceSummary(res.race);
+        if (res.tourney) setTourneySummary(res.tourney);
         if (res.kicked) kickedOut();
         else if (res.status === "ended" || res.status === "not_found") endQuiz();
       } catch {
@@ -305,6 +316,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
         if (res.features) setFeatures(res.features);
         if (res.race) setRaceSummary(res.race);
+        if (res.tourney) setTourneySummary(res.tourney);
         if (res.status === "active") startQuiz();
         else {
           s.phase = "waiting";
@@ -364,6 +376,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
         if (res.features) setFeatures(res.features);
         if (res.race) setRaceSummary(res.race);
+        if (res.tourney) setTourneySummary(res.tourney);
         if (res.status === "active") startQuiz();
         else {
           s.phase = "waiting";
@@ -429,6 +442,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
         if (typeof res.timeLeft === "number") setTimeLeft(res.timeLeft);
         if (res.features) setFeatures(res.features);
         if (res.race) setRaceSummary(res.race);
+        if (res.tourney) setTourneySummary(res.tourney);
         if (res.kicked) kickedOut();
         else if (res.status === "active") startQuiz();
         else if (res.status === "ended" || res.status === "not_found") {
@@ -567,6 +581,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     timeLeft,
     features,
     raceSummary,
+    tourneySummary,
     recordAnswer,
     markFinished,
     rejoin,

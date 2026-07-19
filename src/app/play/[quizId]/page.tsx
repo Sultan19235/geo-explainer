@@ -16,6 +16,14 @@ import { PackQuizClient } from "./pack-quiz-client";
 // ?race=1 marks a race-mode room (docs/RACE_MODE_SPEC.md §5): the server
 // grades every answer, so the pack this component sends to the browser is
 // stripped of everything that gives the answer away.
+//
+// ?tourney=1 marks a tournament room (docs/TOURNAMENT_MODE_SPEC.md §5). It
+// reaches the client the same way ?race=1 does (searchParams pass through to
+// PackQuizClient's useSearchParams untouched) but deliberately triggers NO
+// stripping here: tournaments run only on drill generator packs, whose
+// questions are machine-made in the browser — the pack carries no answers to
+// strip. (The generator code + round seed being client-visible is the
+// accepted v1 risk of spec §11.)
 
 type Params = { quizId: string };
 

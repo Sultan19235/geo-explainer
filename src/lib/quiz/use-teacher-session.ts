@@ -21,6 +21,7 @@ import {
   liveStreamUrl,
   raceAdvance,
   startSession,
+  tourneyAdvance,
   type ActiveRoomConflict,
   type LiveEvent,
   type QuizFeatures,
@@ -29,6 +30,9 @@ import {
   type RaceConfig,
   type StudentRecord,
   type TeacherRaceState,
+  type TeacherTourneyState,
+  type TourneyAdvanceAction,
+  type TourneyConfig,
 } from "./live-client";
 import { isRoomResultSaved } from "./result-claims";
 
@@ -98,6 +102,21 @@ export type RaceView = TeacherRaceState & {
   // the reveal phase's 8s auto-advance badge (the reveal event carries no
   // clock of its own).
   anchorNow: number;
+};
+
+// The tournament board's view of the room: the server's TeacherTourneyState
+// plus the same local receipt anchor as RaceView (remainingMs is only true at
+// SEND time), plus the live per-student duel scores accumulated from
+// 'tourney_score' events — the wire bracket only carries settled scores
+// (spec §2.7), so the current round's ticking numbers live here.
+export type TourneyView = TeacherTourneyState & {
+  // performance.now() when this state landed — every countdown derives from
+  // `remainingMs - (performance.now() - anchorNow)`, never the wall clock.
+  anchorNow: number;
+  // studentId → the round's running counts. Each 'tourney_score' carries the
+  // FULL running pair (not a delta), so a reconnect self-heals per student on
+  // their next accepted answer.
+  liveScores: Record<string, { correct: number; wrong: number }>;
 };
 
 // Re-derived on every incoming report. Re-anchored on each off-screen beat so
@@ -177,8 +196,10 @@ export function useTeacherSession(options?: { persistKey?: string }) {
   // config (v7, or the config was dropped as malformed) — the half-made room
   // is already destroyed by then and the console must say so loudly instead
   // of silently hosting a self-paced room under a race board.
+  // tourney_unsupported is the same failure for tournament configs (v8 server
+  // or malformed config, spec §1: never a silent downgrade).
   const [createError, setCreateError] = useState<
-    "unauthorized" | "network" | "race_unsupported" | null
+    "unauthorized" | "network" | "race_unsupported" | "tourney_unsupported" | null
   >(null);
   const [timeLeft, setTimeLeft] = useState(SESSION_SECONDS);
   const [resumable, setResumable] = useState<ResumableRoom | null>(null);
@@ -186,6 +207,8 @@ export function useTeacherSession(options?: { persistKey?: string }) {
   // (null in self-paced rooms and before the first snapshot). Every write
   // stamps anchorNow — see RaceView.
   const [race, setRace] = useState<RaceView | null>(null);
+  // Tournament rooms: same contract as `race` — see TourneyView.
+  const [tourney, setTourney] = useState<TourneyView | null>(null);
   // v6 one-room-per-teacher: the server refused to open a room because this
   // teacher already has a live one. The console asks "end it and start new?"
   // and answers through resolveConflict.
@@ -198,6 +221,7 @@ export function useTeacherSession(options?: { persistKey?: string }) {
         unknown,
         QuizFeatures | undefined,
         RaceConfig | undefined,
+        TourneyConfig | undefined,
       ]
     | null
   >(null);
@@ -288,6 +312,7 @@ export function useTeacherSession(options?: { persistKey?: string }) {
     setCreateError(null);
     setTimeLeft(SESSION_SECONDS);
     setRace(null);
+    setTourney(null);
     clearStoredRoom();
     setResumable(null);
     setPhaseBoth("setup");
@@ -344,6 +369,21 @@ export function useTeacherSession(options?: { persistKey?: string }) {
         // so only ever overwrite, never clear, from a snapshot.
         if (event.race) {
           setRace({ ...event.race, anchorNow: performance.now() });
+        }
+        // Mid-tournament reload recovery, same overwrite-never-clear rule.
+        // The snapshot's bracket also carries the current unsettled round's
+        // live rows (scoreA/B/C) — the board falls back to those, so the
+        // accumulated liveScores map is only kept when it belongs to the
+        // SAME round; a reconnect that crossed a draw must not paint the
+        // previous round's numbers onto the new round's pair cards.
+        if (event.tourney) {
+          const tv = event.tourney;
+          setTourney((prev) => ({
+            ...tv,
+            anchorNow: performance.now(),
+            liveScores:
+              prev && prev.round === tv.round ? prev.liveScores : {},
+          }));
         }
         // Another tab (or a reconnect after refresh) may already be live.
         if (event.status === "active" && phaseRef.current === "lobby") {
@@ -477,6 +517,51 @@ export function useTeacherSession(options?: { persistKey?: string }) {
         return;
       }
 
+      if (event.type === "tourney") {
+        // Phase transition from the server's tournament state machine. The
+        // FULL bracket rides every transition (spec §2.6), but treat a
+        // bracket-less frame defensively — keeping the previous one is
+        // strictly better than blanking the projector.
+        const anchorNow = performance.now();
+        setTourney((prev) => ({
+          phase: event.phase,
+          round: event.round,
+          roundSec: event.roundSec ?? prev?.roundSec,
+          openAt: event.openAt,
+          deadline: event.deadline,
+          remainingMs: event.remainingMs,
+          bracket: event.bracket ?? prev?.bracket,
+          anchorNow,
+          // 'start' resets the server's round scores (§2.4) — mirror that on
+          // the duel transition so the new round's pair cards open at 0:0.
+          // Every other transition keeps the map (result renders the settled
+          // bracket's scores, so stale live numbers can't show through).
+          liveScores: event.phase === "duel" ? {} : (prev?.liveScores ?? {}),
+        }));
+        return;
+      }
+
+      if (event.type === "tourney_score") {
+        // Per-answer running counts while a duel is live. Only merged while
+        // the round matches — a straggler from the grace window of a settled
+        // round must not bleed into the next round's fresh 0:0 cards.
+        setTourney((prev) =>
+          prev && prev.round === event.round
+            ? {
+                ...prev,
+                liveScores: {
+                  ...prev.liveScores,
+                  [event.studentId]: {
+                    correct: event.correct,
+                    wrong: event.wrong,
+                  },
+                },
+              }
+            : prev,
+        );
+        return;
+      }
+
       if (event.type === "kicked") {
         // Echo of a /kick (possibly from another console tab): drop the card.
         setStudents((prev) => {
@@ -565,22 +650,25 @@ export function useTeacherSession(options?: { persistKey?: string }) {
     // students can't re-enable them by editing the join link.
     // race = the lockstep race config (v8); its ACKNOWLEDGMENT is checked
     // below — a server that ignored the field must not get a room.
+    // tourney = the tournament config (v9), same acknowledgment contract;
+    // race and tourney are mutually exclusive (the server 400s both).
     async (
       title: string,
       studentPath?: string,
       ctx?: unknown,
       features?: QuizFeatures,
       race?: RaceConfig,
+      tourney?: TourneyConfig,
     ) => {
       setCreating(true);
       setCreateError(null);
-      const res = await createSession(title, studentPath, features, race);
+      const res = await createSession(title, studentPath, features, race, tourney);
       setCreating(false);
       if ("error" in res) {
         if (res.error === "active_room") {
           // This teacher already has a live room (v6 rule). Hold the create's
           // arguments; the console confirms and calls resolveConflict.
-          conflictRetryRef.current = [title, studentPath, ctx, features, race];
+          conflictRetryRef.current = [title, studentPath, ctx, features, race, tourney];
           setConflict(res.room);
         } else {
           setCreateError(res.error);
@@ -595,6 +683,15 @@ export function useTeacherSession(options?: { persistKey?: string }) {
       if (race && res.race?.qCount !== race.questions.length) {
         void endSession(res.code, res.hostSecret).catch(() => {});
         setCreateError("race_unsupported");
+        return;
+      }
+      // Tournament requested but not acknowledged round-for-round — a v8
+      // server ignored the field entirely, or v9 dropped the config as
+      // malformed. Same cure as race: destroy the half-made self-paced room
+      // and fail loudly (spec §1: never a silent downgrade).
+      if (tourney && res.tourney?.rounds !== tourney.rounds.length) {
+        void endSession(res.code, res.hostSecret).catch(() => {});
+        setCreateError("tourney_unsupported");
         return;
       }
       // Opening a fresh room supersedes a leftover one (an ignored resume
@@ -637,6 +734,19 @@ export function useTeacherSession(options?: { persistKey?: string }) {
             }
           : null,
       );
+      // Same immediate seed for the tournament view: the board opens on the
+      // idle (draw-button) screen with the right round length from tick one.
+      setTourney(
+        tourney
+          ? {
+              phase: "idle",
+              round: 0,
+              roundSec: tourney.roundSec,
+              anchorNow: performance.now(),
+              liveScores: {},
+            }
+          : null,
+      );
       setPhaseBoth("lobby");
       connectStream(res.code);
     },
@@ -674,6 +784,32 @@ export function useTeacherSession(options?: { persistKey?: string }) {
       setRace((prev) => (prev ? { ...prev, auto: value } : prev));
     },
     [raceAction],
+  );
+
+  // ─── Tournament actions ──────────────────────────────────────────────────
+  // All of them drive POST /tourney/advance with this room's hostSecret. Same
+  // deliberate silence as raceAction: illegal-for-the-phase actions 409
+  // bad_phase server-side (a double-clicked «Жеребе тарту» is a no-op), and
+  // the REAL outcome of every action arrives as a 'tourney' event over the
+  // /live stream — the response body carries nothing the board needs.
+  const tourneyAction = useCallback(
+    (action: TourneyAdvanceAction) => {
+      if (!code) return;
+      void tourneyAdvance(code, hostSecretRef.current, action).catch(() => {
+        // network blip — the teacher just presses the button again
+      });
+    },
+    [code],
+  );
+
+  const tourneyPair = useCallback(() => tourneyAction("pair"), [tourneyAction]);
+  const tourneyStart = useCallback(
+    () => tourneyAction("start"),
+    [tourneyAction],
+  );
+  const tourneyPodium = useCallback(
+    () => tourneyAction("podium"),
+    [tourneyAction],
   );
 
   // Answer to the active-room conflict: end the old room and replay the
@@ -946,5 +1082,10 @@ export function useTeacherSession(options?: { persistKey?: string }) {
     raceExplain,
     racePodium,
     raceSetAuto,
+    // Tournament rooms only (null otherwise): the board's state + actions.
+    tourney,
+    tourneyPair,
+    tourneyStart,
+    tourneyPodium,
   };
 }

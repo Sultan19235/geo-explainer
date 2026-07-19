@@ -1,5 +1,5 @@
 /**
- * MathSabaq Live Score Server — v8
+ * MathSabaq Live Score Server — v9
  * Hetzner Node.js backend — HTTP POST + SSE
  * No Socket.io. Pure HTTP. Sessions live in memory ONLY. This server never
  * writes results anywhere — since 2026-07-10 the teacher's CONSOLE saves the
@@ -20,6 +20,30 @@
  *   GET  /race/stream  → student SSE for race rooms (individualized events)
  *   POST /race/answer  → student's answer to the open race question
  *   POST /race/advance → teacher drives the race state machine (hostSecret)
+ *   GET  /tourney/stream  → student SSE for tournament rooms (individualized)
+ *   POST /tourney/answer  → student's duel answer (graded server-side, exact port)
+ *   POST /tourney/advance → teacher drives the tournament state machine (hostSecret)
+ *
+ * v9 over v8: tournament mode (Турнир) — FIFA-playoff duel rooms on drill
+ * generator packs. Spec: docs/TOURNAMENT_MODE_SPEC.md (normative for every
+ * message shape). server/ becomes THREE files: this entry point plus two pure
+ * require'd siblings — server/bracket.js (deterministic pairing/settling,
+ * seeded rng only) and server/exact.js (exact-value answer port of
+ * src/lib/drill/exact.ts). /session optionally accepts a sanitized `tourney`
+ * config (per-round seeds + pre-generated answer keys; mutually exclusive
+ * with `race` → 400 mode_conflict); when accepted the response carries
+ * `tourney:{rounds}` — the ack the console REQUIRES, so a v8 server silently
+ * ignoring the field can never produce a self-paced room behind a tournament
+ * board. The server owns the teacher-paced state machine
+ * (idle→pairing→duel→result→…→podium) driven by POST /tourney/advance,
+ * grades every duel answer AT ACCEPT time (strict seq order, wrong-answer
+ * lockout), and writes tournament totals back into the regular student
+ * records at each settle so the v7 board, results screen and console
+ * autosave keep working untouched. In tournament rooms /submit IGNORES
+ * client-sent score/total/answers exactly like race rooms; every presence
+ * semantic stays v7, with one addition — a presence change during a live
+ * duel is relayed to the student's duel partner(s). Rooms without a valid
+ * `tourney` config behave byte-for-byte as v8.
  *
  * v8 over v7: race mode (Жарыс) — Kahoot-style lockstep rooms. Spec:
  * docs/RACE_MODE_SPEC.md (normative for every message shape below).
@@ -91,6 +115,8 @@
  *   LIVE_MAX_RACE_SSE_PER_IP max concurrent /race/stream connections per IP
  *                            (default 200 — a school NAT legitimately holds
  *                            several whole classes of phones at once).
+ *   LIVE_MAX_TOURNEY_SSE_PER_IP max concurrent /tourney/stream connections per
+ *                            IP (default 200, same NAT reasoning as race).
  */
 
 const fs = require('fs');
@@ -112,6 +138,12 @@ try {
 
 const express = require('express');
 const cors = require('cors');
+// v9: pure CommonJS siblings, deployed alongside this file (see
+// DEPLOY_V9_TOURNEY.md — all THREE files ship together). bracket.js is the
+// deterministic pairing/settling engine (spec §3), exact.js the exact-value
+// grading port (spec §2.5); both are dependency- and side-effect-free.
+const { mulberry32, planRound, settleRound, applyOutcome, finalStandings } = require('./bracket');
+const { parseExact, equalsExact } = require('./exact');
 const app = express();
 
 // v8: race configs carry explain-phase solution content (lesson steps with
@@ -168,9 +200,12 @@ const MAX_SSE_PER_IP = Number(process.env.LIVE_MAX_SSE_PER_IP ?? 50);
 // one — every student phone in a race holds a stream open, and one school NAT
 // can front several classes simultaneously (spec §2.8).
 const MAX_RACE_SSE_PER_IP = Number(process.env.LIVE_MAX_RACE_SSE_PER_IP ?? 200);
+// v9: /tourney/stream mirrors the race counter with its own cap (spec §2.9).
+const MAX_TOURNEY_SSE_PER_IP = Number(process.env.LIVE_MAX_TOURNEY_SSE_PER_IP ?? 200);
 const rlHits = new Map(); // ip -> timestamps within the trailing minute
 const sseByIp = new Map(); // ip -> open /live connection count
 const raceSseByIp = new Map(); // ip -> open /race/stream connection count
+const tourneySseByIp = new Map(); // ip -> open /tourney/stream connection count
 
 function clientIpOf(req) {
   const xff = req.headers['x-forwarded-for'];
@@ -408,6 +443,84 @@ function checkInputAnswerServer(given, accept) {
     }
   }
   return false;
+}
+
+// ─── Tournament mode (v9) — config sanitization ─────────────────────────────
+// Spec: docs/TOURNAMENT_MODE_SPEC.md §2.2. Same philosophy split as race:
+// malformed SHAPE → field not stored → plain self-paced room (the console
+// detects the missing `tourney.rounds` ack and fails loudly); cap violations
+// → explicit 400s (tourney_too_large / tourney_invalid) because a teacher
+// must never unknowingly run a self-paced room behind a tournament board.
+
+const TOURNEY_GET_READY_MS = 3000; // 3s "get ready" countdown baked into openAt
+const TOURNEY_ANSWER_GRACE_MS = 1500; // answers in flight at the buzzer still land
+
+const MIN_TOURNEY_ROUNDS = 2;
+const MAX_TOURNEY_ROUNDS = 16;
+const MIN_TOURNEY_ANSWERS_PER_ROUND = 40;
+const MAX_TOURNEY_ANSWERS_PER_ROUND = 400;
+const MAX_TOURNEY_ANSWER_LENGTH = 24; // keypad strings ("2π/3", "−0,5", "√2/2")
+const MAX_TOURNEY_CONFIG_BYTES = 256 * 1024; // whole config, serialized
+const MIN_TOURNEY_ROUND_SEC = 30;
+const MAX_TOURNEY_ROUND_SEC = 300;
+const MAX_TOURNEY_LOCKOUT_SEC = 15;
+// Student `given` strings are bounded well above any parseable answer
+// (parseExact caps digit runs at 9) but below abuse territory.
+const MAX_TOURNEY_GIVEN_LENGTH = 64;
+
+// One round key: {seed, answers}. Returns the sanitized round or null — an
+// unusable round is dropped (drop-don't-reject), and the console's required
+// rounds-count ack turns any drop into a loud room-creation failure.
+function sanitizeTourneyRound(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  // The seed must be stored EXACTLY as sent: the console derives each round's
+  // problem sequence from the same 31-bit number client-side, so coercing or
+  // masking here would silently desync grading from what students see.
+  const seed = raw.seed;
+  if (!Number.isInteger(seed) || seed < 0 || seed > 0x7fffffff) return null;
+  if (!Array.isArray(raw.answers)) return null;
+  const answers = [];
+  for (const a of raw.answers) {
+    if (answers.length >= MAX_TOURNEY_ANSWERS_PER_ROUND) break; // truncate, don't reject
+    // A malformed ENTRY kills the whole round: answers are indexed by seq, so
+    // dropping one entry would shift every later key off by one.
+    if (typeof a !== 'string' || a.length === 0 || a.length > MAX_TOURNEY_ANSWER_LENGTH) {
+      return null;
+    }
+    answers.push(a);
+  }
+  if (answers.length < MIN_TOURNEY_ANSWERS_PER_ROUND) return null;
+  return { seed, answers };
+}
+
+// Returns {tourney} (sanitized config), {tourney:null} (absent/malformed →
+// plain self-paced room) or {error} (cap violation → 400, NOT silent
+// downgrade). Console sends 12 rounds × 240 answers.
+function sanitizeTourneyConfig(raw) {
+  if (raw === undefined || raw === null) return { tourney: null };
+  if (typeof raw !== 'object' || Array.isArray(raw) || !Array.isArray(raw.rounds)) {
+    return { tourney: null };
+  }
+  const rounds = [];
+  for (const r of raw.rounds) {
+    if (rounds.length >= MAX_TOURNEY_ROUNDS) break; // truncate, don't reject
+    const clean = sanitizeTourneyRound(r);
+    if (clean) rounds.push(clean);
+  }
+  if (rounds.length < MIN_TOURNEY_ROUNDS) return { error: 'tourney_invalid' };
+  const rs = Number(raw.roundSec);
+  const roundSec = Number.isFinite(rs)
+    ? Math.min(MAX_TOURNEY_ROUND_SEC, Math.max(MIN_TOURNEY_ROUND_SEC, Math.round(rs)))
+    : 90;
+  const ls = Number(raw.lockoutSec);
+  const lockoutSec = Number.isFinite(ls)
+    ? Math.min(MAX_TOURNEY_LOCKOUT_SEC, Math.max(0, Math.round(ls)))
+    : 4;
+  const tourney = { roundSec, lockoutMs: lockoutSec * 1000, rounds };
+  if (JSON.stringify(tourney).length > MAX_TOURNEY_CONFIG_BYTES) {
+    return { error: 'tourney_too_large' };
+  }
+  return { tourney };
 }
 
 // Client-reported numbers (score, counters) are trusted for display but not to
@@ -1011,6 +1124,599 @@ function teacherRaceState(session) {
   return out;
 }
 
+// ─── Tournament mode (v9) — state machine ───────────────────────────────────
+// Spec: docs/TOURNAMENT_MODE_SPEC.md §2.3–§2.7. One teacher-paced state
+// machine per tournament room: idle → (pair) pairing → (start) duel →
+// [settle at deadline+grace] result → … → podium, driven by
+// POST /tourney/advance. There is NO manual early-close of a round — the
+// clock always runs its full length so every duel is the same length. All
+// pairing/settling math lives in bracket.js (pure, seeded); this section owns
+// timers, wire shapes and the glue into the regular student records.
+
+function newTourneyState(config) {
+  return {
+    roundSec: config.roundSec,
+    lockoutMs: config.lockoutMs,
+    rounds: config.rounds,   // sanitized [{seed, answers}]; never mutated
+    phase: 'idle',           // 'idle'|'pairing'|'duel'|'result'|'podium'
+    round: 0,                // 1-based once the first draw happens
+    plan: null,              // current round's RoundPlan (bracket.js §3)
+    openAt: null,            // epoch ms while phase === 'duel'
+    deadline: null,          // epoch ms while phase === 'duel'
+    closeTimer: null,        // setTimeout → settleTourneyRound at deadline+grace
+    scores: new Map(),       // studentId -> {correct, wrong, seqDone, lastCorrectAt, lockedUntil} — CURRENT round
+    // bracket-engine state (§3) — the spec fixes this initial literal; only
+    // applyOutcome (at settle) ever produces the next one.
+    alive: [],               // main-bracket studentIds still in
+    out: [],                 // eliminated + losers-pool players
+    champion: null,          // studentId once decided
+    history: [],             // settled rounds: {round, plan, outcome}
+    firstDrawDone: false,
+    totals: new Map(),       // studentId -> {name, correct, wrong, wins} — whole tournament
+    late: new Set(),         // ids whose first roster contact came after the first draw
+    watchers: new Map(),     // studentId -> Set<res> (open /tourney/stream conns)
+    standings: null,         // final ranked rows (+names), set at podium
+  };
+}
+
+// The five bracket-state fields live flat on session.tourney (§2.3) but the
+// engine wants them as one object — this view is what planRound/applyOutcome
+// read; the settle copies the new state back field by field.
+function bracketStateOf(t) {
+  return {
+    alive: t.alive,
+    out: t.out,
+    champion: t.champion,
+    history: t.history,
+    firstDrawDone: t.firstDrawDone,
+  };
+}
+
+function clearTourneyTimers(t) {
+  if (!t) return;
+  if (t.closeTimer) { clearTimeout(t.closeTimer); t.closeTimer = null; }
+}
+
+// Names are cached in totals rows (race precedent) so kicked students — whose
+// roster records are deleted — keep their names on the bracket and standings.
+function ensureTourneyTotals(t, studentId, name) {
+  let row = t.totals.get(studentId);
+  if (!row) {
+    row = { name: name || 'Student', correct: 0, wrong: 0, wins: 0 };
+    t.totals.set(studentId, row);
+  } else if (name) {
+    row.name = name;
+  }
+  return row;
+}
+
+function tourneyNameOf(session, studentId) {
+  const rec = session.students.get(studentId);
+  if (rec) return rec.name;
+  const cached = session.tourney.totals.get(studentId);
+  return cached ? cached.name : 'Student';
+}
+
+// The bracket engine's roster view: every joined student, PLUS the kicked ids
+// (their records were deleted by /kick, but settleRound needs kicked:true
+// entries to force-lose them, and finalStandings ranks every participant —
+// kicked included).
+function tourneyRoster(session) {
+  const t = session.tourney;
+  const roster = [];
+  const seen = new Set();
+  for (const [sid, s] of session.students.entries()) {
+    const id = String(sid);
+    seen.add(id);
+    roster.push({
+      id,
+      name: s.name,
+      kicked: false,
+      connected: s.connected !== false,
+      joinedAfterFirstDraw: t.late.has(id),
+    });
+  }
+  if (session.kicked) {
+    for (const id of session.kicked) {
+      if (seen.has(id)) continue;
+      roster.push({
+        id,
+        name: tourneyNameOf(session, id),
+        kicked: true,
+        connected: false,
+        joinedAfterFirstDraw: t.late.has(id),
+      });
+    }
+  }
+  return roster;
+}
+
+function tourneyRowMembers(row) {
+  const members = [row.a];
+  if (row.b != null) members.push(row.b);
+  if (row.c != null) members.push(row.c);
+  return members;
+}
+
+// The plan row a student plays in this round (main pair, bye row, losers
+// pair/trio/solo) — null when they are not drawn (latecomer, kicked).
+function tourneyRowOf(plan, studentId) {
+  if (!plan) return null;
+  for (const row of plan.main) {
+    if (tourneyRowMembers(row).includes(studentId)) return row;
+  }
+  for (const row of plan.losers) {
+    if (tourneyRowMembers(row).includes(studentId)) return row;
+  }
+  return null;
+}
+
+function tourneyPartners(plan, studentId) {
+  const row = tourneyRowOf(plan, studentId);
+  if (!row) return [];
+  return tourneyRowMembers(row).filter((id) => id !== studentId);
+}
+
+// Role in the CURRENT round (§2.6): bye beats main (the bye row sits in
+// plan.main with b:null); a solo losers row still reads 'losers'.
+function tourneyRoleOf(t, studentId) {
+  if (!t.plan) return 'waiting';
+  if (t.plan.byeId === studentId) return 'bye';
+  for (const row of t.plan.main) {
+    if (tourneyRowMembers(row).includes(studentId)) return 'main';
+  }
+  for (const row of t.plan.losers) {
+    if (tourneyRowMembers(row).includes(studentId)) return 'losers';
+  }
+  return 'waiting';
+}
+
+function sendTourneyEvent(session, studentId, payload) {
+  const set = session.tourney && session.tourney.watchers.get(studentId);
+  if (!set) return;
+  const msg = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const res of set) {
+    try { res.write(msg); } catch (_) {}
+  }
+}
+
+function broadcastTourneyStudents(session, payload) {
+  const t = session.tourney;
+  if (!t) return;
+  const msg = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const set of t.watchers.values()) {
+    for (const res of set) {
+      try { res.write(msg); } catch (_) {}
+    }
+  }
+}
+
+// This round's opponents of a student, as the wire shows them. Presence
+// fields ride the state snapshot and presence relays; the pairing event
+// carries names only (the reveal must not leak live scores early).
+function tourneyOpponentsOf(session, studentId, withPresence) {
+  const t = session.tourney;
+  return tourneyPartners(t.plan, studentId).map((pid) => {
+    const sc = t.scores.get(pid);
+    // id is additive on the wire (spec §2.6 shows name-only): clients merge
+    // tick/presence by it so two same-named opponents in a trio can't
+    // conflate; old clients ignore the extra field.
+    const entry = { id: pid, name: tourneyNameOf(session, pid), correct: sc ? sc.correct : 0 };
+    if (withPresence) {
+      const rec = session.students.get(pid);
+      entry.connected = rec ? rec.connected !== false : false;
+      entry.away = rec ? rec.focused === false : false;
+      entry.awaySeconds = rec ? rec.awaySeconds || 0 : 0;
+    }
+    return entry;
+  });
+}
+
+// §2.6 'pairing' — the individualized draw reveal.
+function buildTourneyPairing(session, studentId) {
+  const t = session.tourney;
+  return {
+    type: 'pairing',
+    round: t.round,
+    role: tourneyRoleOf(t, studentId),
+    opponents: tourneyPartners(t.plan, studentId).map((pid) => ({
+      id: pid,
+      name: tourneyNameOf(session, pid),
+    })),
+    luckyLoser: t.plan.luckyLoserId === studentId,
+  };
+}
+
+// §2.6 'result' — built from the last settled round in history, so the same
+// function serves the live event and the resync snapshot. null for a student
+// who played in no row (latecomer waiting for their first draw).
+function buildTourneyResult(session, studentId) {
+  const t = session.tourney;
+  const last = t.history[t.history.length - 1];
+  if (!last) return null;
+  const row = last.outcome.duels.find((r) => tourneyRowMembers(r).includes(studentId));
+  if (!row) return null;
+  const you = row.scores[studentId];
+  const champion = last.outcome.champion === studentId;
+  let nextRole;
+  if (champion) nextRole = 'champion';
+  else if (t.champion != null || t.round >= t.rounds.length) nextRole = 'waiting';
+  else if (t.alive.includes(studentId)) nextRole = 'main';
+  else nextRole = 'losers';
+  return {
+    type: 'result',
+    round: last.round,
+    won: row.winner === studentId,
+    eliminated: last.outcome.eliminated.includes(studentId),
+    champion,
+    you: { correct: you.correct, wrong: you.wrong },
+    opponents: tourneyRowMembers(row)
+      .filter((id) => id !== studentId)
+      .map((id) => ({
+        id,
+        name: tourneyNameOf(session, id),
+        correct: row.scores[id].correct,
+      })),
+    nextRole,
+  };
+}
+
+// §2.6 'podium' — final standings were frozen (with names) at the podium
+// transition; champion falls back to the rank-1 row on the no_rounds_left
+// path, where the bracket never crowned anyone.
+function buildTourneyPodium(session, studentId) {
+  const t = session.tourney;
+  const rows = t.standings || [];
+  const championRow = t.champion != null
+    ? rows.find((r) => r.studentId === t.champion)
+    : rows[0];
+  const you = rows.find((r) => r.studentId === studentId);
+  return {
+    type: 'podium',
+    champion: { name: championRow ? championRow.name : 'Student' },
+    top: rows.slice(0, 3).map((r) => ({ name: r.name, wins: r.wins, correct: r.correct })),
+    you: {
+      rank: you ? you.rank : null,
+      of: rows.length,
+      wins: you ? you.wins : 0,
+      correct: you ? you.correct : 0,
+    },
+  };
+}
+
+// §2.7 — one wire row per drawn round. Settled rounds read from the
+// self-contained history rows; the live (current) round reads the running
+// scores and carries no winner/settled:true yet.
+function serializeTourneyRound(session, roundNo, plan, duels, settled) {
+  const t = session.tourney;
+  const liveScore = (id) => {
+    const sc = t.scores.get(id);
+    return sc ? sc.correct : 0;
+  };
+  const rowScore = (row, id) =>
+    settled ? row.scores[id].correct : liveScore(id);
+  const mapRow = (row) => {
+    const out = {
+      a: row.a,
+      b: row.b == null ? null : row.b,
+      scoreA: rowScore(row, row.a),
+      scoreB: row.b == null ? null : rowScore(row, row.b),
+    };
+    if (row.c != null) {
+      out.c = row.c;
+      out.scoreC = rowScore(row, row.c);
+    }
+    if (settled) out.winner = row.winner;
+    return out;
+  };
+  const mainRows = settled ? duels.filter((d) => d.bracket === 'main') : plan.main;
+  const loserRows = settled ? duels.filter((d) => d.bracket === 'losers') : plan.losers;
+  return {
+    round: roundNo,
+    main: mainRows.map(mapRow),
+    losers: loserRows.map(mapRow),
+    byeId: plan.byeId,
+    luckyLoserId: plan.luckyLoserId,
+    settled,
+  };
+}
+
+// §2.7 — the FULL serialized bracket (teacher wire shape). Names ride in
+// `players` so the board renders without a roster join; `standings` is the
+// running total order (rank included — additive over the spec shape).
+function serializeTourneyBracket(session) {
+  const t = session.tourney;
+  const roster = tourneyRoster(session);
+  const players = {};
+  for (const r of roster) {
+    players[r.id] = { name: r.name, connected: r.connected, kicked: r.kicked };
+  }
+  const history = t.history.map((h) =>
+    serializeTourneyRound(session, h.round, h.plan, h.outcome.duels, true),
+  );
+  // pairing/duel = the current round is drawn but unsettled → append it live.
+  // At result/podium the just-settled round is already the last history row.
+  if (t.plan && (t.phase === 'pairing' || t.phase === 'duel')) {
+    history.push(serializeTourneyRound(session, t.round, t.plan, null, false));
+  }
+  return {
+    phase: t.phase,
+    round: t.round,
+    roundCount: t.rounds.length,
+    champion: t.champion,
+    players,
+    history,
+    standings: finalStandings(bracketStateOf(t), t.totals, roster),
+  };
+}
+
+// Teacher 'tourney' event — sent on EVERY phase transition (§2.6); the clock
+// fields ride only while a duel is open, mirroring the student events.
+function broadcastTourneyTeacher(session) {
+  const t = session.tourney;
+  const payload = {
+    type: 'tourney',
+    phase: t.phase,
+    round: t.round,
+    roundSec: t.roundSec,
+    bracket: serializeTourneyBracket(session),
+  };
+  if (t.phase === 'duel') {
+    payload.openAt = t.openAt;
+    payload.deadline = t.deadline;
+    payload.remainingMs = Math.max(0, t.deadline - Date.now());
+  }
+  broadcast(session, payload);
+}
+
+// The teacher-side tournament view embedded in the /live connect snapshot —
+// a mid-tournament console reload restores the exact board from it.
+function teacherTourneyState(session) {
+  const t = session.tourney;
+  const out = {
+    phase: t.phase,
+    round: t.round,
+    roundSec: t.roundSec,
+    bracket: serializeTourneyBracket(session),
+  };
+  if (t.phase === 'duel') {
+    out.openAt = t.openAt;
+    out.deadline = t.deadline;
+    out.remainingMs = Math.max(0, t.deadline - Date.now());
+  }
+  return out;
+}
+
+// §2.8 — the poll-level resync summary riding /status and /submit responses;
+// also how the student page learns the room is a tournament at all.
+function tourneySummary(session) {
+  const t = session.tourney;
+  const out = { phase: t.phase, round: t.round, roundSec: t.roundSec };
+  if (t.round >= 1) out.seed = t.rounds[t.round - 1].seed;
+  if (t.phase === 'duel') {
+    out.openAt = t.openAt;
+    out.deadline = t.deadline;
+    out.remainingMs = Math.max(0, t.deadline - Date.now());
+  }
+  return out;
+}
+
+// The individualized connect snapshot for /tourney/stream — also THE resync
+// shape (§2.6): SSE drop / reload / screen lock → reconnect restores the
+// exact screen. `you.seq` is the NEXT expected seq.
+function buildTourneyStudentState(session, studentId) {
+  const t = session.tourney;
+  const now = Date.now();
+  const state = { type: 'state', phase: t.phase, round: t.round, roundSec: t.roundSec };
+  if (t.round >= 1) state.seed = t.rounds[t.round - 1].seed;
+  if (t.phase === 'duel') {
+    state.openAt = t.openAt;
+    state.deadline = t.deadline;
+    state.remainingMs = Math.max(0, t.deadline - now);
+  }
+  const sc = t.scores.get(studentId);
+  const tot = t.totals.get(studentId);
+  state.you = {
+    correct: sc ? sc.correct : 0,
+    wrong: sc ? sc.wrong : 0,
+    seq: (sc ? sc.seqDone : 0) + 1,
+    lockRemainMs: sc ? Math.max(0, sc.lockedUntil - now) : 0,
+    role: tourneyRoleOf(t, studentId),
+    wins: tot ? tot.wins : 0,
+    totalCorrect: tot ? tot.correct : 0,
+  };
+  if (t.plan) {
+    state.pair = { opponents: tourneyOpponentsOf(session, studentId, true) };
+  }
+  if (t.phase === 'result') {
+    const result = buildTourneyResult(session, studentId);
+    if (result) state.result = result;
+  }
+  if (t.phase === 'podium') state.podium = buildTourneyPodium(session, studentId);
+  return state;
+}
+
+// A presence change (connected / focused / awaySeconds) while a duel is live
+// is relayed to the student's duel partner(s) — §2.5. Fired from /submit
+// heartbeats, /leave beacons and the 45s staleness sweep.
+function relayTourneyPresence(session, studentId) {
+  const t = session.tourney;
+  if (!t || t.phase !== 'duel' || !t.plan) return;
+  const partners = tourneyPartners(t.plan, studentId);
+  if (partners.length === 0) return;
+  const rec = session.students.get(studentId);
+  const payload = {
+    type: 'presence',
+    opponents: [{
+      id: studentId,
+      name: tourneyNameOf(session, studentId),
+      connected: rec ? rec.connected !== false : false,
+      away: rec ? rec.focused === false : false,
+      awaySeconds: rec ? rec.awaySeconds || 0 : 0,
+    }],
+  };
+  for (const pid of partners) sendTourneyEvent(session, pid, payload);
+}
+
+// Draw a round (§2.4 'pair'). The rng is a FRESH mulberry32 of the round's
+// configured seed, so the whole draw replays bit-for-bit from the config —
+// the same seed the phones use to generate the round's problem sequence.
+function doTourneyPair(session) {
+  const t = session.tourney;
+  clearTourneyTimers(t);
+  const rng = mulberry32(t.rounds[t.round].seed); // rounds[N-1] for new round N
+  t.plan = planRound(bracketStateOf(t), tourneyRoster(session), rng);
+  t.round += 1;
+  t.phase = 'pairing';
+  t.openAt = null;
+  t.deadline = null;
+  // Reset per-round scores at the DRAW, not just at start: every wire shape
+  // read during 'pairing' (student state you.*, pair opponents' correct,
+  // the serialized round's live rows) must show the fresh round's zeros,
+  // not the settled previous round's numbers.
+  t.scores = new Map();
+  for (const sid of t.watchers.keys()) {
+    sendTourneyEvent(session, sid, buildTourneyPairing(session, sid));
+  }
+  broadcastTourneyTeacher(session);
+}
+
+// Open the round (§2.4 'start'). The 3s get-ready countdown is BAKED INTO
+// openAt (race precedent); the settle timer runs at deadline+grace so an
+// answer already on the wire at the buzzer still lands — phones display
+// `deadline`.
+function doTourneyStart(session) {
+  const t = session.tourney;
+  clearTourneyTimers(t);
+  const now = Date.now();
+  t.phase = 'duel';
+  t.openAt = now + TOURNEY_GET_READY_MS;
+  t.deadline = t.openAt + t.roundSec * 1000;
+  t.scores = new Map(); // fresh per-round scores
+  t.closeTimer = setTimeout(() => {
+    t.closeTimer = null;
+    settleTourneyRound(session);
+  }, t.deadline + TOURNEY_ANSWER_GRACE_MS - now);
+  broadcastTourneyStudents(session, {
+    type: 'duel',
+    round: t.round,
+    seed: t.rounds[t.round - 1].seed,
+    roundSec: t.roundSec,
+    openAt: t.openAt,
+    deadline: t.deadline,
+    remainingMs: Math.max(0, t.deadline - Date.now()),
+  });
+  broadcastTourneyTeacher(session);
+}
+
+// Settle the round (§2.4) — timer-driven only, IDEMPOTENT by the phase guard
+// (an /end or auto-end clears the timer, so a stale settle can never fire
+// into a moved-on room; the guard covers the rest).
+function settleTourneyRound(session) {
+  const t = session.tourney;
+  if (!t || t.phase !== 'duel') return;
+  clearTourneyTimers(t);
+  t.phase = 'result';
+
+  const roster = tourneyRoster(session);
+  const outcome = settleRound(t.plan, t.scores, roster);
+  const next = applyOutcome(bracketStateOf(t), t.plan, outcome);
+  t.alive = next.alive;
+  t.out = next.out;
+  t.champion = next.champion;
+  t.history = next.history;
+  t.firstDrawDone = next.firstDrawDone;
+
+  // Totals (§2.4 step 3): every duelist banks the round's correct/wrong; +1
+  // win per duel/trio winner — read from the duels rows so bye and solo rows
+  // count too (a bye IS a win).
+  for (const row of outcome.duels) {
+    for (const id of tourneyRowMembers(row)) {
+      const tot = ensureTourneyTotals(t, id, tourneyNameOf(session, id));
+      tot.correct += row.scores[id].correct;
+      tot.wrong += row.scores[id].wrong;
+    }
+    ensureTourneyTotals(t, row.winner, tourneyNameOf(session, row.winner)).wins += 1;
+  }
+
+  // §2.4 step 4: write totals into the REGULAR student records so the v7
+  // board, results screen and console autosave keep working. `finished` is
+  // untouched until podium; updatedAt stays alone (presence-sweep signal).
+  for (const [sid, s] of session.students.entries()) {
+    const tot = t.totals.get(String(sid));
+    if (!tot) continue;
+    const score = tot.correct;
+    const total = tot.correct + tot.wrong;
+    if (s.score === score && s.total === total) continue;
+    s.score = score;
+    s.total = total;
+    broadcast(session, { type: 'update', studentId: sid, ...s });
+  }
+
+  // §2.4 step 5: individualized results (only students who played a row this
+  // round — a waiting latecomer's screen has nothing to settle) + teacher.
+  for (const sid of t.watchers.keys()) {
+    const ev = buildTourneyResult(session, sid);
+    if (ev) sendTourneyEvent(session, sid, ev);
+  }
+  broadcastTourneyTeacher(session);
+}
+
+// §2.4 'podium'. Standings are frozen HERE (with names) so podium snapshots
+// stay stable even as students leave; connected students are marked finished
+// so the console's autosave rows look complete (race precedent).
+function doTourneyPodium(session) {
+  const t = session.tourney;
+  clearTourneyTimers(t);
+  t.phase = 'podium';
+
+  const roster = tourneyRoster(session);
+  t.standings = finalStandings(bracketStateOf(t), t.totals, roster).map((row) => ({
+    ...row,
+    name: tourneyNameOf(session, row.studentId),
+  }));
+
+  // Update the regular records one last time, then mark everyone still
+  // present as finished. Left students keep finished=false — the same signal
+  // self-paced gives.
+  for (const [studentId, student] of session.students.entries()) {
+    const tot = t.totals.get(String(studentId));
+    let changed = false;
+    if (tot) {
+      const score = tot.correct;
+      const total = tot.correct + tot.wrong;
+      if (student.score !== score || student.total !== total) {
+        student.score = score;
+        student.total = total;
+        changed = true;
+      }
+    }
+    if (student.connected !== false && !student.finished) {
+      student.finished = true;
+      changed = true;
+    }
+    if (changed) broadcast(session, { type: 'update', studentId, ...student });
+  }
+
+  broadcastTourneyTeacher(session);
+  for (const sid of t.watchers.keys()) {
+    sendTourneyEvent(session, sid, buildTourneyPodium(session, sid));
+  }
+}
+
+// §2.5 grading: both sides run through the exact port. If the KEY fails to
+// parse (should never — the console generates it from toPlain output), fall
+// back to normalized string equality: trim, unicode minus → '-', comma → '.'.
+function gradeTourneyAnswer(given, key) {
+  const parsedKey = parseExact(key);
+  if (parsedKey) {
+    const parsedGiven = parseExact(given);
+    return parsedGiven != null && equalsExact(parsedGiven, parsedKey);
+  }
+  const norm = (v) => String(v).trim().replace(/−/g, '-').replace(/,/g, '.');
+  return norm(given) === norm(key);
+}
+
 // ─── Auth gate (PLAN.md "Gate 2") ──────────────────────────────────────────
 // Token format: base64url(JSON {uid, exp}) + '.' + base64url(HMAC-SHA256).
 // Issued by the website's /api/quiz-token for signed-in teachers; verified
@@ -1059,6 +1765,8 @@ function checkAutoEnd(session) {
       session.status = 'ended';
       // v8: a pending race timer must never reveal/advance into an ended room.
       if (session.race) clearRaceTimers(session.race);
+      // v9: same rule for the tournament settle timer.
+      if (session.tourney) clearTourneyTimers(session.tourney);
       broadcast(session, { type: 'ended', reason: 'timeout' });
     }
   }
@@ -1088,6 +1796,15 @@ setInterval(() => {
       if (session.race) {
         clearRaceTimers(session.race);
         for (const set of session.race.watchers.values()) {
+          for (const res of set) {
+            try { res.end(); } catch (_) {}
+          }
+        }
+      }
+      // v9: same eviction hygiene for tournament rooms.
+      if (session.tourney) {
+        clearTourneyTimers(session.tourney);
+        for (const set of session.tourney.watchers.values()) {
           for (const res of set) {
             try { res.end(); } catch (_) {}
           }
@@ -1142,12 +1859,25 @@ app.post('/session', (req, res) => {
     return res.status(503).json({ error: 'Server full' });
   }
 
+  // v9: race and tournament are mutually exclusive room modes — a body
+  // carrying both is a confused console, refused before either sanitizer
+  // gets to pick a winner (spec §2.2).
+  if (req.body.race != null && req.body.tourney != null) {
+    return res.status(400).json({ error: 'mode_conflict' });
+  }
+
   // v8: optional race config. Malformed SHAPE → not stored (self-paced room;
   // the console detects the missing race ack below). Cap violations → loud
   // 400s, never a silent downgrade (spec §2.2).
   const raceResult = sanitizeRaceConfig(req.body.race);
   if (raceResult.error) {
     return res.status(400).json({ error: raceResult.error });
+  }
+
+  // v9: optional tournament config — same shape/cap philosophy as race.
+  const tourneyResult = sanitizeTourneyConfig(req.body.tourney);
+  if (tourneyResult.error) {
+    return res.status(400).json({ error: tourneyResult.error });
   }
 
   const code = generateCode();
@@ -1171,17 +1901,24 @@ app.post('/session', (req, res) => {
     teachers: new Set(),
     // v8: race rooms carry the whole lockstep state machine; absent for
     // self-paced rooms so every existing code path sees the exact v7 shape.
-    ...(raceResult.race ? { race: newRaceState(raceResult.race) } : {})
+    ...(raceResult.race ? { race: newRaceState(raceResult.race) } : {}),
+    // v9: tournament rooms carry the teacher-paced duel state machine.
+    ...(tourneyResult.tourney ? { tourney: newTourneyState(tourneyResult.tourney) } : {})
   });
   // hostSecret goes ONLY to the creator here; students never receive it.
   // The race ack is load-bearing: the console REQUIRES race.qCount to equal
   // the question count it sent — a v7 server (which ignores the field) omits
   // it and the console fails room creation loudly instead of opening a
-  // self-paced room behind a race board (spec §1).
+  // self-paced room behind a race board (spec §1). The v9 tourney ack works
+  // the same way: the console requires tourney.rounds to equal the round
+  // count it sent (spec §2.2).
   res.json({
     code,
     hostSecret,
-    ...(raceResult.race ? { race: { qCount: raceResult.race.questions.length } } : {})
+    ...(raceResult.race ? { race: { qCount: raceResult.race.questions.length } } : {}),
+    ...(tourneyResult.tourney
+      ? { tourney: { rounds: tourneyResult.tourney.rounds.length } }
+      : {})
   });
 });
 
@@ -1196,11 +1933,22 @@ app.post('/start', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
+  // Replayed /start on an already-active room is a no-op. Without this guard
+  // a stale console tab's start button resets race/tourney phase to 'idle'
+  // mid-round — in a tournament that silently loses the live round (the
+  // armed settle timer bails on the phase check and the scores never fold).
+  if (session.status === 'active') {
+    return res.json({ ok: true, startedAt: session.startedAt });
+  }
+
   session.status = 'active';
   session.startedAt = Date.now();
   // v8: a race room starts in the 'idle' race phase — the teacher opens the
   // first question explicitly via POST /race/advance {action:'next'}.
   if (session.race) session.race.phase = 'idle';
+  // v9: a tournament room starts in the 'idle' tourney phase (lobby → the
+  // board shows the draw button; POST /tourney/advance {action:'pair'} next).
+  if (session.tourney) session.tourney.phase = 'idle';
 
   // Broadcast to all teacher SSE streams
   broadcast(session, { type: 'started', startedAt: session.startedAt });
@@ -1227,6 +1975,8 @@ app.post('/end', (req, res) => {
   session.status = 'ended';
   // v8: a pending race timer must never reveal/advance into an ended room.
   if (session.race) clearRaceTimers(session.race);
+  // v9: a pending tournament settle must never fire into an ended room.
+  if (session.tourney) clearTourneyTimers(session.tourney);
 
   // Broadcast to all teacher SSE streams
   broadcast(session, { type: 'ended', reason: 'teacher' });
@@ -1253,6 +2003,10 @@ app.post('/kick', (req, res) => {
   session.kicked.add(String(studentId));
   const removed = session.students.delete(studentId);
   broadcast(session, { type: 'kicked', studentId });
+  // A mid-duel kick must reach the duel partner's phone: the record is gone,
+  // so no later heartbeat/sweep will ever relay for this id again.
+  // relayTourneyPresence reports a missing record as connected:false.
+  if (session.tourney) relayTourneyPresence(session, String(studentId));
 
   res.json({ ok: true, removed });
 });
@@ -1277,6 +2031,8 @@ app.get('/status', (req, res) => {
     // v8: the race summary is the poll-level resync channel (spec §2.7) —
     // it's also how the student page learns the room is a race at all.
     ...(session.race ? { race: raceSummary(session, studentId) } : {}),
+    // v9: same role for the tournament summary (spec §2.8).
+    ...(session.tourney ? { tourney: tourneySummary(session) } : {}),
     ...(kicked ? { kicked: true } : {})
   });
 });
@@ -1301,7 +2057,9 @@ app.get('/resolve', (req, res) => {
     // students to use the teacher's QR instead.
     studentPath: session.studentPath || null,
     // v8: lets the /join page show that this room is a race (no UI required).
-    ...(session.race ? { race: true } : {})
+    ...(session.race ? { race: true } : {}),
+    // v9: same flag for tournament rooms (spec §2.8).
+    ...(session.tourney ? { tourney: true } : {})
   });
 });
 
@@ -1331,7 +2089,8 @@ app.post('/submit', (req, res) => {
         status: session.status,
         timeLeft: getTimeLeft(session),
         ...(session.features ? { features: session.features } : {}),
-        ...(session.race ? { race: raceSummary(session, studentId) } : {})
+        ...(session.race ? { race: raceSummary(session, studentId) } : {}),
+        ...(session.tourney ? { tourney: tourneySummary(session) } : {})
       });
     }
   }
@@ -1343,14 +2102,16 @@ app.post('/submit', (req, res) => {
 
   // v8: in race rooms score/total/answers are SERVER-owned — doReveal()
   // writes the graded results into these fields, so client-sent values are
-  // ignored (a tampered phone can't inflate the board). Everything else —
-  // heartbeat, presence, away clock, focus, sticky finished, kick/re-join —
-  // behaves exactly as v7 in both modes.
+  // ignored (a tampered phone can't inflate the board). v9: tournament rooms
+  // are server-owned the same way (settleTourneyRound writes them). Everything
+  // else — heartbeat, presence, away clock, focus, sticky finished,
+  // kick/re-join — behaves exactly as v7 in every mode.
   const isRace = Boolean(session.race);
+  const serverOwned = isRace || Boolean(session.tourney);
   const student = {
     name:        String(name || 'Student').slice(0, MAX_NAME_LENGTH),
-    score:       isRace ? (prev ? prev.score : 0) : cleanNumber(score, MAX_SCORE_VALUE),
-    total:       isRace ? (prev ? prev.total : 0) : cleanNumber(total, MAX_SCORE_VALUE),
+    score:       serverOwned ? (prev ? prev.score : 0) : cleanNumber(score, MAX_SCORE_VALUE),
+    total:       serverOwned ? (prev ? prev.total : 0) : cleanNumber(total, MAX_SCORE_VALUE),
     // Sticky: once a student reported finished, a later heartbeat (which
     // defaults the field to false) can't silently un-finish them.
     finished:    Boolean(finished) || Boolean(prev && !joining && prev.finished),
@@ -1361,13 +2122,35 @@ app.post('/submit', (req, res) => {
     connected:   true,
     // Keep the last known map when a heartbeat omits/garbles the field, so a
     // brief bad submit can't wipe detail the console already relies on.
-    answers:     isRace
+    answers:     serverOwned
       ? (prev ? prev.answers : undefined)
       : cleanAnswers(answers) || (prev ? prev.answers : undefined),
     updatedAt:   Date.now()
   };
 
   session.students.set(studentId, student);
+
+  if (session.tourney) {
+    // v9: a first roster contact AFTER the first draw is a latecomer — they
+    // join the losers pool at the next draw and can never become champion.
+    if (!prev && session.tourney.round >= 1) {
+      session.tourney.late.add(String(studentId));
+    }
+    // Cache the name in totals so a later kick (which deletes the record)
+    // doesn't blank them on the bracket or the standings.
+    ensureTourneyTotals(session.tourney, String(studentId), student.name);
+    // A presence change mid-duel is relayed to the duel partner(s) — §2.5.
+    // The awaySeconds step matches the board broadcast below (≥15s) so the
+    // partner's ticking away-clock stays in sync without extra chatter.
+    if (
+      prev &&
+      (prev.connected !== student.connected ||
+        prev.focused !== student.focused ||
+        Math.abs(student.awaySeconds - prev.awaySeconds) >= 15)
+    ) {
+      relayTourneyPresence(session, String(studentId));
+    }
+  }
 
   // Broadcast only when something the teacher can see actually changed —
   // idle heartbeats (lobby waits, thinking time) produce no SSE traffic.
@@ -1396,7 +2179,9 @@ app.post('/submit', (req, res) => {
     ...(session.features ? { features: session.features } : {}),
     // v8: heartbeat responses double as the race resync channel (spec §2.7) —
     // screen lock kills the SSE stream, the next heartbeat re-anchors the UI.
-    ...(session.race ? { race: raceSummary(session, studentId) } : {})
+    ...(session.race ? { race: raceSummary(session, studentId) } : {}),
+    // v9: and as the tournament resync channel (spec §2.8).
+    ...(session.tourney ? { tourney: tourneySummary(session) } : {})
   });
 });
 
@@ -1419,6 +2204,9 @@ app.post('/leave', express.text({ type: '*/*' }), (req, res) => {
       student.connected = false;
       student.updatedAt = Date.now();
       broadcast(session, { type: 'update', studentId, ...student });
+      // v9: a duel partner sees the "left" badge immediately, not on the
+      // next heartbeat cycle.
+      if (session.tourney) relayTourneyPresence(session, String(studentId));
     }
   }
   res.json({ ok: true });
@@ -1437,6 +2225,8 @@ setInterval(() => {
       if (student.connected !== false && now - student.updatedAt > PRESENCE_STALE_MS) {
         student.connected = false;
         broadcast(session, { type: 'update', studentId, ...student });
+        // v9: the sweep is the third way presence can change mid-duel.
+        if (session.tourney) relayTourneyPresence(session, String(studentId));
       }
     }
   }
@@ -1483,7 +2273,9 @@ app.get('/live', (req, res) => {
     // race view (phase, timing, and the current dist+board when revealed) so
     // the board is restored exactly. Absent for self-paced rooms; old
     // consoles ignore unknown snapshot fields safely.
-    ...(session.race ? { race: teacherRaceState(session) } : {})
+    ...(session.race ? { race: teacherRaceState(session) } : {}),
+    // v9: mid-tournament console reload — phase, clocks and the full bracket.
+    ...(session.tourney ? { tourney: teacherTourneyState(session) } : {})
   })}\n\n`);
 
   // Keep-alive ping every 25 seconds
@@ -1771,13 +2563,267 @@ app.post('/race/advance', (req, res) => {
   res.json({ ok: true, phase: race.phase, qIndex: race.qIndex });
 });
 
+// ─── Tournament mode (v9) — routes ──────────────────────────────────────────
+// All three live under the single `/tourney` prefix ON PURPOSE: the prod
+// nginx allowlist needs exactly ONE new entry for the whole feature
+// (spec §2.1; helper: server/add-tourney-to-nginx.sh).
+
+// Student tournament stream. Individualized SSE like /race/stream: the
+// connect snapshot and every pairing/result/podium event are computed PER
+// student — a phone's stream carries its own duel only, never the whole
+// bracket. Public like /status (code + studentId reveal no more than the
+// phone already shows its holder).
+app.get('/tourney/stream', (req, res) => {
+  const code = String(req.query.code || '');
+  const studentId = String(req.query.studentId || '');
+  if (!code || !studentId) return res.status(400).json({ error: 'Missing fields' });
+
+  const session = sessions.get(code);
+  if (!session) return res.status(404).json({ error: 'Session not found', status: 'not_found' });
+  if (!session.tourney) return res.status(400).json({ error: 'not_tourney' });
+
+  checkAutoEnd(session);
+  const tourney = session.tourney;
+
+  // Own per-IP counter, SEPARATE from the /live and /race caps: every duel
+  // phone holds one of these, and one school NAT fronts several classes.
+  const ip = req.clientIp || clientIpOf(req);
+  const openForIp = tourneySseByIp.get(ip) || 0;
+  if (openForIp >= MAX_TOURNEY_SSE_PER_IP) {
+    return res.status(429).json({ error: 'Too many tourney streams' });
+  }
+  // Per-room cap mirrors the /submit roster cap; reconnects of a known
+  // student are always allowed — that's the screen-lock recovery path.
+  if (!tourney.watchers.has(studentId) && tourney.watchers.size >= MAX_STUDENTS_PER_SESSION) {
+    return res.status(429).json({ error: 'Session full' });
+  }
+  tourneySseByIp.set(ip, openForIp + 1);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  // Individualized connect snapshot — also THE resync path after a dropped
+  // stream: reopening restores the exact phase, seq position and lockout.
+  res.write(`data: ${JSON.stringify(buildTourneyStudentState(session, studentId))}\n\n`);
+
+  // Keep-alive ping every 25 seconds (same cadence as /live and /race/stream)
+  const ping = setInterval(() => {
+    try {
+      res.write(`: ping\n\n`);
+    } catch (_) { clearInterval(ping); }
+  }, 25000);
+
+  let set = tourney.watchers.get(studentId);
+  if (!set) {
+    set = new Set();
+    tourney.watchers.set(studentId, set);
+  }
+  set.add(res);
+
+  req.on('close', () => {
+    set.delete(res);
+    if (set.size === 0) tourney.watchers.delete(studentId);
+    clearInterval(ping);
+    const n = (tourneySseByIp.get(ip) || 1) - 1;
+    if (n <= 0) tourneySseByIp.delete(ip);
+    else tourneySseByIp.set(ip, n);
+  });
+});
+
+// Student answers the current duel problem. Graded AT ACCEPT with the exact
+// port; the verdict IS echoed here (unlike race) — a duel shows right/wrong
+// instantly, that's the game. Answers land strictly in seq order, and every
+// accepted answer settles its seq permanently: a replay or skip can only 409.
+app.post('/tourney/answer', (req, res) => {
+  const { code } = req.body;
+  const studentId = req.body.studentId != null ? String(req.body.studentId) : '';
+  if (!code || !studentId) return res.status(400).json({ error: 'Missing fields' });
+
+  const session = sessions.get(code);
+  if (!session) return res.status(404).json({ error: 'Session not found', status: 'not_found' });
+  if (!session.tourney) return res.status(400).json({ error: 'not_tourney' });
+
+  checkAutoEnd(session);
+  const tourney = session.tourney;
+
+  // Kicked students can't score — same rule as /race/answer (an explicit
+  // re-join via /submit is their way back in, as a latecomer).
+  if (session.kicked && session.kicked.has(studentId)) {
+    return res.json({ ok: false, kicked: true });
+  }
+
+  // Only students actually in the room may score (spec §2.5: unknown → 404).
+  // /submit (joining:true) is the front door and enforces the roster cap.
+  if (!session.students.has(studentId)) {
+    return res.status(404).json({ error: 'not_joined' });
+  }
+
+  // Accept window (§2.5): live room, duel phase, right round, openAt..
+  // deadline+grace. A stale answer gets a 409 that tells the phone where the
+  // room really is — harmless to retry-happy clients.
+  const round = Number(req.body.round);
+  const now = Date.now();
+  if (
+    session.status !== 'active' ||
+    tourney.phase !== 'duel' ||
+    !Number.isInteger(round) ||
+    round !== tourney.round ||
+    now < tourney.openAt ||
+    now > tourney.deadline + TOURNEY_ANSWER_GRACE_MS
+  ) {
+    return res.status(409).json({ error: 'bad_phase', phase: tourney.phase, round: tourney.round });
+  }
+
+  let sc = tourney.scores.get(studentId);
+  if (!sc) {
+    sc = { correct: 0, wrong: 0, seqDone: 0, lastCorrectAt: null, lockedUntil: 0 };
+    tourney.scores.set(studentId, sc);
+  }
+
+  // Strict sequence order: seq must be exactly the next one, and the round's
+  // key list bounds how many there are. `expect` lets a desynced phone jump
+  // straight to the right problem instead of guessing.
+  const answers = tourney.rounds[tourney.round - 1].answers;
+  const seq = Number(req.body.seq);
+  if (!Number.isInteger(seq) || seq !== sc.seqDone + 1 || seq > answers.length) {
+    return res.status(409).json({ error: 'bad_seq', expect: sc.seqDone + 1 });
+  }
+
+  // Wrong-answer freeze: the keypad is locked out client-side; this is the
+  // server-side truth a tampered phone can't skip.
+  if (now < sc.lockedUntil) {
+    return res.status(429).json({ error: 'locked', remainMs: sc.lockedUntil - now });
+  }
+
+  const given = typeof req.body.given === 'string'
+    ? req.body.given.slice(0, MAX_TOURNEY_GIVEN_LENGTH)
+    : '';
+  const right = gradeTourneyAnswer(given, answers[seq - 1]);
+  sc.seqDone += 1; // every accepted answer settles its seq permanently
+  if (right) {
+    sc.correct += 1;
+    sc.lastCorrectAt = now; // the settle tiebreak: earlier finisher wins
+  } else {
+    sc.wrong += 1;
+    sc.lockedUntil = now + tourney.lockoutMs;
+  }
+
+  // An answer proves the page is open — refresh presence like a heartbeat
+  // would, so the 45s sweep can't mark an actively dueling student "left".
+  const existing = session.students.get(studentId);
+  ensureTourneyTotals(tourney, studentId, existing ? existing.name : undefined);
+  if (existing) {
+    existing.updatedAt = now;
+    if (existing.connected === false) {
+      existing.connected = true;
+      broadcast(session, { type: 'update', studentId, ...existing });
+      relayTourneyPresence(session, studentId);
+    }
+  }
+
+  // Side effects (§2.5): the duel partner(s) see the score move at once, and
+  // the teacher stream maps the tick to the right pair card.
+  const partners = tourneyPartners(tourney.plan, studentId);
+  if (partners.length > 0) {
+    const tick = {
+      type: 'tick',
+      opponents: [{ id: studentId, name: tourneyNameOf(session, studentId), correct: sc.correct }],
+    };
+    for (const pid of partners) sendTourneyEvent(session, pid, tick);
+  }
+  broadcast(session, {
+    type: 'tourney_score',
+    round: tourney.round,
+    studentId,
+    correct: sc.correct,
+    wrong: sc.wrong,
+  });
+
+  res.json({
+    ok: true,
+    correct: sc.correct,
+    wrong: sc.wrong,
+    right,
+    lockRemainMs: right ? 0 : tourney.lockoutMs,
+  });
+});
+
+// Teacher paces the tournament: draw (жеребе) → start round → review → next
+// draw. hostSecret-gated like /race/advance; an illegal action for the phase
+// gets a 409 the console silently drops (double-click safe). There is no
+// manual round close — the clock always runs out (settle is timer-driven).
+app.post('/tourney/advance', (req, res) => {
+  const { code, action } = req.body;
+  if (!code || !action) return res.status(400).json({ error: 'Missing fields' });
+
+  const session = sessions.get(code);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!session.tourney) return res.status(400).json({ error: 'not_tourney' });
+  if (!verifyHostSecret(session, req.body.hostSecret)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  checkAutoEnd(session);
+  const tourney = session.tourney;
+  const badPhase = () =>
+    res.status(409).json({ error: 'bad_phase', phase: tourney.phase, round: tourney.round });
+
+  // Every transition needs a live room — a waiting or ended room has no
+  // legal tournament moves (same uniform-handling reasoning as race).
+  if (session.status !== 'active') return badPhase();
+
+  switch (action) {
+    case 'pair':
+      // From idle (first draw) or result — but never once a champion stands,
+      // and never past the pre-generated answer keys (§2.4).
+      if (tourney.phase !== 'idle' && tourney.phase !== 'result') return badPhase();
+      if (tourney.phase === 'result' && tourney.champion != null) return badPhase();
+      if (tourney.round + 1 > tourney.rounds.length) {
+        return res.status(409).json({
+          error: 'no_rounds_left',
+          phase: tourney.phase,
+          round: tourney.round,
+        });
+      }
+      // The first draw needs at least one real pair. Kicked records are
+      // already deleted from the map, so its size IS the eligible count.
+      if (tourney.phase === 'idle' && session.students.size < 2) {
+        return res.status(409).json({ error: 'too_few' });
+      }
+      doTourneyPair(session);
+      break;
+    case 'start':
+      if (tourney.phase !== 'pairing') return badPhase();
+      doTourneyStart(session);
+      break;
+    case 'podium':
+      // Only from result, and only when the bracket is actually over: a
+      // champion stands OR the pre-generated rounds ran out (§2.4).
+      if (
+        tourney.phase !== 'result' ||
+        (tourney.champion == null && tourney.round < tourney.rounds.length)
+      ) {
+        return badPhase();
+      }
+      doTourneyPodium(session);
+      break;
+    default:
+      return res.status(400).json({ error: 'bad_action' });
+  }
+
+  res.json({ ok: true, phase: tourney.phase, round: tourney.round });
+});
+
 // Quick health check. Public response is liveness only — `version` is what the
 // deploy step verifies. The live counts and which security gates are on are a
 // reconnaissance aid (they tell an attacker exactly what's off), so they're
 // disclosed only to a request carrying the operator key. With LIVE_STATUS_KEY
 // unset the detail is unavailable to everyone, which is the safe default.
 app.get('/health', (req, res) => {
-  const body = { ok: true, version: 8 };
+  const body = { ok: true, version: 9 };
   const statusKey = process.env.LIVE_STATUS_KEY;
   if (statusKey && req.query.key === statusKey) {
     body.sessions = sessions.size;
@@ -1791,9 +2837,10 @@ app.get('/health', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ MathSabaq server v8 running on port ${PORT}`);
+  console.log(`✅ MathSabaq server v9 running on port ${PORT}`);
   console.log(`   class history: not saved HERE — the teacher console saves to Supabase`);
   console.log(`   race streams:       ${MAX_RACE_SSE_PER_IP}/IP (LIVE_MAX_RACE_SSE_PER_IP)`);
+  console.log(`   tourney streams:    ${MAX_TOURNEY_SSE_PER_IP}/IP (LIVE_MAX_TOURNEY_SSE_PER_IP)`);
   console.log(`   /session auth gate: ${AUTH_ENFORCED ? 'ENFORCED' : 'OPEN — set QUIZ_TOKEN_SECRET to enforce'}`);
   console.log(`   host-secret gate:   ${HOST_SECRET_ENFORCED ? 'ENFORCED' : 'DORMANT — set LIVE_HOST_SECRET_ENFORCED to enforce'}`);
   console.log(`   CORS:               ${CORS_LOCKED ? `locked to ${ALLOWED_ORIGINS.join(', ')}` : 'OPEN — set LIVE_ALLOWED_ORIGINS to lock'}`);

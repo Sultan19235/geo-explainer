@@ -84,6 +84,7 @@ export default async function PackHostPage({
         initialSelectedIds={initialSelectedIds}
         initialOrderMode={initialOrderMode}
         generator={data.pack.generator ?? null}
+        generatorCode={data.generatorCode}
       />
     </main>
   );

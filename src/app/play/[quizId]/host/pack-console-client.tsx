@@ -28,6 +28,7 @@ import {
   Shapes,
   Shuffle,
   Square,
+  Swords,
   Timer,
   Trophy,
   Users,
@@ -63,6 +64,9 @@ import {
 } from "@/lib/quiz/quadratic";
 import { getDrillTopic } from "@/lib/drill/registry";
 import { locDrill } from "@/lib/drill/strings";
+import { toPlain } from "@/lib/drill/exact";
+import { mulberry32 } from "@/lib/drill/rng";
+import { UploadedDrillSource } from "@/lib/drill/uploaded/source";
 import {
   defaultConfig,
   encodeDrillConfig,
@@ -89,12 +93,15 @@ import {
   type QuizFeatures,
   type RaceConfig,
   type RaceQuestionConfig,
+  type TourneyConfig,
+  type TourneyRoundKey,
 } from "@/lib/quiz/live-client";
 import {
   useResultAutosave,
   type ResultSaveStatus,
 } from "@/lib/quiz/use-result-autosave";
 import { RaceBoard } from "./race-board";
+import { TourneyBoard } from "./tourney-board";
 
 const AVATAR_COLORS = [
   "#2563eb",
@@ -158,10 +165,12 @@ type RoomCtx = {
   genModes: GraphQuizMode[];
   genDrill?: DrillConfig; // drill generator: the teacher's option ticks
   features?: QuizFeatures;
-  mode?: "self" | "race";
+  mode?: "self" | "race" | "tourney";
   raceSec?: number; // room default seconds per question
   raceAuto?: boolean; // auto-advance initial value
   raceQSec?: Record<string, number>; // per-question overrides, qid → seconds
+  tourneySec?: number; // tournament: duel length (roundSec)
+  tourneyLockSec?: number; // tournament: wrong-answer freeze (lockoutSec)
 };
 
 // The default-time choices the setup card offers (spec §7); RACE_SEC_DEFAULT
@@ -173,6 +182,32 @@ const RACE_SEC_DEFAULT = 30;
 // what the room runs.
 function clampRaceSec(n: number): number {
   return Math.min(600, Math.max(5, Math.round(n)));
+}
+
+// Tournament setup choices (TOURNAMENT_MODE_SPEC.md §6). Lockout 0 renders
+// as «Жоқ»/«Нет»; the 4с default sits between the spec's listed steps by
+// product-owner reconciliation (select shows Жоқ/3/4/5/8с, default 4с).
+const TOURNEY_SEC_CHOICES = [60, 90, 120, 180] as const;
+const TOURNEY_SEC_DEFAULT = 90;
+const TOURNEY_LOCK_CHOICES = [0, 3, 4, 5, 8] as const;
+const TOURNEY_LOCK_DEFAULT = 4;
+// The answer key the console pre-generates: 12 rounds × 240 answers (§2.2).
+const TOURNEY_ROUNDS = 12;
+const TOURNEY_SEQ_PER_ROUND = 240;
+
+// Server clamps (spec §2.2) — mirrored so a stale resume blob can't smuggle
+// an out-of-range value into a fresh room.
+function clampTourneySec(n: number): number {
+  return Math.min(300, Math.max(30, Math.round(n)));
+}
+function clampTourneyLock(n: number): number {
+  return Math.min(15, Math.max(0, Math.round(n)));
+}
+
+// A fresh 31-bit round seed (spec §2.2). Math.random is fine here — the seed
+// only needs to be unpredictable-enough for a classroom, not cryptographic.
+function randomSeed31(): number {
+  return Math.floor(Math.random() * 2147483647);
 }
 
 // The teacher's last student-aid choice, shared across quizzes (a teacher who
@@ -200,6 +235,7 @@ export function PackConsoleClient({
   initialSelectedIds,
   initialOrderMode,
   generator = null,
+  generatorCode = null,
 }: {
   quizId: string;
   title: Localized;
@@ -216,6 +252,11 @@ export function PackConsoleClient({
   // The object (not a boolean) because the setup card renders the machine's
   // own controls: sections/modes for graph-quadratic, option ticks for drill.
   generator?: PackGenerator | null;
+  // Uploaded drill-generator source (generator.file packs). The console
+  // itself never executes it directly — buildTourneyConfig runs it in the
+  // same sandbox worker the student page uses, to pre-generate the
+  // tournament answer key. null for registry topics and list packs.
+  generatorCode?: string | null;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -235,11 +276,13 @@ export function PackConsoleClient({
   const [orderMode, setOrderMode] = useState<"custom" | "shuffle">(
     initialOrderMode ?? "custom",
   );
-  // Room mode: self-paced (everything as before) or race (Жарыс) — the
-  // server-lockstep Kahoot flow. A PER-RUN choice on purpose: it is not part
-  // of saved quizzes, and generator packs can't race at all (their graph
-  // questions structurally leak the answer — correct is always index 0).
-  const [mode, setMode] = useState<"self" | "race">("self");
+  // Room mode: self-paced (everything as before), race (Жарыс) — the
+  // server-lockstep Kahoot flow — or tournament (Турнир), the bracket-duel
+  // flow. A PER-RUN choice on purpose: it is not part of saved quizzes.
+  // Race exists for list packs only (generator graph questions structurally
+  // leak the answer — correct is always index 0); tournament v1 exists for
+  // drill generator packs only (the INVERSE rule, spec §6).
+  const [mode, setMode] = useState<"self" | "race" | "tourney">("self");
   // Race timers: the room default + per-question overrides (qid → seconds).
   // A question's effective time is raceQSec[id] ?? question.timeSec (author's
   // suggestion) ?? raceSec — so un-edited rows follow the default live.
@@ -249,11 +292,28 @@ export function PackConsoleClient({
   // Switching to race dropped graph questions from the tray — tell, don't
   // silently shrink the selection.
   const [graphDropped, setGraphDropped] = useState(false);
+  // Tournament timers: duel length + wrong-answer lockout (both sent once at
+  // room creation inside the tourney config; nothing to edit live).
+  const [tourneySec, setTourneySec] = useState<number>(TOURNEY_SEC_DEFAULT);
+  const [tourneyLockSec, setTourneyLockSec] = useState<number>(
+    TOURNEY_LOCK_DEFAULT,
+  );
+  // Pre-generating the 12-round answer key runs the generator ~2880 times
+  // (in a worker for uploaded files) — a spinner state of its own, and a
+  // HARD visible failure: a broken generator must never open a room.
+  const [tourneyBuilding, setTourneyBuilding] = useState(false);
+  const [tourneyBuildError, setTourneyBuildError] = useState<string | null>(
+    null,
+  );
 
   const questionById = useMemo(
     () => new Map(questions.map((q) => [q.id, q] as const)),
     [questions],
   );
+
+  // Tournament eligibility (spec §6): drill generator packs only — registry
+  // topics AND uploaded .js generator files both qualify.
+  const isDrillGen = generator?.type === "drill";
 
   // Effective race seconds for one question (see raceQSec above). The stored
   // override is clamped only here — mid-typing values stay raw in state so
@@ -261,9 +321,11 @@ export function PackConsoleClient({
   const raceSecFor = (q: PackQuestion) =>
     clampRaceSec(raceQSec[q.id] ?? q.timeSec ?? raceSec);
 
-  const switchMode = (m: "self" | "race") => {
+  const switchMode = (m: "self" | "race" | "tourney") => {
     setMode(m);
     if (m !== "race") {
+      // Tournament needs no selection surgery: drill generator packs have no
+      // question picker at all — everything tournament-specific is settings.
       setGraphDropped(false);
       return;
     }
@@ -320,6 +382,124 @@ export function PackConsoleClient({
         return cfg;
       }),
   });
+
+  // The tournament config the server will own (spec §2.2/§6): 12 rounds,
+  // each a fresh 31-bit seed + the 240-answer key generated under the
+  // teacher's option ticks (genDrill — the same config that rides the join
+  // link as dopt=, so the phones regenerate EXACTLY these problems from the
+  // seed). Registry topics run synchronously here; uploaded files run in the
+  // same sandbox worker the student page uses. Any failure throws — the
+  // caller shows it and no room opens.
+  const buildTourneyConfig = async (): Promise<TourneyConfig> => {
+    if (generator?.type !== "drill") {
+      throw new Error("tournament mode needs a drill generator pack");
+    }
+    const rounds: TourneyRoundKey[] = [];
+    if (generator.file) {
+      if (!generatorCode) {
+        // The page didn't thread the uploaded source through — without it
+        // there is no answer key, and a key-less room must not open.
+        throw new Error(
+          "The generator file could not be loaded — reload the page and try again.",
+        );
+      }
+      // The player-path load skips the validation harness: the file was
+      // validated at upload, and the tournament build only needs answers.
+      const loaded = await UploadedDrillSource.load(generatorCode, {
+        validate: false,
+      });
+      if (!loaded.ok) throw new Error(loaded.errors.join("\n"));
+      try {
+        for (let r = 0; r < TOURNEY_ROUNDS; r++) {
+          const seed = randomSeed31();
+          const res = await loaded.source.generate(
+            seed,
+            genDrill,
+            1,
+            TOURNEY_SEQ_PER_ROUND,
+          );
+          if (!res.ok) throw new Error(res.errors.join("\n"));
+          rounds.push({
+            seed,
+            answers: res.problems.map((p) => toPlain(p.answer, p.answerStyle)),
+          });
+        }
+      } finally {
+        loaded.source.dispose();
+      }
+    } else {
+      const topic = getDrillTopic(generator.topic);
+      if (!topic) {
+        // Stale deployed client vs newer pack — same mismatch the student
+        // page degrades on; here it must block the room instead.
+        throw new Error(`unknown drill topic "${generator.topic}"`);
+      }
+      for (let r = 0; r < TOURNEY_ROUNDS; r++) {
+        const seed = randomSeed31();
+        const answers: string[] = [];
+        for (let seq = 1; seq <= TOURNEY_SEQ_PER_ROUND; seq++) {
+          // Same per-seq stream derivation as the student page's
+          // generateDrillPackQuestion — byte-identical problems per (seed,
+          // seq) is what makes the pre-generated key gradeable at all.
+          const problem = topic.generate(
+            mulberry32((seed + seq * 2654435761) >>> 0),
+            genDrill,
+          );
+          answers.push(toPlain(problem.answer, problem.answerStyle));
+        }
+        rounds.push({ seed, answers });
+      }
+    }
+    return { roundSec: tourneySec, lockoutSec: tourneyLockSec, rounds };
+  };
+
+  // Opens the room. Tournament rooms pre-generate the whole answer key FIRST
+  // (spinner via tourneyBuilding) — a generator error is a visible dead end,
+  // never a silently self-paced room (spec §6).
+  const openRoom = async () => {
+    setTourneyBuildError(null);
+    let tourneyCfg: TourneyConfig | undefined;
+    if (isDrillGen && mode === "tourney") {
+      setTourneyBuilding(true);
+      try {
+        // Let the spinner paint before the synchronous registry loop runs.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        tourneyCfg = await buildTourneyConfig();
+      } catch (err) {
+        setTourneyBuildError(
+          err instanceof Error && err.message ? err.message : String(err),
+        );
+        return;
+      } finally {
+        setTourneyBuilding(false);
+      }
+    }
+    await session.createRoom(
+      quizTitle,
+      studentPath,
+      {
+        selectedIds,
+        orderMode,
+        genSections,
+        genModes,
+        genDrill: drillTopic ? genDrill : undefined,
+        features,
+        mode,
+        raceSec,
+        raceAuto,
+        raceQSec,
+        tourneySec,
+        tourneyLockSec,
+      } satisfies RoomCtx,
+      features,
+      // The race config only exists for race rooms; the hook fails the
+      // create loudly (race_unsupported) if the server doesn't acknowledge
+      // it question-for-question. The tourney config gets the same
+      // round-for-round treatment (tourney_unsupported).
+      mode === "race" && !generator ? buildRaceConfig() : undefined,
+      tourneyCfg,
+    );
+  };
   // When some saved ids no longer exist in the pack, the loaded selection
   // already differs from the row — an unmatchable snapshot keeps "save
   // changes" enabled so the teacher can persist the cleanup.
@@ -429,6 +609,9 @@ export function PackConsoleClient({
     qParam ? `q=${encodeURIComponent(qParam)}` : null,
     orderMode === "shuffle" && mode !== "race" ? "shuffle=1" : null,
     mode === "race" && !generator ? "race=1" : null,
+    // tourney=1 makes the student page open the tournament flow (the server
+    // summary on /status confirms it — server truth wins, spec §5).
+    mode === "tourney" && isDrillGen ? "tourney=1" : null,
     generator?.type === "graph-quadratic" ? `sec=${genSections.join(",")}` : null,
     generator?.type === "graph-quadratic" ? `modes=${genModes.join(",")}` : null,
     doptValue ? `dopt=${encodeURIComponent(doptValue)}` : null,
@@ -520,9 +703,15 @@ export function PackConsoleClient({
         for (const group of drillTopic.options) {
           const stored = (ctx.genDrill as Record<string, unknown>)[group.id];
           if (!Array.isArray(stored)) continue;
-          const ids = group.choices
-            .map((c) => c.id)
-            .filter((id) => stored.includes(id));
+          // Whitelist against known choice ids but PRESERVE the stored
+          // order: generators consume config arrays order-sensitively, and a
+          // tournament's answer keys were baked under exactly this order —
+          // canonicalizing here would silently regenerate a different dopt=
+          // in the resumed console's join link and desync grading.
+          const known = new Set(group.choices.map((c) => c.id));
+          const ids = stored.filter(
+            (id): id is string => typeof id === "string" && known.has(id),
+          );
           if (ids.length > 0) restored[group.id] = ids;
         }
         if (Object.keys(restored).length > 0) {
@@ -532,17 +721,37 @@ export function PackConsoleClient({
       if (ctx.features && typeof ctx.features === "object") {
         setFeatures(sanitizeStoredFeatures(ctx.features));
       }
-      // Race fields, whitelisted the same way: mode decides whether the live
-      // phase renders the race board, so getting it back is what makes a
-      // mid-race console reload land on the right screen at all. A ctx
-      // WITHOUT a mode key (a blob written by a pre-race build, alive up to
-      // 4h across a deploy) is by definition a self-paced room — default to
-      // "self" so a mode toggle clicked before resuming can't strand the
-      // teacher on a race board the room never had.
-      setMode(ctx.mode === "race" && !generator ? "race" : "self");
+      // Race/tournament fields, whitelisted the same way: mode decides which
+      // live screen renders (race board / tournament board / self-paced
+      // cards), so getting it back is what makes a mid-game console reload
+      // land on the right screen at all. A ctx WITHOUT a mode key (a blob
+      // written by a pre-race build, alive up to 4h across a deploy) is by
+      // definition a self-paced room — default to "self" so a mode toggle
+      // clicked before resuming can't strand the teacher on a board the room
+      // never had. Each mode is also re-checked against what THIS pack
+      // allows (race: list packs; tourney: drill generator packs).
+      setMode(
+        ctx.mode === "race" && !generator
+          ? "race"
+          : ctx.mode === "tourney" && isDrillGen
+            ? "tourney"
+            : "self",
+      );
       if (ctx.mode === "race" && !generator) setOrderMode("custom");
       if (typeof ctx.raceSec === "number" && Number.isFinite(ctx.raceSec)) {
         setRaceSec(clampRaceSec(ctx.raceSec));
+      }
+      if (
+        typeof ctx.tourneySec === "number" &&
+        Number.isFinite(ctx.tourneySec)
+      ) {
+        setTourneySec(clampTourneySec(ctx.tourneySec));
+      }
+      if (
+        typeof ctx.tourneyLockSec === "number" &&
+        Number.isFinite(ctx.tourneyLockSec)
+      ) {
+        setTourneyLockSec(clampTourneyLock(ctx.tourneyLockSec));
       }
       if (typeof ctx.raceAuto === "boolean") setRaceAuto(ctx.raceAuto);
       if (
@@ -594,31 +803,10 @@ export function PackConsoleClient({
           saved={saved}
           setSaved={setSaved}
           savedMissing={savedQuiz?.missing ?? 0}
-          creating={session.creating}
+          creating={session.creating || tourneyBuilding}
           createError={session.createError}
-          onCreate={() =>
-            void session.createRoom(
-              quizTitle,
-              studentPath,
-              {
-                selectedIds,
-                orderMode,
-                genSections,
-                genModes,
-                genDrill: drillTopic ? genDrill : undefined,
-                features,
-                mode,
-                raceSec,
-                raceAuto,
-                raceQSec,
-              } satisfies RoomCtx,
-              features,
-              // The race config only exists for race rooms; the hook fails
-              // the create loudly (race_unsupported) if the server doesn't
-              // acknowledge it question-for-question.
-              mode === "race" && !generator ? buildRaceConfig() : undefined,
-            )
-          }
+          tourneyBuildError={tourneyBuildError}
+          onCreate={() => void openRoom()}
           resumable={session.resumable}
           onResume={resumeRoom}
           onDiscardResume={() => {
@@ -652,6 +840,10 @@ export function PackConsoleClient({
           raceQSec={raceQSec}
           setRaceQSec={setRaceQSec}
           graphDropped={graphDropped}
+          tourneySec={tourneySec}
+          setTourneySec={setTourneySec}
+          tourneyLockSec={tourneyLockSec}
+          setTourneyLockSec={setTourneyLockSec}
         />
       )}
 
@@ -674,7 +866,32 @@ export function PackConsoleClient({
 
       {session.phase === "live" &&
         session.code &&
-        (mode === "race" && !generator ? (
+        (mode === "tourney" && isDrillGen ? (
+          // Tournament rooms swap the self-paced scoreboard for the bracket
+          // board; ending (button, podium's Аяқтау, or the 45-min clock)
+          // still lands on the SAME ResultsScreen below — the server keeps
+          // score/total in sync at every settle, so the autosave path is one
+          // and the same for all three modes.
+          <TourneyBoard
+            quizTitle={quizTitle}
+            code={session.code}
+            students={session.students}
+            timeLeft={session.timeLeft}
+            tourney={session.tourney}
+            onEnd={() => {
+              if (window.confirm(t("c_end_confirm"))) void session.end();
+            }}
+            onOpenQr={() => setQrOpen(true)}
+            onFullscreen={toggleFullscreen}
+            onKick={kickWithConfirm}
+            onPair={session.tourneyPair}
+            onStartRound={session.tourneyStart}
+            onPodium={session.tourneyPodium}
+            // Podium's «Аяқтау» is the expected end of a tournament — no
+            // confirm.
+            onFinish={() => void session.end()}
+          />
+        ) : mode === "race" && !generator ? (
           // Race rooms swap the self-paced scoreboard for the phase-driven
           // race board; ending (button, podium's Аяқтау, or the 45-min clock)
           // still lands on the SAME ResultsScreen below, so the autosave path
@@ -785,6 +1002,11 @@ function SetupScreen({
   raceQSec,
   setRaceQSec,
   graphDropped,
+  tourneySec,
+  setTourneySec,
+  tourneyLockSec,
+  setTourneyLockSec,
+  tourneyBuildError,
 }: {
   quizId: string;
   quizTitle: string;
@@ -800,7 +1022,15 @@ function SetupScreen({
   setSaved: (s: SavedState) => void;
   savedMissing: number;
   creating: boolean;
-  createError: "unauthorized" | "network" | "race_unsupported" | null;
+  createError:
+    | "unauthorized"
+    | "network"
+    | "race_unsupported"
+    | "tourney_unsupported"
+    | null;
+  // The tournament answer-key pre-generation failed (broken generator file,
+  // unknown topic…) — shown verbatim; no room was opened.
+  tourneyBuildError: string | null;
   onCreate: () => void;
   resumable: ResumableRoom | null;
   onResume: () => void;
@@ -815,8 +1045,8 @@ function SetupScreen({
   setGenDrill: React.Dispatch<React.SetStateAction<DrillConfig>>;
   features: QuizFeatures;
   onToggleFeature: (key: keyof QuizFeatures) => void;
-  mode: "self" | "race";
-  onModeChange: (m: "self" | "race") => void;
+  mode: "self" | "race" | "tourney";
+  onModeChange: (m: "self" | "race" | "tourney") => void;
   raceSec: number;
   setRaceSec: (n: number) => void;
   raceAuto: boolean;
@@ -824,11 +1054,16 @@ function SetupScreen({
   raceQSec: Record<string, number>;
   setRaceQSec: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   graphDropped: boolean;
+  tourneySec: number;
+  setTourneySec: (n: number) => void;
+  tourneyLockSec: number;
+  setTourneyLockSec: (n: number) => void;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
   const total = questions.length;
   const selectedCount = selectedIds.length;
+  const isDrillGen = generator?.type === "drill";
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   // id → question + its stable "№ in the pack" (shown even when filters hide
@@ -1124,12 +1359,17 @@ function SetupScreen({
             </div>
           ))}
 
-        {/* room mode (list quizzes only — generator packs can't race: their
-            graph questions structurally leak the answer) */}
-        {!generator && (
+        {/* room mode. List quizzes: self ↔ race (generator packs can't race:
+            their graph questions structurally leak the answer). Drill
+            generator packs: self ↔ tournament — race stays hidden as today,
+            and «Турнир» appears beside «Өз қарқынымен» (spec §6: tournament
+            v1 runs on drill generators ONLY, the inverse exclusion rule). */}
+        {(!generator || isDrillGen) && (
           <div
             role="radiogroup"
-            aria-label={`${t("race_mode_self")} / ${t("race_mode_race")}`}
+            aria-label={`${t("race_mode_self")} / ${
+              isDrillGen ? t("tourney_mode") : t("race_mode_race")
+            }`}
             className="mt-4 grid gap-2 sm:grid-cols-2"
           >
             <ModeButton
@@ -1138,13 +1378,81 @@ function SetupScreen({
               label={t("race_mode_self")}
               onClick={() => onModeChange("self")}
             />
-            <ModeButton
-              active={mode === "race"}
-              icon={Zap}
-              label={t("race_mode_race")}
-              onClick={() => onModeChange("race")}
-            />
+            {!generator && (
+              <ModeButton
+                active={mode === "race"}
+                icon={Zap}
+                label={t("race_mode_race")}
+                onClick={() => onModeChange("race")}
+              />
+            )}
+            {isDrillGen && (
+              <ModeButton
+                active={mode === "tourney"}
+                icon={Swords}
+                label={t("tourney_mode")}
+                onClick={() => onModeChange("tourney")}
+              />
+            )}
           </div>
+        )}
+
+        {/* tournament timing: duel length + wrong-answer lockout. Both ride
+            the tourney config once at room creation; the pack's drill option
+            ticks above apply as in any drill room. */}
+        {isDrillGen && mode === "tourney" && (
+          <>
+            <div className="mt-4">
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-bold">
+                <Timer className="size-4 text-primary" aria-hidden />
+                {t("tourney_round_len")}
+              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {TOURNEY_SEC_CHOICES.map((sec) => (
+                  <button
+                    key={sec}
+                    type="button"
+                    aria-pressed={tourneySec === sec}
+                    onClick={() => setTourneySec(sec)}
+                    className={cn(
+                      "rounded-full border-[1.5px] px-3.5 py-1.5 text-sm font-bold tabular-nums transition-colors",
+                      tourneySec === sec
+                        ? "border-primary bg-primary text-white"
+                        : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                    )}
+                  >
+                    {sec}с
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mt-4">
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-bold">
+                <Zap className="size-4 text-primary" aria-hidden />
+                {t("tourney_lockout")}
+              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {TOURNEY_LOCK_CHOICES.map((sec) => (
+                  <button
+                    key={sec}
+                    type="button"
+                    aria-pressed={tourneyLockSec === sec}
+                    onClick={() => setTourneyLockSec(sec)}
+                    className={cn(
+                      "rounded-full border-[1.5px] px-3.5 py-1.5 text-sm font-bold tabular-nums transition-colors",
+                      tourneyLockSec === sec
+                        ? "border-primary bg-primary text-white"
+                        : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                    )}
+                  >
+                    {/* 0 = no lockout; §7 has no "none" key, so the literal
+                        pair stays inline */}
+                    {sec === 0 ? (lang === "kz" ? "Жоқ" : "Нет") : `${sec}с`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
         )}
 
         {/* order mode (list quizzes only — a generator deals its own order).
@@ -1297,7 +1605,17 @@ function SetupScreen({
               ? t("c_err_unauthorized")
               : createError === "race_unsupported"
                 ? t("race_server_unsupported")
-                : t("c_err_network")}
+                : createError === "tourney_unsupported"
+                  ? t("tourney_server_unsupported")
+                  : t("c_err_network")}
+          </p>
+        )}
+        {tourneyBuildError && (
+          <p
+            role="alert"
+            className="mt-4 whitespace-pre-line rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-sm font-medium text-destructive"
+          >
+            {tourneyBuildError}
           </p>
         )}
         {!generator && selectedCount === 0 && !createError && (

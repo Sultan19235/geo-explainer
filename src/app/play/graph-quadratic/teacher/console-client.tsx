@@ -231,7 +231,12 @@ function SetupScreen({
   creating: boolean;
   // "race_unsupported" rides along from the shared hook's union but can never
   // occur here — this console never sends a race config on create.
-  createError: "unauthorized" | "network" | "race_unsupported" | null;
+  createError:
+    | "unauthorized"
+    | "network"
+    | "race_unsupported"
+    | "tourney_unsupported"
+    | null;
   onCreate: () => void;
   resumable: ResumableRoom | null;
   onResume: () => void;

@@ -4,7 +4,14 @@
 // live-session machine. Self-paced — each student walks the question list at
 // their own speed while the teacher watches the live scoreboard.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import {
   ArrowRight,
@@ -84,10 +91,18 @@ import { engineT } from "@/lib/quiz/engine-strings";
 import {
   ALL_FEATURES,
   raceAnswer,
+  tourneyAnswer,
   type QuizFeatures,
   type RaceCorrect,
+  type TourneyOpponent,
+  type TourneyPodiumView,
+  type TourneyResultView,
 } from "@/lib/quiz/live-client";
 import { useRaceSession, type RaceState } from "@/lib/quiz/use-race-session";
+import {
+  useTourneySession,
+  type TourneyState,
+} from "@/lib/quiz/use-tourney-session";
 import {
   useLiveSession,
   type QuizStats,
@@ -307,6 +322,20 @@ function LiveMode({
   const raceParam = searchParams.get("race") === "1";
   const isRace = raceParam || session.raceSummary !== null;
 
+  // Tournament mode (docs/TOURNAMENT_MODE_SPEC.md §5). Same detection
+  // contract as race: the join link says tournament (?tourney=1) OR the
+  // server's tourney summary shows up on /status //submit — server truth
+  // wins. v1 tournaments exist only on drill generator packs, so anything
+  // else keeps the normal flows even if a stray flag rides the link (the
+  // console can't create such a room; this is defense, not a feature). Race
+  // takes precedence on a conflict — the server 400s a room claiming both
+  // modes, so only one summary can ever be real.
+  const tourneyParam = searchParams.get("tourney") === "1";
+  const isTourney =
+    !isRace &&
+    (tourneyParam || session.tourneySummary !== null) &&
+    generator?.type === "drill";
+
   // Which student aids the teacher allowed for this room. The server's word
   // (v7, tamper-proof) wins; the join link's `off=` param covers rooms on
   // older servers; no signal at all → everything on.
@@ -356,7 +385,24 @@ function LiveMode({
             roomEnded={session.phase === "ended"}
           />
         )}
+      {/* Tournament: the server owns the bracket, the round clock and the
+          grading; this branch lives INSIDE the same session tree so the live
+          session (heartbeats, beacons, presence) never remounts. Room `ended`
+          deliberately falls through to the shared EndedScreen below (spec §5)
+          — the podium, shown while the room is still active, is the real
+          final screen. */}
+      {isTourney &&
+        (session.phase === "active" || session.phase === "ended") &&
+        generator?.type === "drill" && (
+          <TournamentFlow
+            generator={generator}
+            generatorCode={generatorCode}
+            session={session}
+            roomEnded={session.phase === "ended"}
+          />
+        )}
       {!isRace &&
+        !isTourney &&
         session.phase === "active" &&
         (generator ? (
           // Generator quiz: endless machine-made questions, no "done" — the
@@ -392,7 +438,7 @@ function LiveMode({
             features={features}
           />
         ))}
-      {!isRace && session.phase === "ended" && (
+      {!isRace && !isTourney && session.phase === "ended" && (
         <EndedScreen stats={session.stats} />
       )}
       {session.phase === "kicked" && (
@@ -764,14 +810,25 @@ function drillAnswerKatex(answer: string): string {
 // endless stream just wraps around a 200-problem window.
 
 const UPLOADED_BATCH = 200;
+// Tournament rounds pre-generate a deeper batch: the console's answer key
+// carries 240 entries per round (spec §2.2) and the phone must never wrap
+// around before the server-side key ends (the server rejects any seq beyond
+// it — and no student reaches 240 answers in one round anyway).
+const TOURNEY_BATCH = 240;
 
 function UploadedDrillLoader({
   code,
   config,
+  seed,
   children,
 }: {
   code: string;
   config: DrillConfig | undefined;
+  // Tournament rooms pass the server's ROUND seed so every phone in the
+  // round generates the identical sequence (docs/TOURNAMENT_MODE_SPEC.md §5);
+  // the batch regenerates whenever it changes. Absent → self-paced behavior,
+  // byte-for-byte: one Math.random batch per mount.
+  seed?: number;
   children: (questionAt: (seq: number) => PackQuestion) => ReactNode;
 }) {
   const { lang } = useLanguage();
@@ -784,6 +841,9 @@ function UploadedDrillLoader({
   useEffect(() => {
     let disposed = false;
     let source: UploadedDrillSource | null = null;
+    // Re-runs (a new round seed) must show the spinner again, never a stale
+    // batch; on the first run this re-render shows the same screen.
+    setState({ status: "loading" });
     void (async () => {
       // validate:false — the harness already ran at upload; failures here
       // still surface via the per-problem spot checks in the worker.
@@ -797,8 +857,13 @@ function UploadedDrillLoader({
         return;
       }
       source = load.source;
-      const seed = Math.floor(Math.random() * 0x7fffffff);
-      const result = await source.generate(seed, config, 1, UPLOADED_BATCH);
+      const batchSeed = seed ?? Math.floor(Math.random() * 0x7fffffff);
+      const result = await source.generate(
+        batchSeed,
+        config,
+        1,
+        seed !== undefined ? TOURNEY_BATCH : UPLOADED_BATCH,
+      );
       source.dispose();
       source = null;
       if (disposed) return;
@@ -817,7 +882,7 @@ function UploadedDrillLoader({
       disposed = true;
       source?.dispose();
     };
-  }, [code, config]);
+  }, [code, config, seed]);
 
   if (state.status === "loading") {
     return (
@@ -853,6 +918,7 @@ function GeneratedFlow({
   pack,
   features,
   questionAt,
+  seed,
 }: {
   generator: PackGenerator;
   session: Session;
@@ -861,6 +927,10 @@ function GeneratedFlow({
   // Uploaded generators serve from a pre-generated batch (UploadedDrillLoader);
   // absent → the built-in machines generate synchronously per question.
   questionAt?: (seq: number) => PackQuestion;
+  // Server-chosen sequence seed (tournament rounds, spec §5): every device
+  // given the same seed makes the same drill problems. Absent → today's
+  // self-paced behavior, byte-for-byte: a per-mount Math.random stream.
+  seed?: number;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -868,7 +938,9 @@ function GeneratedFlow({
   // Drill topics generate from a seeded stream (reproducible per mount);
   // graph-quadratic keeps its own Math.random internals.
   const [drillSeed] = useState(() => Math.floor(Math.random() * 2 ** 31));
-  const makeQ = questionAt ?? ((n: number) => generateAnyPackQuestion(generator, drillSeed, n));
+  const makeQ =
+    questionAt ??
+    ((n: number) => generateAnyPackQuestion(generator, seed ?? drillSeed, n));
   const [seq, setSeq] = useState(1);
   const [question, setQuestion] = useState<PackQuestion>(() => makeQ(1));
   const [optOrder, setOptOrder] = useState<number[]>(() =>
@@ -1564,6 +1636,734 @@ function RaceFlow({
         </>
       )}
     </div>
+  );
+}
+
+// ═══ TOURNAMENT FLOW (FIFA-playoff duels, docs/TOURNAMENT_MODE_SPEC.md §5) ══
+// The server owns the bracket, the round clock and the grading (exact-value
+// port); the phone renders whichever phase the tournament stream says. Six
+// screens: waiting / pairing / get-ready / duel / result / podium. Everything
+// here is additive — self-paced and race rooms never mount this component,
+// and the room's `ended` routes to the shared EndedScreen like any other
+// mode (the podium, shown while the room is active, is the real finale).
+
+type DrillPackGenerator = Extract<PackGenerator, { type: "drill" }>;
+
+// Answer-verdict dwell times. Green is a quick confirmation; red holds at
+// least this long so the verdict registers even when the teacher set the
+// lockout to «Жоқ» (0s) — a real lockout extends the dwell to its full span.
+const TOURNEY_GREEN_MS = 450;
+const TOURNEY_RED_MS = 700;
+
+function TournamentFlow({
+  generator,
+  generatorCode,
+  session,
+  roomEnded = false,
+}: {
+  generator: DrillPackGenerator;
+  generatorCode: string | null;
+  session: Session;
+  // The room reached 'ended'. TournamentFlow stays mounted (race precedent:
+  // one JSX slot spanning active AND ended) to keep showing the podium it
+  // already holds — the self-paced EndedScreen only knows client-local
+  // stats, which tournament mode never writes (the fabricated-0/0 bug).
+  roomEnded?: boolean;
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+
+  // Tournament SSE next to (never instead of) the live session — the session
+  // tree above stays mounted, so heartbeats/beacons/presence are untouched.
+  const tourney = useTourneySession({
+    code: session.code,
+    studentId: session.studentId,
+    // A dead room's stream would 404-loop; stop reconnecting the moment the
+    // room ends (the last-received state stays for the final screen).
+    enabled: !roomEnded,
+    summary: session.tourneySummary,
+  });
+  const st = tourney.state;
+
+  // One local monotonic ticker drives the get-ready count, the round bar and
+  // the lockout countdown — running only while a duel can be on screen.
+  const now = usePerfNow(st.phase === "duel");
+
+  // Round clock. totalMs is a server-side difference (skew-free);
+  // remainingMs runs off the local monotonic anchor.
+  const totalMs =
+    st.openAt !== null && st.deadline !== null ? st.deadline - st.openAt : null;
+  const remainingMs =
+    st.deadlineLocal !== null ? Math.max(0, st.deadlineLocal - now) : null;
+  const preOpen =
+    st.phase === "duel" && st.openLocal !== null && now < st.openLocal;
+
+  const wins = st.you?.wins ?? 0;
+
+  // Registry topic for the built-in generators; uploaded files serve through
+  // UploadedDrillLoader (worker sandbox) instead.
+  const topic = generator.file ? null : (getDrillTopic(generator.topic) ?? null);
+  const uploadedCode = generator.file ? generatorCode : null;
+
+  // ── The six screens ───────────────────────────────────────────────────────
+  const renderBody = (
+    questionAt?: (seq: number) => PackQuestion,
+  ): ReactNode => {
+    if (st.podium && (st.phase === "podium" || roomEnded)) {
+      // 6. podium — kept on screen after the teacher ends the room (Аяқтау
+      // follows the podium; the ranking is the tournament's real finale).
+      return <TourneyPodiumScreen podium={st.podium} />;
+    }
+    if (roomEnded) {
+      // Room ended without this phone ever seeing a podium (teacher ended
+      // mid-tournament, 45-min clock, or a reload lost the state): a plain
+      // final card with whatever server-reported totals we still hold —
+      // never the self-paced 0/0 stats.
+      const finalWins = st.you?.wins ?? 0;
+      const finalCorrect = st.you?.totalCorrect ?? 0;
+      return (
+        <section className="mx-auto w-full max-w-sm rounded-2xl border border-border bg-card p-7 text-center shadow-lg shadow-blue-950/5">
+          <h1 className="text-xl font-bold tracking-tight">
+            {t("ended_title")}
+          </h1>
+          {(finalWins > 0 || finalCorrect > 0) && (
+            <p className="mt-3 text-sm font-semibold text-muted-foreground">
+              {t("tourney_wins")}:{" "}
+              <span className="tabular-nums text-foreground">{finalWins}</span>
+              {" · "}
+              <Check className="inline size-4 text-emerald-600" aria-hidden />{" "}
+              <span className="tabular-nums text-foreground">
+                {finalCorrect}
+              </span>
+            </p>
+          )}
+          <p className="mt-3 text-sm text-muted-foreground">
+            {t("ended_desc")}
+          </p>
+        </section>
+      );
+    }
+    if (st.role === "waiting" && st.round > 0) {
+      // A latecomer sits outside every draw until the teacher's next one —
+      // whatever the phase, their screen is the same patient card.
+      return (
+        <RaceCenter>
+          <div className="grid size-16 animate-pulse place-items-center rounded-2xl bg-accent text-3xl">
+            ⏳
+          </div>
+          <h2 className="mt-5 max-w-sm text-lg font-bold tracking-tight">
+            {t("tourney_waiting_next")}
+          </h2>
+        </RaceCenter>
+      );
+    }
+    if (st.phase === "pairing") {
+      // 2. the draw reveal.
+      return <TourneyPairingScreen st={st} />;
+    }
+    if (st.phase === "duel" && preOpen) {
+      // 3. get-ready: the server bakes a 3s runway into openAt. Clamped to 3
+      // for the same first-render reason as the race counterpart (usePerfNow
+      // still holds the tick from before the pairing dwell for one frame).
+      const count =
+        st.openLocal !== null
+          ? Math.min(3, Math.max(1, Math.ceil((st.openLocal - now) / 1000)))
+          : 3;
+      return (
+        <RaceCenter>
+          <p className="text-lg font-bold tracking-tight text-muted-foreground">
+            {t("tourney_get_ready")}
+          </p>
+          {/* key remounts per second so quiz-pop replays on each count */}
+          <div
+            key={count}
+            className="quiz-pop mt-5 grid size-28 place-items-center rounded-full bg-primary text-6xl font-bold tabular-nums text-white shadow-lg shadow-blue-950/20"
+          >
+            {count}
+          </div>
+        </RaceCenter>
+      );
+    }
+    if (st.phase === "duel" && st.seed !== null) {
+      // 4. the duel itself. Problems come from the round's SHARED seed —
+      // every phone in the round generates the identical sequence.
+      const roundSeed = st.seed;
+      const makeQ =
+        questionAt ??
+        ((n: number) =>
+          topic
+            ? generateDrillPackQuestion(topic, generator.config, roundSeed, n)
+            : UNKNOWN_TOPIC_QUESTION(n));
+      return (
+        <TourneyDuel
+          // Every round starts a fresh duel component (clean seq/counts).
+          key={`duel-${st.round}`}
+          st={st}
+          session={session}
+          makeQ={makeQ}
+          now={now}
+          remainingMs={remainingMs}
+          totalMs={totalMs}
+        />
+      );
+    }
+    if (st.phase === "result" && st.result) {
+      // 5. the settle card.
+      return <TourneyResultScreen result={st.result} />;
+    }
+    // 1. waiting — phase idle, or a phase whose content hasn't streamed in
+    // yet (the reopened stream's snapshot fills it within moments).
+    return (
+      <RaceCenter>
+        <div className="grid size-16 animate-pulse place-items-center rounded-2xl bg-accent text-3xl">
+          🏆
+        </div>
+        <h2 className="mt-5 text-xl font-bold tracking-tight">
+          {t("tourney_waiting_draw")}
+        </h2>
+        {wins > 0 && (
+          <span className="mt-4 rounded-full border border-primary/20 bg-accent px-4 py-1.5 text-sm font-semibold text-accent-foreground tabular-nums">
+            {t("tourney_wins")}: {wins}
+          </span>
+        )}
+      </RaceCenter>
+    );
+  };
+
+  return (
+    <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col px-4 pb-8 pt-4">
+      {/* header — round pill + tournament wins instead of the correct-count
+          (scoring is server-owned here) */}
+      <header className="mb-3 flex items-center gap-2">
+        {st.round > 0 && (
+          <span className="rounded-full border border-border bg-card px-3 py-1 text-xs font-bold tabular-nums">
+            {t("tourney_round_n").replace("{n}", String(st.round))}
+          </span>
+        )}
+        <span className="flex items-center gap-1.5 rounded-full border border-primary/20 bg-accent px-2.5 py-1 text-xs font-bold text-primary tabular-nums">
+          <Trophy className="size-3.5" aria-hidden />
+          {wins}
+          <span className="sr-only">{t("tourney_wins")}</span>
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          {session.timeLeft !== null && <TimerPill seconds={session.timeLeft} />}
+        </div>
+      </header>
+
+      {uploadedCode !== null && st.seed !== null ? (
+        // The batch for the round's shared seed regenerates in the sandbox
+        // worker the moment the seed is known (with the `duel` event; earlier
+        // when a resync snapshot during pairing already carried it) — the
+        // 3s get-ready runway absorbs the worker spin-up.
+        <UploadedDrillLoader
+          code={uploadedCode}
+          config={generator.config}
+          seed={st.seed}
+        >
+          {(questionAt) => <>{renderBody(questionAt)}</>}
+        </UploadedDrillLoader>
+      ) : (
+        renderBody(undefined)
+      )}
+    </div>
+  );
+}
+
+// One duel: the drill loop against the round's shared sequence. The SERVER
+// grades every answer (spec §2.5) — each accepted answer settles its seq and
+// the response carries the authoritative counts, so this component only
+// renders verdicts: green flash → next problem; red flash + full-keypad
+// lockout overlay with a ticking countdown → next problem. A 409 bad_seq
+// silently jumps to the server's expected position; a 429 locked re-anchors
+// the freeze. The solution line and the visual's solution reveal stay hidden
+// on purpose (speed context, spec §5).
+function TourneyDuel({
+  st,
+  session,
+  makeQ,
+  now,
+  remainingMs,
+  totalMs,
+}: {
+  st: TourneyState;
+  session: Session;
+  makeQ: (seq: number) => PackQuestion;
+  now: number;
+  remainingMs: number | null;
+  totalMs: number | null;
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+
+  // Server-confirmed position and counts, seeded from the snapshot so a
+  // reload mid-duel resumes at the right problem (localStorage deliberately
+  // holds nothing tournament-specific — spec §1).
+  const [seq, setSeq] = useState(() => st.you?.seq ?? 1);
+  const [question, setQuestion] = useState<PackQuestion>(() =>
+    makeQ(st.you?.seq ?? 1),
+  );
+  // Only the correct-count renders (the score bar); the wrong-count exists
+  // server-side and on the result card.
+  const [correct, setCorrect] = useState(() => st.you?.correct ?? 0);
+  const [input, setInput] = useState("");
+  const [invalid, setInvalid] = useState(false);
+  const [busy, setBusy] = useState(false);
+  // The verdict being flashed and its performance.now() start.
+  const [flash, setFlash] = useState<{
+    kind: "right" | "wrong";
+    at: number;
+  } | null>(null);
+  // Lockout anchor from the answer response; merged below with the hook's
+  // own anchor (which a resync snapshot may carry).
+  const [lockUntil, setLockUntil] = useState<number | null>(null);
+
+  // The generator closure is frozen for this mount (the caller keys this
+  // component by round), so a ref keeps goTo stable without stale problems.
+  const makeQRef = useRef(makeQ);
+  makeQRef.current = makeQ;
+  const goTo = useCallback((n: number) => {
+    setSeq(n);
+    setQuestion(makeQRef.current(n));
+    setInput("");
+    setInvalid(false);
+  }, []);
+
+  // A resync snapshot with a LARGER seq is fresher than local state (answers
+  // land strictly in seq order, spec §2.5): adopt it wholesale — this also
+  // repairs a phone whose previous load already answered further ahead.
+  const seqRef = useRef(seq);
+  seqRef.current = seq;
+  useEffect(() => {
+    const you = st.you;
+    if (!you || you.seq <= seqRef.current) return;
+    setCorrect(you.correct);
+    setFlash(null);
+    goTo(you.seq);
+  }, [st.you, goTo]);
+
+  // Effective freeze end: the answer response's anchor OR the snapshot's,
+  // whichever reaches further (both are local monotonic anchors).
+  const lockEnd = Math.max(lockUntil ?? 0, st.lockUntilLocal ?? 0) || null;
+  const lockRemain = lockEnd !== null ? Math.max(0, lockEnd - now) : 0;
+  const locked = lockRemain > 0;
+
+  // Advance once the verdict dwell — extended by the lockout after a wrong
+  // answer — has fully passed. Driven by the shared 200ms ticker.
+  useEffect(() => {
+    if (!flash) return;
+    const readyAt = Math.max(
+      flash.at + (flash.kind === "right" ? TOURNEY_GREEN_MS : TOURNEY_RED_MS),
+      flash.kind === "wrong" && lockEnd !== null ? lockEnd : 0,
+    );
+    if (now < readyAt) return;
+    setFlash(null);
+    goTo(seq + 1);
+  }, [flash, now, lockEnd, seq, goTo]);
+
+  const submit = async () => {
+    const given = input.trim();
+    if (!given || busy || locked || flash !== null) return;
+    if (remainingMs !== null && remainingMs <= 0) return; // clock ran out
+    // A syntactically incomplete answer ("3," or "5/") blocks the check with
+    // a hint instead of wasting a graded attempt — same rule as drill
+    // practice.
+    if (parseExact(given) === null) {
+      setInvalid(true);
+      return;
+    }
+    setBusy(true);
+    const res = await tourneyAnswer(
+      session.code,
+      session.studentId,
+      st.round,
+      seq,
+      // 24 chars mirrors the server's per-answer-key cap (spec §2.2); the
+      // keypad's own 12-char limit makes this a formality.
+      given.slice(0, 24),
+    );
+    setBusy(false);
+    if (res.ok) {
+      // The response is authoritative: adopt the count, flash the verdict;
+      // the advance effect moves on once the dwell (and lockout) pass.
+      if (typeof res.correct === "number") setCorrect(res.correct);
+      if (res.right === true) {
+        setFlash({ kind: "right", at: performance.now() });
+        setLockUntil(null);
+      } else {
+        setFlash({ kind: "wrong", at: performance.now() });
+        setLockUntil(
+          typeof res.lockRemainMs === "number" && res.lockRemainMs > 0
+            ? performance.now() + res.lockRemainMs
+            : null,
+        );
+      }
+    } else if (res.error === "bad_seq" && typeof res.expect === "number") {
+      // Our position drifted (double-tap, an answer from a previous load):
+      // silently jump to the server's expected problem — no flash (spec §5).
+      goTo(res.expect);
+    } else if (res.error === "locked" && typeof res.remainMs === "number") {
+      // A press slipped in during the freeze — re-anchor the overlay.
+      setLockUntil(performance.now() + res.remainMs);
+    }
+    // Anything else (network blip, phase already closed): keep the input so
+    // the student can just press Check again; the next event/summary decides.
+  };
+
+  const youLabel = lang === "ru" ? "Ты" : "Сен";
+
+  return (
+    <>
+      <RaceCountdown remainingMs={remainingMs} totalMs={totalMs} />
+
+      {/* you-vs-opponent bars (a trio shows one bar per opponent); a bye
+          plays solo — no bar */}
+      {st.opponents.length > 0 && (
+        <div className="mb-4 space-y-2">
+          {st.opponents.map((opp, i) => (
+            <TourneyScoreBar
+              key={opp.id ?? `${opp.name}:${i}`}
+              youLabel={youLabel}
+              mine={correct}
+              opp={opp}
+            />
+          ))}
+        </div>
+      )}
+
+      {remainingMs !== null && remainingMs <= 0 ? (
+        <section className="rounded-2xl border border-border bg-card p-8 text-center shadow-lg shadow-blue-950/5">
+          <div className="mx-auto grid size-14 place-items-center rounded-full bg-amber-50">
+            <Hourglass className="size-7 text-amber-600" aria-hidden />
+          </div>
+          <h2 className="mt-4 text-lg font-bold tracking-tight">
+            {t("race_time_up")}
+          </h2>
+        </section>
+      ) : (
+        <section className="rounded-2xl border border-border bg-card p-5 shadow-lg shadow-blue-950/5">
+          <div className="text-[17px] font-medium leading-relaxed">
+            <MathText text={loc(question.text, lang)} />
+          </div>
+
+          {question.visual && (
+            <div className="mt-4 rounded-xl border border-border bg-background px-2 py-2">
+              {/* revealed stays false even after a wrong answer — no solution
+                  reveal mid-duel */}
+              <DrillVisualView visual={question.visual} revealed={false} />
+            </div>
+          )}
+
+          {/* answer display — flashes the server's verdict */}
+          <div
+            className={cn(
+              "mt-4 rounded-xl border-[1.5px] bg-background px-4 py-3 text-center",
+              flash?.kind === "right"
+                ? "border-emerald-500 bg-emerald-50"
+                : flash?.kind === "wrong" || invalid
+                  ? "border-red-400 bg-red-50"
+                  : "border-border",
+            )}
+          >
+            <div
+              className={cn(
+                "min-h-9 font-math text-3xl tabular-nums",
+                input === "" && "text-muted-foreground/50",
+              )}
+            >
+              {input === "" ? t("input_placeholder") : input}
+            </div>
+          </div>
+          {invalid && (
+            <p className="mt-1.5 text-xs font-medium text-red-600">
+              {t("input_invalid")}
+            </p>
+          )}
+
+          <div className="relative mt-3">
+            <DrillKeypad
+              keys={question.keys ?? []}
+              value={input}
+              onChange={(next) => {
+                if (locked || flash !== null) return;
+                setInvalid(false);
+                setInput(next);
+              }}
+              onSubmit={() => void submit()}
+              submitLabel={t("check_button")}
+              submitMode="check"
+            />
+            {/* full-keypad lockout overlay with the ticking freeze */}
+            {locked && (
+              <div className="absolute -inset-1 z-10 flex flex-col items-center justify-center gap-1 rounded-xl bg-red-50/95">
+                <p className="text-sm font-bold text-red-700">
+                  {t("tourney_locked")}
+                </p>
+                <p className="text-4xl font-bold tabular-nums text-red-600">
+                  {Math.ceil(lockRemain / 1000)}
+                </p>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </>
+  );
+}
+
+// The duel score header: «Сен 8 ▓▓▓░░ 6 Аружан» — a proportional two-color
+// bar with the numbers inside it, plus the opponent's away/left badge from
+// the presence relay. A scoreless duel splits 50/50.
+function TourneyScoreBar({
+  youLabel,
+  mine,
+  opp,
+}: {
+  youLabel: string;
+  mine: number;
+  opp: TourneyOpponent;
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const theirs = opp.correct ?? 0;
+  const total = mine + theirs;
+  const frac = total > 0 ? mine / total : 0.5;
+  const badge =
+    opp.connected === false
+      ? t("tourney_left_badge")
+      : opp.away === true
+        ? t("tourney_away_badge")
+        : null;
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2 text-xs font-bold">
+        <span>{youLabel}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          {badge && (
+            <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-600">
+              {badge}
+            </span>
+          )}
+          <span className="truncate">{opp.name}</span>
+        </span>
+      </div>
+      <div className="flex h-7 overflow-hidden rounded-full border border-border bg-card">
+        <div
+          className="flex min-w-10 items-center bg-primary pl-2.5 text-xs font-bold text-white tabular-nums transition-all"
+          style={{ width: `${Math.round(frac * 100)}%` }}
+        >
+          {mine}
+        </div>
+        <div className="flex min-w-10 flex-1 items-center justify-end bg-border pr-2.5 text-xs font-bold text-foreground tabular-nums">
+          {theirs}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The draw reveal — role-aware: main duel, losers pool (with the trio
+// variant), bye, and the lucky-loser comeback banner (spec §5 screen 2).
+function TourneyPairingScreen({ st }: { st: TourneyState }) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const names = st.opponents.map((o) => o.name);
+  return (
+    <RaceCenter>
+      {st.luckyLoser && (
+        <p className="mb-4 rounded-full border border-amber-200 bg-amber-50 px-4 py-1.5 text-sm font-bold text-amber-700">
+          {t("tourney_lucky_loser")}
+        </p>
+      )}
+      {st.role === "losers" && (
+        <p className="mb-4 rounded-full border border-border bg-card px-4 py-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+          {t("tourney_losers_pool")}
+        </p>
+      )}
+      {st.role === "bye" ? (
+        <>
+          <div className="grid size-16 place-items-center rounded-2xl bg-accent text-3xl">
+            🎟️
+          </div>
+          <p className="mt-5 max-w-sm text-lg font-bold tracking-tight">
+            {t("tourney_bye")}
+          </p>
+        </>
+      ) : names.length === 0 ? (
+        // Latecomer draw slot (defensive — the caller routes them earlier).
+        <p className="max-w-sm text-lg font-bold tracking-tight">
+          {t("tourney_waiting_next")}
+        </p>
+      ) : (
+        <>
+          <div className="grid size-16 place-items-center rounded-2xl bg-accent text-3xl">
+            ⚔️
+          </div>
+          <p className="mt-5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+            {names.length > 1 ? t("tourney_trio") : t("tourney_your_opponent")}
+          </p>
+          <div className="mt-2 space-y-1">
+            {names.map((name) => (
+              <p key={name} className="text-2xl font-bold tracking-tight">
+                {name}
+              </p>
+            ))}
+          </div>
+        </>
+      )}
+    </RaceCenter>
+  );
+}
+
+// The settle card: champion / won / eliminated / lost, with the duel score
+// («9 : 6») per opponent. Eliminated students read that the game continues —
+// the next draw puts them in the losers pool (spec §5 screen 5).
+function TourneyResultScreen({ result }: { result: TourneyResultView }) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const headline = result.champion
+    ? t("tourney_champion")
+    : result.won
+      ? t("tourney_you_won")
+      : result.eliminated
+        ? t("tourney_eliminated")
+        : t("tourney_you_lost");
+  const upbeat = result.champion || result.won;
+  return (
+    <RaceCenter>
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-7 text-center shadow-lg shadow-blue-950/5">
+        <div
+          className={cn(
+            "mx-auto mb-3 grid size-12 place-items-center rounded-xl text-2xl",
+            upbeat ? "bg-emerald-50" : "bg-red-50",
+          )}
+        >
+          {result.champion ? "🏆" : result.won ? "🎉" : "🥊"}
+        </div>
+        <h2
+          className={cn(
+            "text-xl font-bold tracking-tight",
+            upbeat ? "text-emerald-700" : "text-red-700",
+          )}
+        >
+          {headline}
+        </h2>
+        <div className="mt-4 space-y-1.5">
+          {result.opponents.map((opp, i) => (
+            <p
+              key={opp.id ?? `${opp.name}:${i}`}
+              className="text-sm font-semibold text-muted-foreground"
+            >
+              <span className="tabular-nums text-foreground">
+                {result.you.correct}
+              </span>
+              {" : "}
+              <span className="tabular-nums text-foreground">
+                {opp.correct ?? 0}
+              </span>{" "}
+              {opp.name}
+            </p>
+          ))}
+          {result.opponents.length === 0 && (
+            // A bye round settled — only your own tally to show.
+            <p className="text-sm font-semibold text-muted-foreground">
+              <Check className="inline size-4 text-emerald-600" aria-hidden />{" "}
+              <span className="tabular-nums text-foreground">
+                {result.you.correct}
+              </span>
+            </p>
+          )}
+        </div>
+        {!result.champion && (
+          <p className="mt-4 text-sm text-muted-foreground">
+            {t("tourney_waiting_draw")}
+          </p>
+        )}
+      </div>
+    </RaceCenter>
+  );
+}
+
+// The final screen: champion, top-3 with medals, your rank; confetti for the
+// top-3 (spec §5 screen 6).
+function TourneyPodiumScreen({ podium }: { podium: TourneyPodiumView }) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const onPodium = podium.you.rank >= 1 && podium.you.rank <= 3;
+  const rankLine = raceRankLine(t, podium.you.rank, podium.you.of);
+  return (
+    <RaceCenter>
+      {onPodium && <Confetti />}
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-7 text-center shadow-lg shadow-blue-950/5">
+        <div className="mx-auto mb-3 grid size-12 place-items-center rounded-xl bg-accent">
+          <Trophy className="size-6 text-primary" aria-hidden />
+        </div>
+        {/* champion is null when the pre-generated rounds ran out before the
+            bracket produced one (spec §2.4) — the card then leads with rank */}
+        {podium.champion && (
+          <>
+            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              {t("tourney_final")}
+            </p>
+            <p className="mt-1 text-2xl font-bold tracking-tight">
+              🏆 {podium.champion.name}
+            </p>
+          </>
+        )}
+        <p
+          className={cn(
+            "text-sm font-semibold text-muted-foreground",
+            podium.champion && "mt-4",
+          )}
+        >
+          {t("race_your_result")}
+        </p>
+        <p className="mt-1 text-3xl font-bold tracking-tight">
+          {rankLine ?? String(podium.you.correct)}
+        </p>
+        <p className="mt-2 text-sm font-semibold text-muted-foreground">
+          {t("tourney_wins")}:{" "}
+          <span className="tabular-nums text-foreground">
+            {podium.you.wins}
+          </span>
+          {" · "}
+          <Check className="inline size-4 text-emerald-600" aria-hidden />{" "}
+          <span className="tabular-nums text-foreground">
+            {podium.you.correct}
+          </span>
+        </p>
+      </div>
+      {podium.top.length > 0 && (
+        <div className="mt-6 w-full max-w-sm">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+            {t("tourney_standings")}
+          </p>
+          <div className="space-y-2">
+            {podium.top.slice(0, 3).map((row, i) => (
+              <div
+                key={i}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl border bg-card px-4 py-3 text-left",
+                  i === 0 ? "border-amber-300 bg-amber-50" : "border-border",
+                )}
+              >
+                <span className="text-xl" aria-hidden>
+                  {["🥇", "🥈", "🥉"][i]}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                  {row.name}
+                </span>
+                <span className="text-xs font-bold text-muted-foreground tabular-nums">
+                  {t("tourney_wins")}: {row.wins}
+                </span>
+                <span className="text-sm font-bold tabular-nums">
+                  {row.correct}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </RaceCenter>
   );
 }
 
