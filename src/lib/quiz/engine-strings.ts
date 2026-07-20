@@ -218,7 +218,7 @@ export const ENGINE_STRINGS = {
     // tournament mode — teacher board
     tourney_draw_btn: "Жеребе тарту",
     tourney_start_round: "Айналымды бастау",
-    tourney_next_draw: "Келесі жеребе",
+    tourney_next_draw: "Келесі айналым",
     tourney_podium_btn: "Марапаттау",
     tourney_finish: "Аяқтау",
     tourney_round_n: "{n}-айналым",
@@ -443,7 +443,7 @@ export const ENGINE_STRINGS = {
     // tournament mode — teacher board
     tourney_draw_btn: "Жеребьёвка",
     tourney_start_round: "Начать раунд",
-    tourney_next_draw: "Следующая жеребьёвка",
+    tourney_next_draw: "Следующий раунд",
     tourney_podium_btn: "Награждение",
     tourney_finish: "Завершить",
     tourney_round_n: "Раунд {n}",

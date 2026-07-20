@@ -16,6 +16,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  ArrowRight,
   Check,
   ChevronDown,
   ChevronUp,
@@ -270,8 +271,11 @@ export function TourneyBoard({
                       {t("tourney_podium_btn")}
                     </>
                   ) : (
+                    // No dice here on purpose: since the fixed-lineage
+                    // bracket (spec §3) the only random жеребе is round 1 —
+                    // this button just advances the tree.
                     <>
-                      <Dices className="size-5" aria-hidden />
+                      <ArrowRight className="size-5" aria-hidden />
                       {t("tourney_next_draw")}
                     </>
                   )}
