@@ -5,9 +5,17 @@ GeoGebra). One `.js` file = one topic (one numbered section of the textbook,
 e.g. **1.1 Натурал сандар және нөл**). The file is pure declarative data —
 the engine owns every pixel, same philosophy as drill generator files.
 
-Preview/test bench: **/labs/present** (paste or pick the file; errors come
-back as readable English lines you can paste into an AI chat).
+Preview/test bench: **/labs/present/file** (paste or pick the file; errors
+come back as readable English lines you can paste into an AI chat).
 Working example: `public/present/demo-5-1-1.js`.
+
+## Publishing
+
+Upload checked files at **/admin/presentations** (multiple at once). Each
+published presentation gets a permanent page at **/labs/present/\<id\>**,
+listed on the **/labs/present** hub. Re-uploading a file with the same `id`
+replaces it in place (version bump — pages update immediately). The ids
+`file`, `demo` and `index` are reserved.
 
 ## Contract
 
