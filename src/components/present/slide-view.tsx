@@ -14,6 +14,8 @@ import { PlaceValueSlide, DigitMeaningSlide } from "./place-value";
 import { ExpandSlide } from "./expand";
 import { ClassTableSlide } from "./class-table";
 import { OralSlide } from "./oral";
+import { CoordRaySlide } from "./coord-ray";
+import { WordProblemSlide } from "./word-problem";
 
 export function SlideView({
   slide,
@@ -41,6 +43,10 @@ export function SlideView({
       return <ClassTableSlide slide={slide} lang={lang} />;
     case "oral":
       return <OralSlide slide={slide} lang={lang} />;
+    case "coord-ray":
+      return <CoordRaySlide slide={slide} step={step} lang={lang} />;
+    case "word-problem":
+      return <WordProblemSlide slide={slide} lang={lang} />;
   }
 }
 

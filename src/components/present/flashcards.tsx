@@ -25,6 +25,14 @@ export function FlashcardsSlide({
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const card = slide.cards[index];
+  const front = pickPresentText(card.front, lang);
+  // A bare number fills the card; a whole question has to step down to fit.
+  const frontSize =
+    front.length <= 10
+      ? "clamp(56px,8vw,128px)"
+      : front.length <= 28
+        ? "clamp(38px,4.8vw,76px)"
+        : "clamp(24px,2.9vw,46px)";
 
   const go = (next: number) => {
     if (next < 0 || next >= slide.cards.length) return;
@@ -59,8 +67,11 @@ export function FlashcardsSlide({
             (!revealed || card.verdict === undefined) && "border-[#d8dde5]",
           )}
         >
-          <span className="text-[clamp(56px,8vw,128px)] font-bold leading-tight text-[#1a1a2e]">
-            <MathText text={pickPresentText(card.front, lang)} />
+          <span
+            className="font-bold leading-tight text-[#1a1a2e]"
+            style={{ fontSize: frontSize }}
+          >
+            <MathText text={front} />
           </span>
 
           {revealed ? (

@@ -100,10 +100,52 @@ add their own number live. Below, the number is read out by classes
 ```
 Click a card to reveal/hide its answer; a reset button covers all again.
 
+### `coord-ray` — координаталық сәуле
+```js
+{ type: "coord-ray", heading?, prompt?, note?,
+  mode: "show" | "build" | "reveal" | "mark" | "jump",
+  max: 18,                       // rightmost whole number (2–40)
+  labels?: "auto" | "all" | "none" | [0, 1],  // numbers printed under ticks
+  unit?: "Бірлік кесінді = 40 м",
+  points: [{ name?: "A", value: 4, icon?: "🐕", given?, unknown? }], // 1–12
+  jumps?: [-2, 5, -2, 5] }       // mode "jump" only
+```
+One ray, five classroom uses:
+
+- **show** — the finished figure, every coordinate printed.
+- **build** — points appear one per → press (the ray being constructed); the
+  player counts these as internal steps.
+- **reveal** — letters visible, coordinates hidden until a point is clicked.
+- **mark** — empty ray; the class clicks the tick where each point belongs.
+  Right tick → the point lands in green, wrong tick → a red ring. Needs at
+  least one point without `given`.
+- **jump** — the first point hops along `jumps` (−2 = two units left), one hop
+  per click, leaving a trail and the list of visited coordinates.
+
+`given: true` prints that point's coordinate from the start (it is given, not
+asked — it also sets the scale); `unknown: true` draws "?" instead of the
+coordinate.
+
+### `word-problem` — есеп, шығарылуымен
+```js
+{ type: "word-problem", heading?,
+  statement: "Ит мысықты көріп, қуа жөнелді…",
+  ray?: { max, points, labels?, unit? },            // same shape as coord-ray
+  question: "Қанша уақытта ит мысықты қуып жетеді?",
+  choices?: [{ text: "4 с", correct: true }, ...],  // 2–4, one correct
+  steps?: [{ text: "16 − 4 = 12 (м)" }, ...],       // ≤ 8 solution lines
+  answer: "4 секундта" }
+```
+The class votes on a choice (a click marks it green/red), then the teacher
+opens the solution one line per click, ending on the green answer badge.
+Nothing auto-reveals, and the picture shrinks to make room as the solution
+grows. Emoji `icon`s stand in for the textbook's actors (🏠 🐕 🐈 🦗).
+
 ## Player
 
 - → ← / Space / PgUp / PgDn / on-screen arrows; Escape exits.
-- Stepped slides (`text`, `expand`) consume → presses before the next slide.
+- Stepped slides (`text`, `expand`, `coord-ray` in `build` mode) consume →
+  presses before the next slide.
 - Pen overlay (red/blue pens, eraser, undo) is available on every slide;
   the canvas resets when the slide changes.
 - KZ/RU toggle lives in the header; switching is instant.
