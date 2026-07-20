@@ -14,7 +14,7 @@
 // countdown, the champion) — while staying usable inside the embedded lesson
 // frame (min-h-[640px]), so nothing here assumes a full viewport.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Check,
   ChevronDown,
@@ -110,17 +110,6 @@ function presenceOf(
 
 // One drawn round of the bracket history — the wire shape of a history entry.
 type BracketRound = TourneyBracket["history"][number];
-
-// Column heading: the structure names the stage better than a number once the
-// main draw shrinks — 1 pair = финал, 2 pairs = жартылай финал.
-function roundLabel(
-  entry: BracketRound,
-  t: ReturnType<typeof engineT>,
-): string {
-  if (entry.main.length === 1) return t("tourney_final");
-  if (entry.main.length === 2) return t("tourney_semifinal");
-  return t("tourney_round_n").replace("{n}", String(entry.round));
-}
 
 // A player's score in one pair row. Settled rows carry their own scores; the
 // CURRENT round streams live scores via 'tourney_score' instead (spec §2.7).
@@ -477,7 +466,267 @@ function ChampionBanner({ name }: { name: string }) {
   );
 }
 
-// ═══ BRACKET (FIFA-style columns of pair cards) ═══════════════════════════
+// ═══ BRACKET (FIFA playoff sheet: wings converging on a center final) ═════
+//
+// The one random жеребе is round 1 — after it the bracket is a fixed FIFA
+// tree (spec §3: later draws pair the previous round's winners in pair
+// order), so the connectors are real lineage: the winner of pair 2i meets
+// the winner of pair 2i+1, and a left-wing pair's road stays on the left
+// wing. Only a lucky loser / bye (appended at the end of an odd round) or a
+// kicked winner bends the lines. Round 1 sits on the outer edges (its pairs
+// split half left / half right), later rounds move inward, and rounds that
+// are not drawn yet render as dashed placeholder cards so the class sees
+// the whole road to the final from the first draw.
+
+// One column of the sheet: a drawn round (entry) or a projected future round
+// (entry: null). `count` = main-pair count, real or projected.
+type Stage = {
+  round: number;
+  entry: BracketRound | null;
+  count: number;
+};
+
+// history rounds + projected future rounds. Winners halve each round
+// (odd → lucky loser or bye keeps pairs at ceil(n/2), spec §3), so the
+// projection is exact until a champion emerges; it is re-derived from the
+// latest real draw on every render, so an early podium or kicks can never
+// leave a stale tail. Bounded by roundCount — if the pre-generated rounds
+// run out first, the sheet honestly stops short of a 1-pair final.
+function buildStages(bracket: TourneyBracket): Stage[] {
+  const stages: Stage[] = bracket.history.map((h) => ({
+    round: h.round,
+    entry: h,
+    count: h.main.length,
+  }));
+  if (stages.length === 0 || bracket.champion !== null) return stages;
+  let { round, count } = stages[stages.length - 1];
+  while (count > 1 && round < bracket.roundCount) {
+    count = Math.ceil(count / 2);
+    round += 1;
+    stages.push({ round, entry: null, count });
+  }
+  return stages;
+}
+
+function stageLabel(stage: Stage, t: ReturnType<typeof engineT>): string {
+  if (stage.count === 1) return t("tourney_final");
+  if (stage.count === 2) return t("tourney_semifinal");
+  return t("tourney_round_n").replace("{n}", String(stage.round));
+}
+
+// Which sides of a pair slot carry connector lines. Wings emit a stub toward
+// the center; every non-outermost column also receives an elbow (vertical
+// joiner + stub) from the column behind it. Columns are spaced by gap-6
+// (24px): the emitter covers its 12px half, the receiver the other half, so
+// the lines meet mid-gap.
+type SlotLines = {
+  emit: "left" | "right" | null;
+  recv: "left" | "right" | "both" | null;
+};
+
+function PairSlot({
+  lines,
+  children,
+}: {
+  lines: SlotLines;
+  children: ReactNode;
+}) {
+  return (
+    <div className="relative flex flex-1 flex-col justify-center py-1">
+      {lines.emit !== null && (
+        <span
+          aria-hidden
+          className={cn(
+            "absolute top-1/2 h-px w-3 bg-border",
+            lines.emit === "right" ? "-right-3" : "-left-3",
+          )}
+        />
+      )}
+      {(lines.recv === "left" || lines.recv === "both") && (
+        <>
+          <span
+            aria-hidden
+            className="absolute -left-3 top-1/4 h-1/2 w-px bg-border"
+          />
+          <span
+            aria-hidden
+            className="absolute -left-3 top-1/2 h-px w-3 bg-border"
+          />
+        </>
+      )}
+      {(lines.recv === "right" || lines.recv === "both") && (
+        <>
+          <span
+            aria-hidden
+            className="absolute -right-3 top-1/4 h-1/2 w-px bg-border"
+          />
+          <span
+            aria-hidden
+            className="absolute -right-3 top-1/2 h-px w-3 bg-border"
+          />
+        </>
+      )}
+      {children}
+    </div>
+  );
+}
+
+// A future round's slot: dashed shell, two empty seats.
+function PlaceholderCard({ compact }: { compact: boolean }) {
+  const row = cn(
+    "flex items-center px-3 font-bold text-muted-foreground/40",
+    compact ? "h-8 text-xs" : "h-9 text-sm",
+  );
+  return (
+    <div className="rounded-xl border-[1.5px] border-dashed border-border bg-card/40">
+      <div className={row}>—</div>
+      <div className={cn(row, "border-t border-dashed border-border")}>—</div>
+    </div>
+  );
+}
+
+function StageColumnHeader({
+  stage,
+  isCurrent,
+  t,
+}: {
+  stage: Stage;
+  isCurrent: boolean;
+  t: ReturnType<typeof engineT>;
+}) {
+  return (
+    <p
+      className={cn(
+        "h-6 truncate text-center text-xs font-bold uppercase tracking-[0.14em]",
+        isCurrent ? "text-primary" : "text-muted-foreground",
+      )}
+    >
+      {stageLabel(stage, t)}
+    </p>
+  );
+}
+
+// One wing column: the given half of a stage's pairs (drawn or placeholder).
+// `outermost` columns have nothing feeding into them, so no receive elbow.
+function WingColumn({
+  stage,
+  side,
+  outermost,
+  bracket,
+  liveScores,
+  students,
+  phase,
+}: {
+  stage: Stage;
+  side: "left" | "right";
+  outermost: boolean;
+  bracket: TourneyBracket;
+  liveScores: TourneyView["liveScores"];
+  students: Map<string, LiveStudent>;
+  phase: TourneyView["phase"];
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const isCurrent = stage.entry !== null && stage.round === bracket.round;
+  const compact = !isCurrent;
+  const leftCount = Math.ceil(stage.count / 2);
+  const from = side === "left" ? 0 : leftCount;
+  const to = side === "left" ? leftCount : stage.count;
+  const lines: SlotLines = {
+    emit: side === "left" ? "right" : "left",
+    recv: outermost ? null : side === "left" ? "left" : "right",
+  };
+  const slots = [];
+  for (let i = from; i < to; i++) {
+    slots.push(
+      <PairSlot key={i} lines={lines}>
+        {stage.entry !== null ? (
+          <PairCard
+            pair={stage.entry.main[i]}
+            bracket={bracket}
+            settled={stage.entry.settled}
+            isCurrentRound={isCurrent}
+            liveScores={liveScores}
+            students={students}
+            phase={phase}
+            highlight={isCurrent && phase === "pairing"}
+            compact={compact}
+          />
+        ) : (
+          <PlaceholderCard compact />
+        )}
+      </PairSlot>,
+    );
+  }
+  if (slots.length === 0) return null;
+  return (
+    <div className={cn("flex flex-col", compact ? "w-40" : "w-52")}>
+      <StageColumnHeader stage={stage} isCurrent={isCurrent} t={t} />
+      {slots}
+    </div>
+  );
+}
+
+// The center column: the last stage of the sheet — normally the final (one
+// pair, trophy on top), or the last reachable round if the pre-generated
+// rounds run out before a champion (then it may hold several cards).
+function CenterColumn({
+  stage,
+  hasWings,
+  bracket,
+  liveScores,
+  students,
+  phase,
+}: {
+  stage: Stage;
+  hasWings: boolean;
+  bracket: TourneyBracket;
+  liveScores: TourneyView["liveScores"];
+  students: Map<string, LiveStudent>;
+  phase: TourneyView["phase"];
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const isCurrent = stage.entry !== null && stage.round === bracket.round;
+  const lines: SlotLines = { emit: null, recv: hasWings ? "both" : null };
+  return (
+    <div className="flex w-52 flex-col">
+      <StageColumnHeader stage={stage} isCurrent={isCurrent} t={t} />
+      <div className="flex flex-1 flex-col justify-center">
+        <div className="mb-1 flex justify-center">
+          <Trophy
+            className={cn(
+              "size-8",
+              bracket.champion !== null
+                ? "text-amber-500"
+                : "text-muted-foreground/40",
+            )}
+            aria-hidden
+          />
+        </div>
+        {Array.from({ length: stage.count }, (_, i) => (
+          <PairSlot key={i} lines={lines}>
+            {stage.entry !== null ? (
+              <PairCard
+                pair={stage.entry.main[i]}
+                bracket={bracket}
+                settled={stage.entry.settled}
+                isCurrentRound={isCurrent}
+                liveScores={liveScores}
+                students={students}
+                phase={phase}
+                highlight={isCurrent && phase === "pairing"}
+                compact={false}
+              />
+            ) : (
+              <PlaceholderCard compact={false} />
+            )}
+          </PairSlot>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function BracketColumns({
   bracket,
@@ -490,50 +739,37 @@ function BracketColumns({
   students: Map<string, LiveStudent>;
   phase: TourneyView["phase"];
 }) {
-  const { lang } = useLanguage();
-  const t = engineT(lang);
-  if (bracket.history.length === 0) return null;
+  const stages = buildStages(bracket);
+  if (stages.length === 0) return null;
+  // Wings hold every stage except the last; the last stage is the center.
+  // items-stretch + equal flex-1 slots per column keep all columns the same
+  // height, so a round with half the pairs naturally interleaves between the
+  // feeders beside it, like a printed playoff sheet.
+  const wings = stages.slice(0, -1);
+  const center = stages[stages.length - 1];
+  const shared = { bracket, liveScores, students, phase };
   return (
-    // The whole bracket scrolls horizontally as one strip; columns center
-    // their pairs vertically so later (shorter) rounds sit mid-height like a
-    // printed playoff sheet.
     <div className="w-full overflow-x-auto">
-      <div className="mx-auto flex w-max items-stretch gap-8 px-2 py-1">
-        {bracket.history.map((entry, i) => {
-          const isCurrent = entry.round === bracket.round;
-          const isLastColumn = i === bracket.history.length - 1;
-          return (
-            <div
-              key={entry.round}
-              className="flex min-w-56 flex-col justify-center gap-3"
-            >
-              <p
-                className={cn(
-                  "text-center text-xs font-bold uppercase tracking-[0.14em]",
-                  isCurrent ? "text-primary" : "text-muted-foreground",
-                )}
-              >
-                {roundLabel(entry, t)}
-              </p>
-              {entry.main.map((pair, pi) => (
-                <PairCard
-                  key={pi}
-                  pair={pair}
-                  bracket={bracket}
-                  settled={entry.settled}
-                  isCurrentRound={isCurrent}
-                  liveScores={liveScores}
-                  students={students}
-                  phase={phase}
-                  highlight={isCurrent && phase === "pairing"}
-                  // connector stub toward the next column — winners flow
-                  // right; the last drawn column has nowhere to point yet
-                  connector={!isLastColumn}
-                />
-              ))}
-            </div>
-          );
-        })}
+      <div className="mx-auto flex w-max items-stretch gap-6 px-2 py-1">
+        {wings.map((stage, i) => (
+          <WingColumn
+            key={stage.round}
+            stage={stage}
+            side="left"
+            outermost={i === 0}
+            {...shared}
+          />
+        ))}
+        <CenterColumn stage={center} hasWings={wings.length > 0} {...shared} />
+        {[...wings].reverse().map((stage, i) => (
+          <WingColumn
+            key={stage.round}
+            stage={stage}
+            side="right"
+            outermost={i === wings.length - 1}
+            {...shared}
+          />
+        ))}
       </div>
     </div>
   );
@@ -548,7 +784,7 @@ function PairCard({
   students,
   phase,
   highlight,
-  connector,
+  compact,
 }: {
   pair: TourneyBracketPair;
   bracket: TourneyBracket;
@@ -558,7 +794,9 @@ function PairCard({
   students: Map<string, LiveStudent>;
   phase: TourneyView["phase"];
   highlight: boolean;
-  connector: boolean;
+  // Slimmer rows for settled/older wing columns — the current round keeps
+  // full size so live scores stay readable from the back row.
+  compact: boolean;
 }) {
   const slots: Array<{ id: string | null; slot: "a" | "b" | "c" }> = [
     { id: pair.a, slot: "a" },
@@ -568,18 +806,12 @@ function PairCard({
   return (
     <div
       className={cn(
-        "relative rounded-xl border-[1.5px] bg-card",
+        "relative overflow-hidden rounded-xl border-[1.5px] bg-card",
         highlight
           ? "border-primary shadow-[0_0_0_3px_rgba(37,99,235,0.15)]"
           : "border-border",
       )}
     >
-      {connector && (
-        <span
-          aria-hidden
-          className="absolute -right-8 top-1/2 h-px w-8 bg-border"
-        />
-      )}
       {slots.map(({ id, slot }, i) => (
         <PlayerRow
           key={slot}
@@ -589,6 +821,7 @@ function PairCard({
           winner={settled && id !== null && pair.winner === id}
           students={students}
           divider={i > 0}
+          compact={compact}
         />
       ))}
     </div>
@@ -602,6 +835,7 @@ function PlayerRow({
   winner,
   students,
   divider,
+  compact,
 }: {
   // null = the empty slot of a solo row (main-bracket bye or a one-person
   // losers pool) — rendered as a muted dash, the auto-advance reads itself.
@@ -611,6 +845,7 @@ function PlayerRow({
   winner: boolean;
   students: Map<string, LiveStudent>;
   divider: boolean;
+  compact: boolean;
 }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
@@ -618,7 +853,8 @@ function PlayerRow({
     return (
       <div
         className={cn(
-          "flex h-9 items-center px-3 text-sm font-bold text-muted-foreground/50",
+          "flex items-center px-3 font-bold text-muted-foreground/50",
+          compact ? "h-8 text-xs" : "h-9 text-sm",
           divider && "border-t border-border",
         )}
       >
@@ -632,27 +868,34 @@ function PlayerRow({
   return (
     <div
       className={cn(
-        "flex h-9 items-center gap-2 px-2",
+        "flex items-center gap-2 px-2",
+        compact ? "h-8" : "h-9",
         divider && "border-t border-border",
         winner && "bg-emerald-50",
       )}
     >
       <span
-        className="grid size-6 shrink-0 place-items-center rounded-full text-[10px] font-bold text-white"
+        className={cn(
+          "grid shrink-0 place-items-center rounded-full font-bold text-white",
+          compact ? "size-5 text-[9px]" : "size-6 text-[10px]",
+        )}
         style={{ background: avatarColor(name) }}
       >
         {name.slice(0, 1).toUpperCase()}
       </span>
       <span
         className={cn(
-          "min-w-0 flex-1 truncate text-sm",
+          "min-w-0 flex-1 truncate",
+          compact ? "text-xs" : "text-sm",
           winner ? "font-bold text-emerald-800" : "font-semibold",
           player?.kicked && "line-through opacity-50",
         )}
       >
         {name}
       </span>
-      {presence !== null && (
+      {/* presence badges only at full size — compact wing rows are history,
+          and the badge + check + score would overflow the slim card */}
+      {presence !== null && !compact && (
         <span
           className={cn(
             "shrink-0 rounded-full border px-1.5 py-px text-[9px] font-bold uppercase tracking-wide",
@@ -670,7 +913,8 @@ function PlayerRow({
       {score !== null && (
         <span
           className={cn(
-            "w-7 shrink-0 text-right font-mono text-base font-bold tabular-nums",
+            "w-7 shrink-0 text-right font-mono font-bold tabular-nums",
+            compact ? "text-sm" : "text-base",
             winner ? "text-emerald-700" : "text-primary",
           )}
         >
@@ -715,7 +959,7 @@ function LosersPanel({
               students={students}
               phase={phase}
               highlight={false}
-              connector={false}
+              compact={false}
             />
           </div>
         ))}
