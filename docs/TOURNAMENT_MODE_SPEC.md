@@ -343,11 +343,16 @@ Rules (normative):
 - **First draw**: shuffle all eligible students (rng), pair sequentially.
   Odd → the last unpaired student is `byeId` (`{a, b:null}` in `main`; bye =
   auto-win, plays solo for fun, their score counts toward totals only).
-- **Later draws (main)**: candidates = previous winners (+bye). If odd AND
-  eligible losers exist: promote `luckyLoserId` = best loser of the
-  JUST-SETTLED round by the same comparator, `connected !== false` and not
-  kicked only. If odd and no eligible loser → bye (same rule as round 1).
-  Shuffle candidates (rng), pair sequentially.
+- **Later draws (main)**: NOT shuffled — the one random жеребе is round 1;
+  after that the bracket is a fixed FIFA tree. Candidates = previous winners
+  (+bye) in PAIR ORDER (settle emits winners by pair index; applyOutcome
+  preserves that order into `alive`), paired sequentially — the winner of
+  pair 2i meets the winner of pair 2i+1. A kicked winner is dropped and the
+  survivors shift up. If odd AND eligible losers exist: promote
+  `luckyLoserId` = best loser of the JUST-SETTLED round by the same
+  comparator, `connected !== false` and not kicked only, appended at the END
+  (pairs with the leftover last winner). If odd and no eligible loser → the
+  last winner gets the bye (same rule as round 1).
 - **Losers pool**: everyone eliminated (minus a promoted lucky loser) plus
   latecomers. Shuffle, pair; odd → last THREE form a trio `{a, b, c}` (a
   1-person pool → solo `{a, b:null}`). Trio/solo winner counts for standings

@@ -650,6 +650,50 @@ run('lobby-kicked student: never drawn, still ranked', () => {
   );
 });
 
+run('FIFA lineage: later draws pair previous winners in pair order', () => {
+  // 16 students → 8/4/2/1 pairs, no odd cases: every post-round-1 draw must
+  // be exactly (winner of pair 0 vs winner of pair 1), (2 vs 3), … — the one
+  // random жеребе is round 1.
+  const res = driveTournament({ baseSeed: 4242, n: 16 });
+  assert(res.rounds === 4, `16 students must resolve in 4 rounds, took ${res.rounds}`);
+  for (let i = 1; i < res.log.length; i++) {
+    const prevWinners = res.log[i - 1].outcome.winners;
+    const main = res.log[i].plan.main;
+    main.forEach((row, p) => {
+      assert(
+        row.a === prevWinners[2 * p] && row.b === prevWinners[2 * p + 1],
+        `round ${i + 1} pair ${p} broke lineage: got (${row.a}, ${row.b}), ` +
+          `expected (${prevWinners[2 * p]}, ${prevWinners[2 * p + 1]})`,
+      );
+    });
+  }
+});
+
+run('FIFA lineage: lucky loser appended last, bye falls to the last winner', () => {
+  // 10 students → 5 pairs → 5 winners (odd): the lucky loser must pair with
+  // the LAST leftover winner, everyone else keeps strict pair order.
+  const res = driveTournament({ baseSeed: 777, n: 10 });
+  const r2 = res.log[1];
+  const prevWinners = res.log[0].outcome.winners;
+  if (r2.plan.luckyLoserId != null) {
+    const last = r2.plan.main[r2.plan.main.length - 1];
+    assert(
+      last.b === r2.plan.luckyLoserId && last.a === prevWinners[prevWinners.length - 1],
+      'lucky loser must pair with the leftover last winner',
+    );
+  } else {
+    assert(
+      r2.plan.byeId === prevWinners[prevWinners.length - 1],
+      'with no eligible loser the bye must fall to the last winner',
+    );
+  }
+  r2.plan.main.forEach((row, p) => {
+    if (2 * p < prevWinners.length) {
+      assert(row.a === prevWinners[2 * p], `round 2 pair ${p} slot a broke lineage`);
+    }
+  });
+});
+
 console.log('');
 if (failed === 0) {
   console.log(`All green — ${passed} checks passed.`);

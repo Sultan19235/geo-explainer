@@ -125,19 +125,27 @@ function kickedSetOf(roster) {
  * Draw a round. First draw (state.firstDrawDone false): every non-kicked
  * roster student is a main-bracket candidate — shuffle, pair sequentially,
  * odd → the LAST unpaired student is the bye ({a, b:null} row; auto-win,
- * plays solo for fun). Later draws: candidates = state.alive (previous
- * winners + bye) minus kicked; odd → promote the lucky loser (best loser of
- * the JUST-settled round by compareScores, `connected !== false` and not
- * kicked only; comparator tie → earlier appearance in that round's main
- * plan) — no eligible loser → bye, same rule as round 1. Everyone else
- * non-kicked (eliminated minus the promoted lucky loser, plus latecomers)
- * lands in the losers pool: shuffle, pair; odd pool → the last THREE form a
- * trio {a,b,c}; a 1-person pool → solo {a, b:null}.
+ * plays solo for fun). Later draws are NOT shuffled — FIFA lineage: the one
+ * random жеребе is round 1, after that candidates = state.alive minus
+ * kicked, in PAIR ORDER (settleRound emits winners by pair index, and
+ * applyOutcome preserves that order into alive), paired sequentially — so
+ * the winner of pair 2i meets the winner of pair 2i+1, exactly what the
+ * board's bracket sheet draws. A kicked winner drops out and shifts the
+ * survivors up — the lineage bends rather than leaving a hole. Odd →
+ * promote the lucky loser (best loser of the JUST-settled round by
+ * compareScores, `connected !== false` and not kicked only; comparator tie
+ * → earlier appearance in that round's main plan), appended at the END, so
+ * they pair with the leftover last winner — no eligible loser → the last
+ * winner gets the bye, same rule as round 1. Everyone else non-kicked
+ * (eliminated minus the promoted lucky loser, plus latecomers) lands in the
+ * losers pool: shuffle (the consolation pool stays random on purpose — new
+ * opponents every round), pair; odd pool → the last THREE form a trio
+ * {a,b,c}; a 1-person pool → solo {a, b:null}.
  *
  * Disconnected students are still drawn everywhere (recovery flows exist) —
  * they are only ineligible for the lucky-loser promotion. Kicked students
- * appear in no draw at all. rng order: main shuffle first, then losers
- * shuffle (part of the determinism contract).
+ * appear in no draw at all. rng order: main shuffle (first draw only), then
+ * losers shuffle (part of the determinism contract).
  */
 function planRound(state, roster, rng) {
   const kicked = kickedSetOf(roster);
@@ -163,12 +171,14 @@ function planRound(state, roster, rng) {
 
   const main = [];
   let byeId = null;
-  const shuffledMain = shuffle(rng, mainCandidates);
-  for (let i = 0; i + 1 < shuffledMain.length; i += 2) {
-    main.push({ a: shuffledMain[i], b: shuffledMain[i + 1] });
+  const orderedMain = state.firstDrawDone
+    ? mainCandidates
+    : shuffle(rng, mainCandidates);
+  for (let i = 0; i + 1 < orderedMain.length; i += 2) {
+    main.push({ a: orderedMain[i], b: orderedMain[i + 1] });
   }
-  if (shuffledMain.length % 2 === 1) {
-    byeId = shuffledMain[shuffledMain.length - 1];
+  if (orderedMain.length % 2 === 1) {
+    byeId = orderedMain[orderedMain.length - 1];
     main.push({ a: byeId, b: null });
   }
 
