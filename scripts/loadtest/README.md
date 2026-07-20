@@ -6,11 +6,12 @@ fake students speak the exact same protocol as real phones (same 2s lobby
 polls, 15s heartbeats, race SSE streams), so what the server experiences is
 indistinguishable from a real school day.
 
-Two tools:
+Three tools:
 
 | file | runs where | what it does |
 |---|---|---|
 | `loadtest.mjs` | your Mac | pretends to be N teachers + N×30 students |
+| `tourney-sim.ts` | your Mac | fills ONE tournament room with robot pupils who really solve the problems (see below) |
 | `record-resources.sh` | the Hetzner box | writes CPU / memory / connections to a CSV every 5s |
 
 **Run tests in the evening** — the simulator shares the box with real
@@ -145,3 +146,66 @@ whole game and answer every question within seconds of each other.
 | `--questions` / `--qtime` | 8 / 20 | race: question count / seconds each |
 | `--no-xff` | off | don't fake per-room IPs (only with limits lifted) |
 | `--preflight` | — | just check rate-limit bucketing, then exit |
+
+---
+
+# Тournament rehearsal — see a full Турнир without 30 pupils
+
+`tourney-sim.ts` fills a real tournament room with robot pupils. They are not
+dummies: each bot regenerates the round's problems from the server's seed with
+the same generator the phones use, so it **actually solves them**. Every bot
+gets its own thinking speed and accuracy, so duels have genuine winners, the
+bracket advances for real, and the projector board looks exactly like a live
+class. A couple of bots also pocket their phone mid-duel so you can see the
+away badges.
+
+### How to run it
+
+1. On the site, open your drill-generator quiz's console and start a **Турнир**
+   room as usual. Leave the board on screen — that's what you're going to watch.
+2. Note the 6-letter room code.
+3. On your Mac, in the project folder:
+
+   ```
+   npx tsx scripts/loadtest/tourney-sim.ts --code ABC123 --students 30
+   ```
+
+   The bots join within a few seconds — you'll see them fill your lobby.
+4. Run the tournament from the console exactly as you would with real pupils:
+   «Жеребе тарту» → «Айналымды бастау» → watch → «Келесі жеребе» → … →
+   «Марапаттау».
+5. Ctrl-C when you're done. Every bot sends its leave beacon, so the board
+   empties immediately.
+
+The terminal narrates alongside the board: each round's draw, then a result
+table with a 🏅 on the winner of every duel (the medal comes from the server's
+own verdict, so tiebreak wins show correctly), and the final standings.
+
+### Options
+
+| option | meaning |
+|---|---|
+| `--code ABC123` | the room code (required) |
+| `--students 30` | how many bots (default 30) |
+| `--topic <id>` | name the drill topic instead of auto-detecting it |
+| `--generator-file path.js` | for quizzes built on an **uploaded** generator file — pass the same .js you uploaded |
+| `--flaky 2` | how many bots wander off mid-duel (default 2) |
+| `--seed 12345` | reproducible personalities — same seed, same class |
+| `--quiet` | only round summaries, no per-answer lines |
+| `--server` / `--site` | point at a local dev server instead of production |
+
+Local dev run (server on :3001, site on :3000):
+
+```
+npx tsx scripts/loadtest/tourney-sim.ts --code ABC123 \
+  --server http://localhost:3001 --site http://localhost:3000
+```
+
+### Notes
+
+- 30 bots ≈ 600 requests/minute — well under the server's 2000/min per-IP
+  limit, so a rehearsal on the live box is safe. Still, prefer a quiet hour.
+- The bots are as strong as the accuracy spread makes them (55–97%), so
+  scores look like a real class rather than a room full of perfect solvers.
+- Auto-detection reads the drill topic from your quiz's student page. If it
+  can't tell (rare), it prints the list of topics and asks for `--topic`.
