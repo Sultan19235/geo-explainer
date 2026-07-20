@@ -240,6 +240,50 @@ export function TourneyBoard({
         </div>
       </header>
 
+      {/* ── action bar pinned under the header ── the teacher's next move,
+             the running clock and the roster live on TOP: nobody scrolls
+             past a 16-pair bracket to start a round or kick a troll.
+             Teacher pacing: draw → start → (clock runs out) → result →
+             next draw / podium. NO early-close button on purpose — a round
+             always runs its full clock (spec §11). */}
+      {phase !== "podium" && (
+        <div className="mb-3 flex flex-col items-center gap-2">
+          {tourney !== null && bracket !== undefined && (
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              {phase === "pairing" && (
+                <Button
+                  onClick={onStartRound}
+                  className="h-11 px-7 text-base font-bold"
+                >
+                  <Play className="size-5" aria-hidden />
+                  {t("tourney_start_round")}
+                </Button>
+              )}
+              {phase === "result" && (
+                <Button
+                  onClick={mustPodium ? onPodium : onPair}
+                  className="h-11 px-7 text-base font-bold"
+                >
+                  {mustPodium ? (
+                    <>
+                      <Trophy className="size-5" aria-hidden />
+                      {t("tourney_podium_btn")}
+                    </>
+                  ) : (
+                    <>
+                      <Dices className="size-5" aria-hidden />
+                      {t("tourney_next_draw")}
+                    </>
+                  )}
+                </Button>
+              )}
+              {phase === "duel" && <CompactClock tourney={tourney} />}
+            </div>
+          )}
+          <PresenceStrip students={list} onKick={onKick} />
+        </div>
+      )}
+
       {/* ── phase body ── */}
       {phase === "idle" && (
         <IdleScreen
@@ -253,8 +297,9 @@ export function TourneyBoard({
         tourney !== null &&
         bracket !== undefined && (
           <div className="flex flex-1 flex-col items-center gap-4 py-2">
-            {/* duel clock above everything — the back row reads it first */}
-            {phase === "duel" && <DuelClock tourney={tourney} />}
+            {/* the 3-2-1 before the round opens — brief, then the compact
+                ring in the action bar takes over */}
+            {phase === "duel" && <GetReadyBlock tourney={tourney} />}
 
             {/* lucky loser returns to the bracket — announce it while the
                 draw is on screen */}
@@ -280,48 +325,12 @@ export function TourneyBoard({
               students={students}
               phase={phase}
             />
-
-            {/* teacher pacing: draw → start → (clock runs out) → result →
-                next draw / podium. NO early-close button on purpose — a
-                round always runs its full clock (spec §11). */}
-            {phase === "pairing" && (
-              <Button
-                onClick={onStartRound}
-                className="h-14 px-10 text-lg font-bold sm:h-16 sm:px-12 sm:text-xl"
-              >
-                <Play className="size-5" aria-hidden />
-                {t("tourney_start_round")}
-              </Button>
-            )}
-            {phase === "result" && (
-              <Button
-                onClick={mustPodium ? onPodium : onPair}
-                className="h-14 px-10 text-lg font-bold sm:h-16 sm:px-12 sm:text-xl"
-              >
-                {mustPodium ? (
-                  <>
-                    <Trophy className="size-5" aria-hidden />
-                    {t("tourney_podium_btn")}
-                  </>
-                ) : (
-                  <>
-                    <Dices className="size-5" aria-hidden />
-                    {t("tourney_next_draw")}
-                  </>
-                )}
-              </Button>
-            )}
           </div>
         )}
 
       {phase === "podium" && bracket !== undefined && (
         <PodiumScreen bracket={bracket} onFinish={onFinish} />
       )}
-
-      {/* the presence strip stays reachable in every non-podium phase — a
-          teacher must be able to see who left / kick a troll mid-duel
-          without leaving the tournament board */}
-      {phase !== "podium" && <PresenceStrip students={list} onKick={onKick} />}
     </div>
   );
 }
@@ -364,41 +373,58 @@ function IdleScreen({
   );
 }
 
-// ═══ DUEL CLOCK (countdown ring + get-ready) ══════════════════════════════
+// ═══ DUEL CLOCK (get-ready block + compact top-bar ring) ══════════════════
+// The clock never occupies the board's center during a running duel — the
+// class watches the bracket and pupils have their own clocks on the phones.
+// Big 3-2-1 before the round opens (brief), then a compact ring up in the
+// action bar, pulsing through the last 10 seconds.
 
-function DuelClock({ tourney }: { tourney: TourneyView }) {
+// The server bakes a 3s get-ready gap into remainingMs (openAt = now + 3s,
+// spec §2.4): anything above the pure round time IS the get-ready phase.
+function GetReadyBlock({ tourney }: { tourney: TourneyView }) {
   const { lang } = useLanguage();
   const t = engineT(lang);
   const remaining = roundRemainingMs(tourney);
   const totalMs = (tourney.roundSec ?? 90) * 1000;
-  // The server bakes a 3s get-ready gap into remainingMs (openAt = now + 3s,
-  // spec §2.4): anything above the pure round time IS the get-ready phase.
   const getReadyMs = remaining !== null ? remaining - totalMs : null;
-
-  if (getReadyMs !== null && getReadyMs > 0) {
-    return (
-      <div className="flex flex-col items-center gap-2 py-4">
-        <p className="text-2xl font-bold text-primary sm:text-3xl">
-          {t("tourney_get_ready")}
-        </p>
-        <p className="font-mono text-8xl font-bold tabular-nums text-primary sm:text-9xl">
-          {Math.ceil(getReadyMs / 1000)}
-        </p>
-      </div>
-    );
-  }
-  if (remaining === null) return null;
-  return <CountdownRing remainingMs={remaining} totalMs={totalMs} />;
+  if (getReadyMs === null || getReadyMs <= 0) return null;
+  return (
+    <div className="flex flex-col items-center gap-2 py-4">
+      <p className="text-2xl font-bold text-primary sm:text-3xl">
+        {t("tourney_get_ready")}
+      </p>
+      <p className="font-mono text-8xl font-bold tabular-nums text-primary sm:text-9xl">
+        {Math.ceil(getReadyMs / 1000)}
+      </p>
+    </div>
+  );
 }
 
-// Same ring as race-board's — duplicated (not imported) so neither board's
-// visual tuning can silently change the other's.
+// The running-round ring for the action bar. Hidden during get-ready (the
+// big block owns that moment); pulses once ≤10s remain.
+function CompactClock({ tourney }: { tourney: TourneyView }) {
+  const remaining = roundRemainingMs(tourney);
+  const totalMs = (tourney.roundSec ?? 90) * 1000;
+  if (remaining === null || remaining - totalMs > 0) return null;
+  return (
+    <CountdownRing
+      remainingMs={remaining}
+      totalMs={totalMs}
+      pulse={remaining <= 10_000}
+    />
+  );
+}
+
+// Same ring family as race-board's — duplicated (not imported) so neither
+// board's visual tuning can silently change the other's.
 function CountdownRing({
   remainingMs,
   totalMs,
+  pulse,
 }: {
   remainingMs: number;
   totalMs: number;
+  pulse: boolean;
 }) {
   const frac = Math.max(0, Math.min(1, remainingMs / Math.max(1, totalMs)));
   const R = 56;
@@ -406,14 +432,14 @@ function CountdownRing({
   const secs = Math.ceil(remainingMs / 1000);
   const color = frac > 0.5 ? "#059669" : frac > 0.25 ? "#d97706" : "#dc2626";
   return (
-    <div className="relative">
-      <svg viewBox="0 0 128 128" className="size-36 -rotate-90 sm:size-44">
+    <div className={cn("relative", pulse && "animate-pulse")}>
+      <svg viewBox="0 0 128 128" className="size-16 -rotate-90 sm:size-20">
         <circle
           cx="64"
           cy="64"
           r={R}
           fill="none"
-          strokeWidth="10"
+          strokeWidth="12"
           className="stroke-secondary"
         />
         <circle
@@ -421,7 +447,7 @@ function CountdownRing({
           cy="64"
           r={R}
           fill="none"
-          strokeWidth="10"
+          strokeWidth="12"
           strokeLinecap="round"
           stroke={color}
           strokeDasharray={C}
@@ -429,7 +455,7 @@ function CountdownRing({
         />
       </svg>
       <span
-        className="absolute inset-0 grid place-items-center font-mono text-5xl font-bold tabular-nums sm:text-6xl"
+        className="absolute inset-0 grid place-items-center font-mono text-xl font-bold tabular-nums sm:text-2xl"
         style={{ color }}
       >
         {secs}
@@ -537,7 +563,7 @@ function PairSlot({
         <span
           aria-hidden
           className={cn(
-            "absolute top-1/2 h-px w-3 bg-border",
+            "absolute top-1/2 h-0.5 w-3 bg-slate-400",
             lines.emit === "right" ? "-right-3" : "-left-3",
           )}
         />
@@ -546,11 +572,11 @@ function PairSlot({
         <>
           <span
             aria-hidden
-            className="absolute -left-3 top-1/4 h-1/2 w-px bg-border"
+            className="absolute -left-3 top-1/4 h-1/2 w-0.5 bg-slate-400"
           />
           <span
             aria-hidden
-            className="absolute -left-3 top-1/2 h-px w-3 bg-border"
+            className="absolute -left-3 top-1/2 h-0.5 w-3 bg-slate-400"
           />
         </>
       )}
@@ -558,11 +584,11 @@ function PairSlot({
         <>
           <span
             aria-hidden
-            className="absolute -right-3 top-1/4 h-1/2 w-px bg-border"
+            className="absolute -right-3 top-1/4 h-1/2 w-0.5 bg-slate-400"
           />
           <span
             aria-hidden
-            className="absolute -right-3 top-1/2 h-px w-3 bg-border"
+            className="absolute -right-3 top-1/2 h-0.5 w-3 bg-slate-400"
           />
         </>
       )}
@@ -571,16 +597,19 @@ function PairSlot({
   );
 }
 
-// A future round's slot: dashed shell, two empty seats.
+// A future round's slot: dashed shell, two empty seats. Bold enough to read
+// from the back row — this is the "road to the final" the class follows.
 function PlaceholderCard({ compact }: { compact: boolean }) {
   const row = cn(
-    "flex items-center px-3 font-bold text-muted-foreground/40",
+    "flex items-center px-3 font-bold text-slate-400",
     compact ? "h-8 text-xs" : "h-9 text-sm",
   );
   return (
-    <div className="rounded-xl border-[1.5px] border-dashed border-border bg-card/40">
+    <div className="rounded-xl border-2 border-dashed border-slate-300 bg-card/70">
       <div className={row}>—</div>
-      <div className={cn(row, "border-t border-dashed border-border")}>—</div>
+      <div className={cn(row, "border-t-2 border-dashed border-slate-200")}>
+        —
+      </div>
     </div>
   );
 }
@@ -1075,7 +1104,9 @@ function PodiumScreen({
 
 // ═══ PRESENCE STRIP (compact roster, collapsible) ═════════════════════════
 // Same strip as race-board's — duplicated (not imported) for the same
-// non-circularity reason as the constants above.
+// non-circularity reason as the constants above. Lives in the TOP action
+// bar (not bottom-pinned like race): the expanded chip list grows downward
+// over nothing more important than the bracket's top edge.
 
 function PresenceStrip({
   students,
@@ -1094,7 +1125,7 @@ function PresenceStrip({
   const out = away + left;
 
   return (
-    <div className="mt-auto w-full pt-4">
+    <div className="w-full">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

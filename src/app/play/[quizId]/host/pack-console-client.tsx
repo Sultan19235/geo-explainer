@@ -786,6 +786,12 @@ export function PackConsoleClient({
           !plainSetup &&
           "min-h-[640px] overflow-hidden rounded-xl border-[1.5px] border-border shadow-[0_1px_2px_rgba(15,23,42,0.04)] md:min-h-[760px]",
         !embedded && "min-h-dvh",
+        // This div IS the fullscreen element (toggleFullscreen). Fullscreen
+        // clamps it to the viewport, so the embedded overflow-hidden would
+        // make anything below the fold (losers panel, podium tail)
+        // unreachable — let it scroll there, and give it an opaque bg so the
+        // fullscreen backdrop never shows through as black.
+        "[&:fullscreen]:overflow-y-auto [&:fullscreen]:bg-background",
       )}
     >
       {session.phase === "setup" && (
