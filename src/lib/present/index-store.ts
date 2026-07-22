@@ -36,6 +36,12 @@ export type PresentIndexEntry = {
    * served as-is by /present-files. Absent on pre-html entries → "js".
    */
   format?: PresentFormat;
+  /**
+   * Explicit topic attachment, set from the /admin/presentations dropdown —
+   * the /grades topic page shows its presentation card when this equals the
+   * topic row's id. Stored here so attachment needs no migration.
+   */
+  topicId?: string;
 };
 
 export function presentFilePath(id: string, format: PresentFormat = "js"): string {

@@ -165,6 +165,8 @@ export async function uploadPresentationsAction(input: {
       version: (existing?.version ?? 0) + 1,
       updatedAt: new Date().toISOString(),
       ...(format === "html" ? { format: "html" as const } : {}),
+      // Re-uploading a deck must not detach it from its topic.
+      ...(existing?.topicId ? { topicId: existing.topicId } : {}),
     };
     byId.set(meta.id, entry);
     changed = true;
@@ -189,6 +191,38 @@ export async function uploadPresentationsAction(input: {
     revalidatePath("/admin/presentations");
   }
   return { ok: results.every((result) => result.ok), results };
+}
+
+/**
+ * Attach/detach a presentation to a topic (topicId: null detaches). The
+ * link lives in index.json — no migration; the /grades topic page reads it.
+ */
+export async function setPresentationTopicAction(input: {
+  id: string;
+  topicId: string | null;
+}): Promise<{ ok: boolean; error?: string }> {
+  await requireAdmin();
+  if (!ID_RE.test(input.id)) return { ok: false, error: "invalid id" };
+  if (input.topicId !== null && !/^[0-9a-f-]{36}$/i.test(input.topicId)) {
+    return { ok: false, error: "invalid topic id" };
+  }
+
+  const admin = createAdminClient();
+  const indexRead = await loadPresentIndexStrict(admin);
+  if (!indexRead.ok) return { ok: false, error: indexRead.error };
+
+  const entry = indexRead.entries.find((e) => e.id === input.id);
+  if (!entry) return { ok: false, error: "presentation not found" };
+
+  const next = indexRead.entries.map((e) => {
+    if (e.id !== input.id) return e;
+    const { topicId: _drop, ...rest } = e;
+    return input.topicId ? { ...rest, topicId: input.topicId } : rest;
+  });
+  const writeError = await writePresentIndex(admin, next);
+  if (writeError) return { ok: false, error: writeError };
+  revalidatePath("/admin/presentations");
+  return { ok: true };
 }
 
 export async function deletePresentationAction(input: {

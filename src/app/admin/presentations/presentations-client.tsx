@@ -21,10 +21,18 @@ import type { PresentIndexEntry } from "@/lib/present/index-store";
 import { cn } from "@/lib/utils";
 import {
   deletePresentationAction,
+  setPresentationTopicAction,
   uploadPresentationsAction,
   type PresentUploadMeta,
   type PresentUploadResult,
 } from "./actions";
+
+export type TopicOption = {
+  id: string;
+  grade_id: number;
+  name_kz: string;
+  display_order: number;
+};
 
 type PendingFile =
   | { name: string; ok: true; text: string; meta: PresentUploadMeta }
@@ -41,13 +49,31 @@ function toText(value: string | { kz: string; ru?: string } | undefined): {
 
 export function PresentationsAdminClient({
   entries,
+  topics,
 }: {
   entries: PresentIndexEntry[];
+  topics: TopicOption[];
 }) {
   const [pending, setPending] = useState<PendingFile[]>([]);
   const [results, setResults] = useState<PresentUploadResult[]>([]);
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [linking, setLinking] = useState<string | null>(null);
+
+  const linkTopic = async (id: string, topicId: string) => {
+    setLinking(id);
+    try {
+      const result = await setPresentationTopicAction({
+        id,
+        topicId: topicId === "" ? null : topicId,
+      });
+      if (!result.ok) {
+        window.alert(`Байланыстыру сәтсіз: ${result.error ?? "белгісіз қате"}`);
+      }
+    } finally {
+      setLinking(null);
+    }
+  };
 
   /**
    * Standalone HTML deck (present-html build output): no evaluator — pull
@@ -318,6 +344,20 @@ export function PresentationsAdminClient({
                     {entry.format === "html" ? " · html" : ""}
                   </div>
                 </div>
+                <select
+                  value={entry.topicId ?? ""}
+                  disabled={linking === entry.id}
+                  onChange={(e) => void linkTopic(entry.id, e.target.value)}
+                  className="max-w-44 rounded-md border px-2 py-1 text-xs disabled:opacity-50"
+                  aria-label="Тақырыпқа байланыстыру"
+                >
+                  <option value="">— тақырыпсыз —</option>
+                  {topics.map((topic) => (
+                    <option key={topic.id} value={topic.id}>
+                      {topic.grade_id}-сынып · {topic.name_kz}
+                    </option>
+                  ))}
+                </select>
                 <Link
                   href={`/labs/present/${entry.id}`}
                   target="_blank"

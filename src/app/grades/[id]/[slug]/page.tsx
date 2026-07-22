@@ -69,21 +69,13 @@ export default async function LessonHubPage({
     return count;
   };
 
-  // Convention-based attachment, no migration: a published presentation
-  // belongs to this topic when its deck id starts with the grade number and
-  // ends with the topic slug — e.g. "5-1-2-koordinatalyq-saule" attaches to
-  // grade 5, slug "koordinatalyq-saule". The author controls both names.
+  // Explicit attachment: the admin picks a topic per presentation in
+  // /admin/presentations; the link (topicId) lives in the presentations
+  // index — no migration needed.
   const findPresentation = async () => {
     try {
       const entries = await readPresentIndex(createAdminClient());
-      return (
-        entries.find(
-          (entry) =>
-            entry.id === `${topic.grade_id}-${topic.slug}` ||
-            (entry.id.startsWith(`${topic.grade_id}-`) &&
-              entry.id.endsWith(`-${topic.slug}`)),
-        ) ?? null
-      );
+      return entries.find((entry) => entry.topicId === topic.id) ?? null;
     } catch {
       return null; // storage unreachable — the hub renders without the card
     }
