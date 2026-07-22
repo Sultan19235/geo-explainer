@@ -103,7 +103,9 @@ export function PresentationsAdminClient({
     }
     const title =
       text.match(/<title>([^<]+)<\/title>/i)?.[1]?.trim() ?? id;
-    const slides = (text.match(/registerSlide\(/g) ?? []).length || 1;
+    // Count actual slide registrations ("registerSlide({"), not the engine's
+    // own function definition or comments mentioning the name.
+    const slides = (text.match(/registerSlide\(\s*\{/g) ?? []).length || 1;
     return {
       ok: true,
       meta: { id, titleKz: title, slides, format: "html" },

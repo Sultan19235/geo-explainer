@@ -104,6 +104,14 @@ export default async function LessonHubPage({
           ? { id: presentation.id, slides: presentation.slides }
           : null
       }
+      // Presentation-taught topics (grade 5+) have no separate theory/problems
+      // section — the slides ARE the lesson. An empty «0 есеп» card would just
+      // confuse; it reappears as soon as the topic gets real learn content.
+      showLearn={
+        (problemCount ?? 0) > 0 ||
+        Boolean(topic.lesson_topic_id) ||
+        Boolean(topic.theory_html_path)
+      }
     />
   );
 }

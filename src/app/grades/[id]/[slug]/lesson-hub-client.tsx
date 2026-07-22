@@ -35,11 +35,14 @@ export function LessonHubClient({
   problemCount,
   quizCount,
   presentation,
+  showLearn,
 }: {
   topic: Topic;
   problemCount: number;
   quizCount: number;
   presentation: { id: string; slides: number } | null;
+  /** Hidden for presentation-taught topics with no theory/problems behind it. */
+  showLearn: boolean;
 }) {
   const { t, lang } = useT();
   const localizedName = topicName(topic, lang);
@@ -66,7 +69,6 @@ export function LessonHubClient({
           {presentation && (
             <HubCard
               href={`/labs/present/${presentation.id}`}
-              newTab
               badgeClass="bg-[#fbf0da] text-[#8a5d08]"
               icon={<PresentationIcon className="size-6" />}
               title={t("hub_present_title")}
@@ -74,14 +76,16 @@ export function LessonHubClient({
               meta={t("hub_present_count")(presentation.slides)}
             />
           )}
-          <HubCard
-            href={`${base}/learn`}
-            badgeClass="bg-[#ecfdf5] text-[#16a34a]"
-            icon={<BookOpenIcon className="size-6" />}
-            title={t("hub_learn_title")}
-            subtitle={t("hub_learn_subtitle")}
-            meta={t("hub_problems_count")(problemCount)}
-          />
+          {showLearn && (
+            <HubCard
+              href={`${base}/learn`}
+              badgeClass="bg-[#ecfdf5] text-[#16a34a]"
+              icon={<BookOpenIcon className="size-6" />}
+              title={t("hub_learn_title")}
+              subtitle={t("hub_learn_subtitle")}
+              meta={t("hub_problems_count")(problemCount)}
+            />
+          )}
           <HubCard
             href={`${base}/quizzes`}
             badgeClass="bg-[#eff6ff] text-[#2563eb]"
@@ -107,7 +111,6 @@ function HubCard({
   title,
   subtitle,
   meta,
-  newTab,
 }: {
   href: string;
   badgeClass: string;
@@ -115,12 +118,10 @@ function HubCard({
   title: string;
   subtitle: string;
   meta: string;
-  newTab?: boolean;
 }) {
   return (
     <Link
       href={href}
-      target={newTab ? "_blank" : undefined}
       className="group flex flex-col gap-4 rounded-xl border-[1.5px] border-[#d8dde5] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-all hover:-translate-y-0.5 hover:border-[#2563eb] hover:shadow-[0_8px_22px_rgba(37,99,235,0.12)]"
     >
       <div className="flex items-start justify-between">
