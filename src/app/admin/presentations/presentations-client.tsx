@@ -49,6 +49,41 @@ export function PresentationsAdminClient({
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
 
+  /**
+   * Standalone HTML deck (present-html build output): no evaluator — pull
+   * meta straight out of the markup. id comes from Deck.boot({id}), title
+   * from <title>, slide count from registerSlide occurrences.
+   */
+  const parseHtmlDeck = (
+    name: string,
+    text: string,
+  ): { ok: true; meta: PresentUploadMeta } | { ok: false; errors: string[] } => {
+    if (!/<!doctype html|<html[\s>]/i.test(text)) {
+      return { ok: false, errors: ["Not an HTML document (no doctype/<html>)."] };
+    }
+    const idMatch = text.match(/Deck\.boot\(\s*\{\s*id:\s*"([^"]+)"/);
+    const fallbackId = name
+      .replace(/\.html?$/i, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9.-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
+    const id = idMatch?.[1] ?? fallbackId;
+    if (!/^[a-z0-9][a-z0-9.-]{1,39}$/.test(id)) {
+      return {
+        ok: false,
+        errors: [`Cannot derive a valid id (got "${id}") — check Deck.boot({id}) or the filename.`],
+      };
+    }
+    const title =
+      text.match(/<title>([^<]+)<\/title>/i)?.[1]?.trim() ?? id;
+    const slides = (text.match(/registerSlide\(/g) ?? []).length || 1;
+    return {
+      ok: true,
+      meta: { id, titleKz: title, slides, format: "html" },
+    };
+  };
+
   const onFiles = async (list: FileList | null) => {
     if (!list) return;
     setResults([]);
@@ -56,6 +91,28 @@ export function PresentationsAdminClient({
     const seen = new Set<string>();
     for (const file of Array.from(list)) {
       const text = await file.text();
+      if (/\.html?$/i.test(file.name)) {
+        const parsed = parseHtmlDeck(file.name, text);
+        if (!parsed.ok) {
+          next.push({ name: file.name, ok: false, errors: parsed.errors });
+        } else if (RESERVED_PRESENT_IDS.has(parsed.meta.id)) {
+          next.push({
+            name: file.name,
+            ok: false,
+            errors: [`id "${parsed.meta.id}" is reserved — pick another slug.`],
+          });
+        } else if (seen.has(parsed.meta.id)) {
+          next.push({
+            name: file.name,
+            ok: false,
+            errors: [`Duplicate id "${parsed.meta.id}" in this batch.`],
+          });
+        } else {
+          seen.add(parsed.meta.id);
+          next.push({ name: file.name, ok: true, text, meta: parsed.meta });
+        }
+        continue;
+      }
       const result = evaluatePresentationCode(text);
       if ("errors" in result) {
         next.push({ name: file.name, ok: false, errors: result.errors });
@@ -151,8 +208,9 @@ export function PresentationsAdminClient({
     <div className="mx-auto max-w-3xl">
       <h1 className="text-xl font-bold">Презентациялар</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Сынып презентациялары (.js файлдар) · формат:
-        docs/PRESENTATION_FORMAT.md · алдын ала тексеру:{" "}
+        Сынып презентациялары (.js / .html файлдар) · форматтар:
+        docs/PRESENTATION_FORMAT.md, docs/PRESENTATION_HTML_FORMAT.md ·
+        алдын ала тексеру:{" "}
         <Link href="/labs/present/file" className="underline">
           /labs/present/file
         </Link>
@@ -162,10 +220,10 @@ export function PresentationsAdminClient({
       <div className="mt-6 rounded-lg border p-4">
         <label className="flex w-fit cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-semibold text-primary hover:bg-muted">
           <FileCode2Icon className="size-4" aria-hidden />
-          .js файлдарды таңдау
+          .js / .html файлдарды таңдау
           <input
             type="file"
-            accept=".js,text/javascript"
+            accept=".js,.html,text/javascript,text/html"
             multiple
             className="hidden"
             onChange={(e) => {
@@ -257,6 +315,7 @@ export function PresentationsAdminClient({
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {entry.id} · {entry.slides} слайд · v{entry.version}
+                    {entry.format === "html" ? " · html" : ""}
                   </div>
                 </div>
                 <Link

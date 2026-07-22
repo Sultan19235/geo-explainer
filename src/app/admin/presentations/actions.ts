@@ -25,6 +25,8 @@ import {
 
 const ID_RE = /^[a-z0-9][a-z0-9.-]{1,39}$/;
 const FILE_MAX_BYTES = 300_000;
+// Standalone HTML decks inline their whole shell (CSS + engines + slides).
+const HTML_MAX_BYTES = 900_000;
 const MAX_SLIDES = 80;
 const MAX_FILES = 50;
 const MAX_TITLE = 200;
@@ -36,6 +38,8 @@ export type PresentUploadMeta = {
   subtitleKz?: string;
   subtitleRu?: string;
   slides: number;
+  /** "html" = standalone page (present-html build); default "js". */
+  format?: "js" | "html";
 };
 
 export type PresentUploadResult = {
@@ -95,16 +99,26 @@ export async function uploadPresentationsAction(input: {
     const name = String(file.name ?? "file");
     const text = String(file.text ?? "");
     const meta = file.meta;
+    const format = meta?.format === "html" ? "html" : "js";
 
-    if (text.length === 0 || text.length > FILE_MAX_BYTES) {
+    const maxBytes = format === "html" ? HTML_MAX_BYTES : FILE_MAX_BYTES;
+    if (text.length === 0 || text.length > maxBytes) {
       results.push({ name, ok: false, message: "файл бос немесе тым үлкен" });
       continue;
     }
-    if (!text.includes("registerPresentation(")) {
+    if (format === "js" && !text.includes("registerPresentation(")) {
       results.push({
         name,
         ok: false,
         message: "registerPresentation({...}) табылмады",
+      });
+      continue;
+    }
+    if (format === "html" && !/<!doctype html|<html[\s>]/i.test(text)) {
+      results.push({
+        name,
+        ok: false,
+        message: "HTML файл емес (doctype/<html> табылмады)",
       });
       continue;
     }
@@ -115,12 +129,13 @@ export async function uploadPresentationsAction(input: {
       continue;
     }
 
+    const mime = format === "html" ? "text/html" : "text/javascript";
     const { error: uploadError } = await admin.storage
       .from(PRESENT_BUCKET)
       .upload(
-        presentFilePath(meta.id),
-        new Blob([text], { type: "text/javascript" }),
-        { upsert: true, contentType: "text/javascript; charset=utf-8" },
+        presentFilePath(meta.id, format),
+        new Blob([text], { type: mime }),
+        { upsert: true, contentType: `${mime}; charset=utf-8` },
       );
     if (uploadError) {
       results.push({ name, ok: false, message: uploadError.message });
@@ -149,6 +164,7 @@ export async function uploadPresentationsAction(input: {
       slides: meta.slides,
       version: (existing?.version ?? 0) + 1,
       updatedAt: new Date().toISOString(),
+      ...(format === "html" ? { format: "html" as const } : {}),
     };
     byId.set(meta.id, entry);
     changed = true;
@@ -188,9 +204,10 @@ export async function deletePresentationAction(input: {
   const indexRead = await loadPresentIndexStrict(admin);
   if (!indexRead.ok) return { ok: false, error: indexRead.error };
 
+  // Remove both possible formats — Supabase remove() ignores missing paths.
   const { error: removeError } = await admin.storage
     .from(PRESENT_BUCKET)
-    .remove([presentFilePath(input.id)]);
+    .remove([presentFilePath(input.id, "js"), presentFilePath(input.id, "html")]);
   if (removeError) return { ok: false, error: removeError.message };
 
   const writeError = await writePresentIndex(

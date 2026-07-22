@@ -19,6 +19,8 @@ const INDEX_PATH = `${PRESENT_PREFIX}/index.json`;
 /** Path segments that are static routes under /labs/present. */
 export const RESERVED_PRESENT_IDS = new Set(["file", "demo", "index"]);
 
+export type PresentFormat = "js" | "html";
+
 export type PresentIndexEntry = {
   id: string;
   title: { kz: string; ru?: string };
@@ -28,10 +30,16 @@ export type PresentIndexEntry = {
   /** Bumped on every re-upload; cache-busts /present-files/<id>?v=N. */
   version: number;
   updatedAt: string; // ISO
+  /**
+   * "js" = registerPresentation deck rendered by the React player;
+   * "html" = self-contained standalone page (present-html/ build output),
+   * served as-is by /present-files. Absent on pre-html entries → "js".
+   */
+  format?: PresentFormat;
 };
 
-export function presentFilePath(id: string): string {
-  return `${PRESENT_PREFIX}/${id}.js`;
+export function presentFilePath(id: string, format: PresentFormat = "js"): string {
+  return `${PRESENT_PREFIX}/${id}.${format}`;
 }
 
 /** Numeric-aware id sort: 5.1.2 < 5.1.10 < 5.2.1. */

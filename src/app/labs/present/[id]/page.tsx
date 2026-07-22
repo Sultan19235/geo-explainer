@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { readPresentIndex } from "@/lib/present/index-store";
 import { PresentPlayerLoader } from "@/components/present/player-loader";
@@ -53,6 +53,12 @@ export default async function PresentPlayerPage({
   const { id: rawId } = await params;
   const entry = await findEntry(rawId);
   if (!entry) notFound();
+
+  // Standalone HTML decks take over the whole tab — no React player around
+  // them. The permanent /labs/present/<id> link stays; it just forwards.
+  if (entry.format === "html") {
+    redirect(`/present-files/${entry.id}?f=html&v=${cacheKey(entry)}`);
+  }
 
   return (
     <PresentPlayerLoader
