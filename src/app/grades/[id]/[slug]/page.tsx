@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { isPrefetchRequest, logActivity } from "@/lib/analytics/track";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { readPresentIndex } from "@/lib/present/index-store";
 import { loadAccessibleTopic } from "./topic-access";
 import { LessonHubClient } from "./lesson-hub-client";
 
@@ -68,9 +69,30 @@ export default async function LessonHubPage({
     return count;
   };
 
-  const [problemCount, quizCount] = await Promise.all([
+  // Convention-based attachment, no migration: a published presentation
+  // belongs to this topic when its deck id starts with the grade number and
+  // ends with the topic slug — e.g. "5-1-2-koordinatalyq-saule" attaches to
+  // grade 5, slug "koordinatalyq-saule". The author controls both names.
+  const findPresentation = async () => {
+    try {
+      const entries = await readPresentIndex(createAdminClient());
+      return (
+        entries.find(
+          (entry) =>
+            entry.id === `${topic.grade_id}-${topic.slug}` ||
+            (entry.id.startsWith(`${topic.grade_id}-`) &&
+              entry.id.endsWith(`-${topic.slug}`)),
+        ) ?? null
+      );
+    } catch {
+      return null; // storage unreachable — the hub renders without the card
+    }
+  };
+
+  const [problemCount, quizCount, presentation] = await Promise.all([
     countProblems(),
     countQuizzes(),
+    findPresentation(),
   ]);
 
   return (
@@ -85,6 +107,11 @@ export default async function LessonHubPage({
       }}
       problemCount={problemCount ?? 0}
       quizCount={quizCount ?? 0}
+      presentation={
+        presentation
+          ? { id: presentation.id, slides: presentation.slides }
+          : null
+      }
     />
   );
 }
