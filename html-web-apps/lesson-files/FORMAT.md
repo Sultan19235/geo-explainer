@@ -73,6 +73,28 @@ registerLessonProblem({
 - Math in HTML: `\\(…\\)` inline, `\\[…\\]` display (KaTeX-rendered).
 - KZ text is mandatory; always fill RU too.
 
+**File-scoped helpers.** Lesson files execute in the page's shared global
+scope (previewer AND site). Wrap the whole body after the meta header in
+`(function () { … })();` — otherwise one file's helper functions overwrite
+another's and problems break at random depending on load order.
+
+**`view: "2d"` is broken — don't use it.** The current web3d GeoGebra build
+destroys the view on `SetPerspective("G")` (blank panel, zero-size Graphics
+view). For flat content (number rays, 2D figures) stay in the default 3D
+view and look straight down, framing from INSIDE `init` (not `home`/`fit`):
+
+```js
+g.cmd("SetViewDirection((0,-1,0),false)");        // far off-axis first…
+g.cmd("SetViewDirection((0,-0.001,1),false)");    // …then top-down, y up
+g.api.setCoordSystem(x0, x1, y0, y1, -5, 5);      // 6-arg = the 3D view
+```
+
+BOTH camera calls are required. A single near-z direction is ambiguous:
+GeoGebra keeps the previous azimuth (or toggles 180° per call for a pure
+`(0,0,1)`), so the view comes out mirrored or upside-down depending on how
+many times the scene was rebuilt. The far off-axis jump makes the final
+rotation deterministic. Build objects at `z = 0`; renders identically to 2D.
+
 **Figure-less problems (text-first).** A problem may **omit `init`** (and
 all of `view`/`home`/`fit`/`axes`, and every step's `run`). That declares
 "no figure": the player and previewer drop the GeoGebra pane and render the

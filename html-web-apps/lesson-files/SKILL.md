@@ -184,6 +184,19 @@ No custom styles, no scripts, no images, no other classes.
 
 ## 6. GeoGebra gotchas (hard-won — respect them)
 
+- **Wrap every file in an IIFE**: `(function () { … })();` after the meta
+  header. Files share the page's global scope — unwrapped helper functions
+  overwrite each other across files and fail depending on load order.
+- **Never `view: "2d"`** — `SetPerspective("G")` blanks the applet in the
+  current web3d build. Flat content = default 3D view + top-down camera set
+  inside `init`, TWO calls: `SetViewDirection((0,-1,0),false)` then
+  `SetViewDirection((0,-0.001,1),false)`, then
+  `g.api.setCoordSystem(x0,x1,y0,y1,-5,5)`; objects at `z = 0`. A single
+  near-z direction keeps the previous azimuth (or toggles 180°) — the view
+  then mirrors at random per rebuild; the off-axis jump pins it.
+- **Lowercase tuple = VECTOR**: `pA=(3,0,0)` creates a vector (arrow from
+  origin), not a point — GeoGebra decides by the first letter of the name.
+  Points need an Uppercase name or explicit `pA=Point({3,0,0})`.
 - **Object names**: never `rad`, `tan`, `sin`, `cos`, `log`, `exp` (parsed
   as functions), never single `x y z e i`. Beware: `A1`-style names are
   spreadsheet cells — they work, but only in the 3D view context we run in.
