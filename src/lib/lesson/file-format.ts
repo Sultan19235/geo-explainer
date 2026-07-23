@@ -54,7 +54,9 @@ export type LessonProblemDef = {
   // Show axes/grid instead of the default clean canvas.
   axes?: boolean;
   statement: { kz: string; ru?: string };
-  init: (g: LessonToolkit) => void;
+  // Omitting init means the problem has no figure — the player renders the
+  // statement and walkthrough full-width (text-first classroom layout).
+  init?: (g: LessonToolkit) => void;
   steps: LessonFileStep[];
 };
 

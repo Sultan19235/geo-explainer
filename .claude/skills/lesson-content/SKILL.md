@@ -39,6 +39,8 @@ also uses it in other Claude environments). Summary of the contract:
   `g.POLY`, `g.SECT`, `g.DIAG`, `g.show/hide`, `g.cap`, colors…).
 - **True scale is law**: build at the problem's real numbers, frame via
   `fit: [x0,x1,y0,y1,z0,z1]`. Never shrink a figure to look nice.
+- **Figure-less problems**: omit `init` (and all `run`s) — the player and
+  previewer render the problem text-first, full-width, no GeoGebra pane.
 - **Steps only run forward**; going back replays init + steps 0..k on a
   clean board. Build everything in `init` hidden, reveal per step.
 - Reference examples: `html-web-apps/lesson-files/cube/problem1.js` (problem

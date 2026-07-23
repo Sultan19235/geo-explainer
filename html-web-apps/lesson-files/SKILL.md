@@ -97,6 +97,9 @@ registerLessonTheory({
 - A step may also create objects on the fly (`g.cmd`, `g.SECT`…) if they are
   step-specific — but prefer building in init and revealing.
 - Theory sections are independent: each `ggb(g)` starts from a clean board.
+- **No figure? Omit `init` entirely** (and `view`/`home`/`fit` and every
+  step's `run`). The player then renders the problem text-first: full-width
+  statement + walkthrough, no GeoGebra pane. Right for pure-text problems.
 
 ## 3. The toolkit `g` (complete reference)
 

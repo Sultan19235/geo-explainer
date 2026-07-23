@@ -38,7 +38,8 @@ export type PlayerProblem = {
   statementBlocks?: Block[];
   statementHtml?: { kz: string; ru?: string };
   steps: PlayerStep[];
-  ggb: PlayerGgbSource;
+  // Absent for figure-less problems — the player renders text full-width.
+  ggb?: PlayerGgbSource;
 };
 
 export type PlayerTheorySection = {
@@ -116,20 +117,23 @@ export function fileToPlayerProblem(
       html: step.html,
       sceneStep: index,
     })),
-    ggb: {
-      kind: "program",
-      programKey: def.id,
-      program: sceneFromFileProgram({
-        view: def.view,
-        home: def.home,
-        fit: def.fit,
-        axes: def.axes,
-        init: def.init as unknown as (g: unknown) => void,
-        stepRuns: def.steps.map(
-          (step) => step.run as unknown as ((g: unknown) => void) | undefined,
-        ),
-      }),
-    },
+    ggb: def.init
+      ? {
+          kind: "program",
+          programKey: def.id,
+          program: sceneFromFileProgram({
+            view: def.view,
+            home: def.home,
+            fit: def.fit,
+            axes: def.axes,
+            init: def.init as unknown as (g: unknown) => void,
+            stepRuns: def.steps.map(
+              (step) =>
+                step.run as unknown as ((g: unknown) => void) | undefined,
+            ),
+          }),
+        }
+      : undefined,
   };
 }
 

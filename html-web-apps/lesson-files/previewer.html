@@ -46,6 +46,16 @@
   #resizer:hover { background:#dbe3f0; }
 
   #text-panel { flex:1; min-width:0; display:flex; flex-direction:column; background:#fff; border-left:1.5px solid #d8dde5; }
+
+  /* Figure-less problem (def without init): text takes the whole stage,
+     larger classroom type, content centered — mirrors the site player. */
+  #stage.nofig #graph-panel, #stage.nofig #resizer { display:none; }
+  #stage.nofig #text-panel { border-left:none; }
+  #stage.nofig #statement, #stage.nofig #steps {
+    font-size: calc(var(--exp-font) * 1.13);
+    padding-left: max(20px, calc((100% - 900px) / 2));
+    padding-right: max(20px, calc((100% - 900px) / 2));
+  }
   #statement { border-bottom:1.5px solid #d8dde5; background:#fbfcfe; padding:14px 20px; max-height:42%; overflow-y:auto; font-size:var(--exp-font); line-height:1.7; }
   #statement .plabel { display:inline-block; background:#eff6ff; color:#2563eb; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; border-radius:4px; padding:3px 9px; margin-bottom:10px; }
   #steps { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:20px; font-size:var(--exp-font); line-height:1.7; }
@@ -239,8 +249,17 @@ function renderFileList() {
 function activate(i) {
   activeIdx = i; stepIdx = 0;
   renderFileList();
+  updateStageLayout();
   rebuildModel();
   renderText();
+}
+
+// Problems without init have no figure — hide the graph panel entirely.
+function updateStageLayout() {
+  var def = currentDef();
+  var nofig = !!def && !isTheory() && !def.init;
+  document.getElementById('stage').classList.toggle('nofig', nofig);
+  if (!nofig) fitApplet();
 }
 
 function currentDef() { return activeIdx >= 0 ? files[activeIdx].def : null; }

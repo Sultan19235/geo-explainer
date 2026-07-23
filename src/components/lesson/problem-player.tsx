@@ -63,6 +63,12 @@ export function ProblemPlayer({
   const total = problem.steps.length;
   const { index } = state;
   const isBoard = mode === "board";
+  // Figure-less problems drop the model pane entirely: statement and
+  // walkthrough go full-width with larger classroom type.
+  const textFirst = !problem.ggb;
+  const bodyText = textFirst
+    ? "text-[length:calc(17px*var(--lesson-scale,1))]"
+    : "text-[length:calc(15px*var(--lesson-scale,1))]";
 
   // The statement matters most on the first step; once the student moves
   // on, collapse it to a peek so the walkthrough gets the vertical space.
@@ -154,19 +160,21 @@ export function ProblemPlayer({
       }
       onClick={statementOpen ? undefined : () => setStatementOpen(true)}
     >
-      {problem.statementBlocks ? (
-        <LessonBlocks
-          blocks={problem.statementBlocks}
-          lang={lang}
-          params={problem.params}
-        />
-      ) : problem.statementHtml ? (
-        <LessonHtml
-          html={problem.statementHtml}
-          lang={lang}
-          className="text-[length:calc(15px*var(--lesson-scale,1))]"
-        />
-      ) : null}
+      <div className={cn(textFirst && "mx-auto w-full max-w-4xl")}>
+        {problem.statementBlocks ? (
+          <LessonBlocks
+            blocks={problem.statementBlocks}
+            lang={lang}
+            params={problem.params}
+          />
+        ) : problem.statementHtml ? (
+          <LessonHtml
+            html={problem.statementHtml}
+            lang={lang}
+            className={bodyText}
+          />
+        ) : null}
+      </div>
       {statementOpen && (index > 0 || isBoard) && (
         <button
           type="button"
@@ -184,34 +192,7 @@ export function ProblemPlayer({
     </div>
   ) : null;
 
-  return (
-    <SplitRow
-      className={className}
-      left={
-        problem.ggb.kind === "scene" ? (
-          <GgbView
-            sceneId={problem.ggb.sceneId}
-            params={problem.ggb.params}
-            step={sceneStep}
-            animate={state.animate}
-            lang={lang}
-            stepperSlot={stepper}
-            className="border-b-[1.5px] border-[#d8dde5] md:border-b-0"
-          />
-        ) : (
-          <GgbView
-            program={problem.ggb.program}
-            programKey={problem.ggb.programKey}
-            step={sceneStep}
-            animate={state.animate}
-            lang={lang}
-            stepperSlot={stepper}
-            className="border-b-[1.5px] border-[#d8dde5] md:border-b-0"
-          />
-        )
-      }
-      right={
-        isBoard ? (
+  const walkthroughPane = isBoard ? (
           <div className="flex min-h-0 flex-col">
             {statementNode}
             <BoardCanvas storeKey={problem.key} lang={lang} />
@@ -244,13 +225,16 @@ export function ProblemPlayer({
                 return (
                   <div
                     key={stepIndex}
-                    className={cn(stepIndex < index && "opacity-70")}
+                    className={cn(
+                      stepIndex < index && "opacity-70",
+                      textFirst && "mx-auto w-full max-w-4xl",
+                    )}
                   >
                     <div className="flex items-center gap-2.5 border-b-2 border-[#2563eb] pb-2">
                       <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[#2563eb] text-[12px] font-bold text-white">
                         {stepIndex + 1}
                       </span>
-                      <h3 className="text-[length:calc(15px*var(--lesson-scale,1))] font-bold text-[#2563eb]">
+                      <h3 className={cn(bodyText, "font-bold text-[#2563eb]")}>
                         {pickText(step.name, lang)}
                       </h3>
                     </div>
@@ -267,7 +251,7 @@ export function ProblemPlayer({
                             html={step.html}
                             lang={lang}
                             compact={compact}
-                            className="text-[length:calc(15px*var(--lesson-scale,1))]"
+                            className={bodyText}
                           />
                         ) : null}
                       </div>
@@ -301,8 +285,44 @@ export function ProblemPlayer({
               </button>
             </div>
           </div>
+        );
+
+  // No figure: the walkthrough IS the player, full-width.
+  if (!problem.ggb) {
+    return (
+      <div className={cn("flex min-h-0 flex-col", className)}>
+        {walkthroughPane}
+      </div>
+    );
+  }
+
+  return (
+    <SplitRow
+      className={className}
+      left={
+        problem.ggb.kind === "scene" ? (
+          <GgbView
+            sceneId={problem.ggb.sceneId}
+            params={problem.ggb.params}
+            step={sceneStep}
+            animate={state.animate}
+            lang={lang}
+            stepperSlot={stepper}
+            className="border-b-[1.5px] border-[#d8dde5] md:border-b-0"
+          />
+        ) : (
+          <GgbView
+            program={problem.ggb.program}
+            programKey={problem.ggb.programKey}
+            step={sceneStep}
+            animate={state.animate}
+            lang={lang}
+            stepperSlot={stepper}
+            className="border-b-[1.5px] border-[#d8dde5] md:border-b-0"
+          />
         )
       }
+      right={walkthroughPane}
     />
   );
 }

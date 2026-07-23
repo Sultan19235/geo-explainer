@@ -73,6 +73,13 @@ registerLessonProblem({
 - Math in HTML: `\\(…\\)` inline, `\\[…\\]` display (KaTeX-rendered).
 - KZ text is mandatory; always fill RU too.
 
+**Figure-less problems (text-first).** A problem may **omit `init`** (and
+all of `view`/`home`/`fit`/`axes`, and every step's `run`). That declares
+"no figure": the player and previewer drop the GeoGebra pane and render the
+statement + walkthrough full-width in larger classroom type. Use this for
+pure-text problems (arithmetic, logic) — never pair an omitted `init` with
+steps that call `run`, there is no board to draw on.
+
 ## 2. The toolkit `g`
 
 Same vocabulary as the old HTML template, minus the applet argument:
