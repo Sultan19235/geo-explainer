@@ -1,10 +1,11 @@
 "use client";
 
 // Compact one-row problem navigator (~52px): prev/next, numbered problem
-// pills (click to jump, drag to reorder), counter, fullscreen. Replaces the
-// old 102px card strip — screen space matters on classroom projectors.
+// pills (click to jump, drag to reorder), counter. Replaces the old 102px
+// card strip — screen space matters on classroom projectors. Fullscreen and
+// A−/A+ live in the section header now, not here.
 
-import { useRef, type ReactNode } from "react";
+import { useRef } from "react";
 import {
   DndContext,
   MouseSensor,
@@ -21,12 +22,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  Maximize2Icon,
-  Minimize2Icon,
-} from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lang } from "@/lib/i18n/strings";
 import { pickText } from "@/lib/lesson/types";
@@ -83,22 +79,14 @@ export function LessonNavigator({
   activeIndex,
   onJump,
   onReorder,
-  isFullscreen,
-  onToggleFullscreen,
   lang,
-  extraControls,
 }: {
   problems: BankProblem[];
   activeIndex: number;
   onJump: (index: number) => void;
   // Commits a drag-reorder: the full problem id list in its new order.
   onReorder: (ids: string[]) => void;
-  isFullscreen: boolean;
-  onToggleFullscreen: () => void;
   lang: Lang;
-  // Rendered before the fullscreen button — the page header is hidden in
-  // fullscreen, so controls like A−/A+ move here.
-  extraControls?: ReactNode;
 }) {
   // A completed drag still dispatches a click on the dragged pill — swallow
   // it so reordering doesn't also jump to that problem.
@@ -181,27 +169,6 @@ export function LessonNavigator({
         aria-label={lang === "ru" ? "Следующая задача" : "Келесі есеп"}
       >
         <ChevronRightIcon className="size-[18px]" />
-      </button>
-
-      <div className="mx-0.5 h-6 w-px shrink-0 bg-[#d8dde5]" />
-
-      {extraControls}
-
-      <button
-        type="button"
-        onClick={onToggleFullscreen}
-        className={cn(
-          iconButton,
-          isFullscreen &&
-            "border-[#2563eb] bg-[#2563eb] text-white enabled:hover:text-white",
-        )}
-        aria-label={lang === "ru" ? "Полный экран" : "Толық экран"}
-      >
-        {isFullscreen ? (
-          <Minimize2Icon className="size-4" />
-        ) : (
-          <Maximize2Icon className="size-4" />
-        )}
       </button>
     </div>
   );

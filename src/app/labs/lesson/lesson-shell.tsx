@@ -15,12 +15,18 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
-import { ArrowLeftIcon, ListChecksIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ListChecksIcon,
+  Maximize2Icon,
+  Minimize2Icon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n/context";
 import { LanguageToggle } from "@/components/language-toggle";
 import { LessonNavigator } from "@/components/lesson/lesson-navigator";
 import { ProblemPicker } from "@/components/lesson/problem-picker";
+import { TheoryChromeProvider } from "@/components/lesson/theory-chrome";
 import {
   SolveModeTabs,
   useSolveMode,
@@ -88,7 +94,11 @@ export function LessonShell({
   const [appliedIds, setAppliedIds] = useState<string[] | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  // Which section (if any) is blown up to fill the screen. Theory and
+  // problems each get their own fullscreen toggle; only one at a time.
+  const [fullscreen, setFullscreen] = useState<SectionId | null>(null);
+  const isTheoryFull = fullscreen === "theory";
+  const isProblemsFull = fullscreen === "problems";
   const [activeSection, setActiveSection] = useState<SectionId>("theory");
   const theoryRef = useRef<HTMLElement>(null);
   const problemsRef = useRef<HTMLElement>(null);
@@ -138,23 +148,23 @@ export function LessonShell({
   // lock left the page stuck unscrollable after fullscreen → bank → exit
   // fullscreen → close bank).
   useEffect(() => {
-    if (!isFullscreen) return;
+    if (!fullscreen) return;
     const html = document.documentElement;
     const previous = html.style.overflow;
     html.style.overflow = "hidden";
     return () => {
       html.style.overflow = previous;
     };
-  }, [isFullscreen]);
+  }, [fullscreen]);
 
   useEffect(() => {
-    if (!isFullscreen || pickerOpen) return;
+    if (!fullscreen || pickerOpen) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsFullscreen(false);
+      if (event.key === "Escape") setFullscreen(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isFullscreen, pickerOpen]);
+  }, [fullscreen, pickerOpen]);
 
   useEffect(() => {
     if (!problem || !onActiveProblem) return;
@@ -246,18 +256,33 @@ export function LessonShell({
       </header>
 
       <main className="w-full px-4 py-3">
-        <section
-          ref={theoryRef}
-          className="scroll-mt-[72px] overflow-hidden rounded-xl border-[1.5px] border-[#d8dde5] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+        <TheoryChromeProvider
+          value={{
+            isFullscreen: isTheoryFull,
+            onToggleFullscreen: () =>
+              setFullscreen((s) => (s === "theory" ? null : "theory")),
+            fontIndex: font.index,
+            onFontChange: font.change,
+            lang,
+          }}
         >
-          {theorySlot}
-        </section>
+          <section
+            ref={theoryRef}
+            className={cn(
+              "scroll-mt-[72px] overflow-hidden rounded-xl border-[1.5px] border-[#d8dde5] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
+              isTheoryFull &&
+                "fixed inset-0 z-[100] flex flex-col rounded-none border-0",
+            )}
+          >
+            {theorySlot}
+          </section>
+        </TheoryChromeProvider>
 
         <section
           ref={problemsRef}
           className={cn(
             "mt-4 scroll-mt-[72px] overflow-hidden rounded-xl border-[1.5px] border-[#d8dde5] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
-            isFullscreen &&
+            isProblemsFull &&
               "fixed inset-0 z-[100] mt-0 flex flex-col rounded-none border-0",
           )}
         >
@@ -271,7 +296,7 @@ export function LessonShell({
                 : ""}
             </h2>
             <SolveModeTabs mode={solveMode} onChange={setSolveMode} lang={lang} />
-            <span className="text-xs font-semibold text-[#6b7280]">
+            <span className="hidden text-xs font-semibold text-[#6b7280] sm:block">
               {problems.length} / {bank.length}
             </span>
             <button
@@ -282,9 +307,41 @@ export function LessonShell({
               <ListChecksIcon className="size-4" />
               {t("bank_button")}
             </button>
+            {/* A−/A+ only while fullscreen — the global header (hidden then)
+                carries it otherwise, so no duplicate control in normal view. */}
+            {isProblemsFull && (
+              <FontSizeControl
+                index={font.index}
+                onChange={font.change}
+                lang={lang}
+              />
+            )}
+            <button
+              type="button"
+              onClick={() =>
+                setFullscreen((s) => (s === "problems" ? null : "problems"))
+              }
+              className={cn(
+                "grid size-8 shrink-0 place-items-center rounded-md border-[1.5px] border-[#d8dde5] bg-white text-[#6b7280] transition-colors hover:border-[#2563eb] hover:text-[#2563eb]",
+                isProblemsFull &&
+                  "border-[#2563eb] bg-[#2563eb] text-white hover:text-white",
+              )}
+              aria-label={lang === "ru" ? "Полный экран" : "Толық экран"}
+            >
+              {isProblemsFull ? (
+                <Minimize2Icon className="size-4" />
+              ) : (
+                <Maximize2Icon className="size-4" />
+              )}
+            </button>
           </div>
 
-          {problem && renderProblem(problem, { isFullscreen, lang, solveMode })}
+          {problem &&
+            renderProblem(problem, {
+              isFullscreen: isProblemsFull,
+              lang,
+              solveMode,
+            })}
 
           <LessonNavigator
             problems={problems}
@@ -293,18 +350,7 @@ export function LessonShell({
             // Drag-reorder commits through the same path as the bank picker,
             // so the active problem and the ?q= URL stay in sync.
             onReorder={applySelection}
-            isFullscreen={isFullscreen}
-            onToggleFullscreen={() => setIsFullscreen((value) => !value)}
             lang={lang}
-            extraControls={
-              isFullscreen ? (
-                <FontSizeControl
-                  index={font.index}
-                  onChange={font.change}
-                  lang={lang}
-                />
-              ) : undefined
-            }
           />
         </section>
       </main>

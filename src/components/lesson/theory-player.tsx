@@ -6,7 +6,12 @@
 // (blocks) and uploaded lesson files (bilingual HTML) via PlayerTheory.
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  Maximize2Icon,
+  Minimize2Icon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lang } from "@/lib/i18n/strings";
 import { pickText } from "@/lib/lesson/types";
@@ -18,10 +23,12 @@ import type {
   PlayerTheorySection,
 } from "@/lib/lesson/player-adapter";
 import { ExplainReveal } from "./explain-reveal";
+import { FontSizeControl } from "./font-size-control";
 import { GgbView } from "./ggb-view";
 import { LessonBlocks } from "./blocks";
 import { LessonHtml } from "./lesson-html";
 import { SplitRow } from "./split-row";
+import { useTheoryChrome } from "./theory-chrome";
 import { VisualHost } from "./visual-host";
 
 const WORDS = {
@@ -196,6 +203,8 @@ function TheoryDocPlayer({
   theory: PlayerTheory;
   lang: Lang;
 }) {
+  const chrome = useTheoryChrome();
+  const full = chrome?.isFullscreen ?? false;
   const [index, setIndex] = useState(0);
   const bodyRef = useRef<HTMLDivElement>(null);
   const total = theory.sections.length;
@@ -210,7 +219,7 @@ function TheoryDocPlayer({
   const goNext = () => setIndex((i) => Math.min(total - 1, i + 1));
 
   return (
-    <div>
+    <div className={cn("flex flex-col", full && "min-h-0 flex-1")}>
       <div className="flex min-h-12 flex-wrap items-center gap-3 border-b-[1.5px] border-[#d8dde5] px-[18px] py-[10px]">
         <span className="inline-flex items-center rounded bg-[#ecfdf5] px-[9px] py-[3px] text-[10.5px] font-bold uppercase tracking-[0.05em] text-[#16a34a]">
           {WORDS.badge[lang] ?? WORDS.badge.kz}
@@ -218,9 +227,42 @@ function TheoryDocPlayer({
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-[#1a1a2e]">
           {pickText(theory.title, lang)}
         </h2>
+        {/* A−/A+ only while fullscreen — the global header (hidden then)
+            carries it otherwise, so no duplicate control in normal view. */}
+        {chrome && full && (
+          <FontSizeControl
+            index={chrome.fontIndex}
+            onChange={chrome.onFontChange}
+            lang={lang}
+          />
+        )}
+        {chrome && (
+          <button
+            type="button"
+            onClick={chrome.onToggleFullscreen}
+            className={cn(
+              "grid size-8 shrink-0 place-items-center rounded-md border-[1.5px] border-[#d8dde5] bg-white text-[#6b7280] transition-colors hover:border-[#16a34a] hover:text-[#16a34a]",
+              full &&
+                "border-[#16a34a] bg-[#16a34a] text-white hover:text-white",
+            )}
+            aria-label={lang === "ru" ? "Полный экран" : "Толық экран"}
+          >
+            {full ? (
+              <Minimize2Icon className="size-4" />
+            ) : (
+              <Maximize2Icon className="size-4" />
+            )}
+          </button>
+        )}
       </div>
 
-      <div ref={bodyRef} className="h-[520px] overflow-y-auto md:h-[580px]">
+      <div
+        ref={bodyRef}
+        className={cn(
+          "overflow-y-auto",
+          full ? "min-h-0 flex-1" : "h-[520px] md:h-[580px]",
+        )}
+      >
         {section && (
           <TheoryDocSection
             key={section.id}
