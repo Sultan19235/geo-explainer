@@ -13,58 +13,63 @@ __LESSON_META__*/
 // File-scoped: lesson files share the page global scope — helpers must not leak.
 (function () {
 
-// №21: C — the midpoint of AB. Case 1: A(4), B(8); case 2: A(3), B(11).
-// Two rays are built stacked; each case gets its own frame.
+// №21 — document-mode: two rays (the two cases), A and B marked; the reveal
+// draws each midpoint C with the equal green half-spans.
 
-// 2D content renders in the 3D view top-down (SetPerspective("G") kills the
-// view in the current web3d build) — so framing uses the 6-arg 3D form.
-function crFrame(g, x0, x1, y0, y1) {
-  // Deterministic top-down camera: jump far off-axis first — a single
-  // near-parallel SetViewDirection keeps the previous azimuth and can leave
-  // the view mirrored/rotated depending on prior state.
-  g.cmd("SetViewDirection((0,-1,0),false)");
-  g.cmd("SetViewDirection((0,-0.001,1),false)");
-  if (g.api && g.api.setCoordSystem) g.api.setCoordSystem(x0, x1, y0, y1, -5, 5);
+var NS = "http://www.w3.org/2000/svg";
+var DARK = "#1a1a2e", GRAY = "#6b7280", BLUE = "#2563eb", GREEN = "#16a34a", RED = "#dc2626";
+
+function el(tag, attrs, parent) {
+  var node = document.createElementNS(NS, tag);
+  for (var key in attrs) node.setAttribute(key, attrs[key]);
+  if (parent) parent.appendChild(node);
+  return node;
 }
-function crRay(g, id, maxV, yo, o) {
+function txt(parent, x, y, s, o) {
   o = o || {};
-  var st = o.step || 1, tick = o.tick || 0.18, big = o.big || 0;
-  var lo = o.labelOff || 0.7, lx = o.lx || 0.1, over = o.over || 1;
-  var names = [id + "v"];
-  g.cmd(id + "v=Vector((0," + yo + "),(" + (maxV + over) + "," + yo + "))");
-  g.col(id + "v", g.DARK); g.thick(id + "v", 3); g.labelOff(id + "v"); g.lock(id + "v");
-  for (var k = 0; k <= maxV; k += st) {
-    var h = big && k % big === 0 ? tick * 1.7 : tick;
-    var tn = id + "t" + k;
-    g.cmd(tn + "=Segment((" + k + "," + (yo - h) + "),(" + k + "," + (yo + h) + "))");
-    g.col(tn, g.DARK); g.thick(tn, 2); g.labelOff(tn); g.lock(tn);
-    names.push(tn);
+  var t = el("text", {
+    x: x, y: y, fill: o.fill || DARK,
+    "font-size": o.size || 16, "font-weight": o.weight || 500,
+    "text-anchor": o.anchor || "middle",
+    "font-family": "system-ui, -apple-system, 'Segoe UI', sans-serif"
+  }, parent);
+  t.textContent = s;
+  return t;
+}
+function ray(svg, o) {
+  var X = function (v) { return o.x0 + v * o.unit; };
+  var end = X(o.maxV) + (o.over || 30);
+  el("line", { x1: X(0), y1: o.y, x2: end, y2: o.y, stroke: DARK, "stroke-width": 3, "stroke-linecap": "round" }, svg);
+  el("path", { d: "M" + (end + 12) + " " + o.y + " l-14 -6 v12 z", fill: DARK }, svg);
+  for (var v = 0; v <= o.maxV; v += (o.step || 1)) {
+    var h = o.big && v % o.big === 0 ? (o.tick || 7) * 1.7 : (o.tick || 7);
+    el("line", { x1: X(v), y1: o.y - h, x2: X(v), y2: o.y + h, stroke: DARK, "stroke-width": 2 }, svg);
   }
   (o.labels || []).forEach(function (v) {
-    names.push(crLabel(g, id + "l" + v, String(v), v - lx * String(v).length, yo - lo));
+    txt(svg, X(v), o.y + (o.labelDy || 30), String(v), { size: 15, weight: 600 });
   });
-  return names;
+  txt(svg, X(0) - 10, o.y - 12, "O", { size: 16, weight: 600, anchor: "end" });
+  return X;
 }
-function crLabel(g, n, txt, x, y, color) {
-  g.cmd(n + '=Text("' + txt + '",(' + x + "," + y + "))");
-  g.col(n, color || g.DARK); g.lock(n);
-  return n;
-}
-// Point({…}) forces point semantics — a lowercase name with bare tuple
-// syntax (n=(x,y)) would silently create a VECTOR instead.
-function crPoint(g, n, x, yo, capTxt, color, size) {
-  g.cmd(n + "=Point({" + x + "," + yo + ",0})");
-  g.pointSize(n, size || 5);
-  g.col(n, color || g.BLUE);
-  g.cap(n, capTxt || n);
-  if (capTxt === null) g.labelOff(n);
-  g.lock(n);
-  return n;
-}
-function crSpan(g, n, a, b, y, capTxt, color) {
-  g.cmd(n + "=Segment((" + a + "," + y + "),(" + b + "," + y + "))");
-  g.col(n, color || g.PURPLE); g.thick(n, 4); g.cap(n, capTxt); g.lock(n);
-  return n;
+
+// One case: A and B marked immediately; the hidden group carries C and the
+// equal half-span markers.
+function midCase(svg, y, a, b, half) {
+  var X = ray(svg, { x0: 84, y: y, unit: 56, maxV: 13, labels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] });
+  [[a, "A(" + a + ")"], [b, "B(" + b + ")"]].forEach(function (p) {
+    el("circle", { cx: X(p[0]), cy: y, r: 6, fill: BLUE }, svg);
+    txt(svg, X(p[0]), y - 22, p[1], { size: 15, weight: 700, fill: BLUE });
+  });
+  var c = (a + b) / 2;
+  var hidden = el("g", {}, svg);
+  el("circle", { cx: X(c), cy: y, r: 6.5, fill: RED }, hidden);
+  txt(hidden, X(c), y - 46, "C(" + c + ")", { size: 15, weight: 700, fill: RED });
+  [[a, c], [c, b]].forEach(function (s) {
+    el("line", { x1: X(s[0]) + 8, y1: y + 24, x2: X(s[1]) - 8, y2: y + 24, stroke: GREEN, "stroke-width": 4, "stroke-linecap": "round" }, hidden);
+    txt(hidden, (X(s[0]) + X(s[1])) / 2, y + 48, String(half), { size: 14, weight: 700, fill: GREEN });
+  });
+  hidden.style.display = "none";
+  return hidden;
 }
 
 registerLessonProblem({
@@ -80,89 +85,32 @@ registerLessonProblem({
     ru: "<p>Начертите координатный луч, у которого единичный отрезок равен длине 2 клеток тетради. Отметьте точки: 1) \\(A(4)\\) и \\(B(8)\\); 2) \\(A(3)\\) и \\(B(11)\\), и <b class=\"lf-find\">запишите точку \\(C\\) — середину отрезка \\(AB\\) — с её координатой</b>.</p>",
   },
 
-  init(g) {
-    crFrame(g, -1.8, 14.6, -8.2, 8.2);
-    // Case 1 ray at y = 0.
-    var r1 = crRay(g, "a", 13, 0, { tick: 0.2, labelOff: 0.85, lx: 0.12, over: 1.2, labels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] });
-    r1.push(crLabel(g, "alo", "O", -0.16, 1.05));
-    g.hide(r1);
-    g.hide(
-      crPoint(g, "aA", 4, 0, "A(4)", g.BLUE),
-      crPoint(g, "aB", 8, 0, "B(8)", g.BLUE),
-      crPoint(g, "aC", 6, 0, "C = ?", g.RED, 6),
-      crSpan(g, "aAC", 4, 6, -2, "2", g.GREEN),
-      crSpan(g, "aCB", 6, 8, -2, "2", g.GREEN),
-    );
-    // Case 2 ray far below at y = -24 (framed separately in its step).
-    var r2 = crRay(g, "b", 13, -24, { tick: 0.2, labelOff: 0.85, lx: 0.12, over: 1.2, labels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] });
-    r2.push(crLabel(g, "blo", "O", -0.16, -22.95));
-    g.hide(r2);
-    g.hide(
-      crPoint(g, "bA", 3, -24, "A(3)", g.BLUE),
-      crPoint(g, "bB", 11, -24, "B(11)", g.BLUE),
-      crPoint(g, "bC", 7, -24, "C = ?", g.RED, 6),
-      crSpan(g, "bAC", 3, 7, -26, "4", g.GREEN),
-      crSpan(g, "bCB", 7, 11, -26, "4", g.GREEN),
-    );
+  visual(root) {
+    var svg = el("svg", { viewBox: "0 0 880 420", style: "width:100%;height:auto;display:block" });
+    root.appendChild(svg);
+    txt(svg, 26, 96, "1)", { size: 17, weight: 700, fill: GRAY, anchor: "start" });
+    var h1 = midCase(svg, 90, 4, 8, 2);
+    txt(svg, 26, 296, "2)", { size: 17, weight: 700, fill: GRAY, anchor: "start" });
+    var h2 = midCase(svg, 290, 3, 11, 4);
+
+    var answered = false;
+    return {
+      showAnswers: function () {
+        if (answered) return;
+        answered = true;
+        h1.style.display = "";
+        h2.style.display = "";
+      },
+    };
   },
 
-  steps: [
-    {
-      title: { kz: "Шарты", ru: "Условие" },
-      html: {
-        kz: "<div class=\"lf-given\"><p><b>Берілгені:</b> 1) \\(A(4),\\; B(8)\\); &nbsp; 2) \\(A(3),\\; B(11)\\).</p><p><b>Табу керек:</b> <b class=\"lf-find\">\\(C = \\,?\\)</b> — \\(AB\\)-ның қақ ортасы (әр жағдайда).</p></div>",
-        ru: "<div class=\"lf-given\"><p><b>Дано:</b> 1) \\(A(4),\\; B(8)\\); &nbsp; 2) \\(A(3),\\; B(11)\\).</p><p><b>Найти:</b> <b class=\"lf-find\">\\(C = \\,?\\)</b> — середину \\(AB\\) (в каждом случае).</p></div>",
-      },
-    },
-    {
-      title: { kz: "Сурет", ru: "Чертёж" },
-      html: {
-        kz: "<p>Сәуле сызып, \\(A(4)\\) мен \\(B(8)\\) нүктелерін белгілейміз. Ізделінді \\(C\\) нүктесі — \\(A\\) мен \\(B\\)-ның дәл ортасында.</p>",
-        ru: "<p>Чертим луч и отмечаем точки \\(A(4)\\) и \\(B(8)\\). Искомая точка \\(C\\) — ровно посередине между \\(A\\) и \\(B\\).</p>",
-      },
-      run(g) {
-        g.show("av", "alo", "aA", "aB", "aC");
-        for (var k = 0; k <= 13; k++) g.show("at" + k, "al" + k);
-      },
-    },
-    {
-      title: { kz: "Теория", ru: "Теория" },
-      html: {
-        kz: "<p>\\(C\\) — \\(AB\\)-ның қақ ортасы болса, \\(AC = CB\\). Ортаның координатасы — шеткі координаталардың қосындысының жартысы:</p><div class=\"lf-formula\">\\[ c = (a + b) : 2 \\]<div class=\"lf-formula-label\">Кесінді ортасының координатасы</div></div>",
-        ru: "<p>Если \\(C\\) — середина \\(AB\\), то \\(AC = CB\\). Координата середины — половина суммы крайних координат:</p><div class=\"lf-formula\">\\[ c = (a + b) : 2 \\]<div class=\"lf-formula-label\">Координата середины отрезка</div></div>",
-      },
-    },
-    {
-      title: { kz: "1-қадам · Бірінші жағдай", ru: "Шаг 1 · Первый случай" },
-      html: {
-        kz: "<p>Формуланы қолданамыз:</p>\\[ c = (a + b) : 2 \\]\\[ c = (4 + 8) : 2 = 12 : 2 = 6 \\]<p>Тексеру: \\(AC = 6 - 4 = 2\\), \\(CB = 8 - 6 = 2\\) — тең. ✓</p><div class=\"lf-answer\">1) \\(C(6)\\)</div>",
-        ru: "<p>Применяем формулу:</p>\\[ c = (a + b) : 2 \\]\\[ c = (4 + 8) : 2 = 12 : 2 = 6 \\]<p>Проверка: \\(AC = 6 - 4 = 2\\), \\(CB = 8 - 6 = 2\\) — равны. ✓</p><div class=\"lf-answer\">1) \\(C(6)\\)</div>",
-      },
-      run(g) {
-        g.cap("aC", "C(6)");
-        g.show("aAC", "aCB");
-      },
-    },
-    {
-      title: { kz: "2-қадам · Екінші жағдай", ru: "Шаг 2 · Второй случай" },
-      html: {
-        kz: "<p>Енді \\(A(3)\\) және \\(B(11)\\):</p>\\[ c = (3 + 11) : 2 = 14 : 2 = 7 \\]<p>Тексеру: \\(AC = 7 - 3 = 4\\), \\(CB = 11 - 7 = 4\\) — тең. ✓</p><div class=\"lf-answer\">2) \\(C(7)\\)</div>",
-        ru: "<p>Теперь \\(A(3)\\) и \\(B(11)\\):</p>\\[ c = (3 + 11) : 2 = 14 : 2 = 7 \\]<p>Проверка: \\(AC = 7 - 3 = 4\\), \\(CB = 11 - 7 = 4\\) — равны. ✓</p><div class=\"lf-answer\">2) \\(C(7)\\)</div>",
-      },
-      run(g) {
-        crFrame(g, -1.8, 14.6, -32.2, -15.8);
-        g.show("bv", "blo", "bA", "bB", "bC", "bAC", "bCB");
-        for (var k = 0; k <= 13; k++) g.show("bt" + k, "bl" + k);
-        g.cap("bC", "C(7)");
-      },
-    },
-    {
-      title: { kz: "Жауабы", ru: "Ответ" },
-      html: {
-        kz: "<div class=\"lf-answer\">1) \\(C(6)\\); &nbsp; 2) \\(C(7)\\).</div><div class=\"lf-callout\">Қақ орта — шеткі екі санның «дәл ортасындағы» сан: одан \\(A\\)-ға дейін де, \\(B\\)-ға дейін де бірдей қашықтық.</div>",
-        ru: "<div class=\"lf-answer\">1) \\(C(6)\\); &nbsp; 2) \\(C(7)\\).</div><div class=\"lf-callout\">Середина — число «ровно посередине» между крайними: от него одинаковое расстояние и до \\(A\\), и до \\(B\\).</div>",
-      },
-    },
-  ],
+  explanation: {
+    kz: "<div class=\"lf-given\"><p><b>Берілгені:</b> 1) \\(A(4),\\; B(8)\\); &nbsp; 2) \\(A(3),\\; B(11)\\).</p><p><b>Табу керек:</b> \\(C = \\,?\\) — \\(AB\\)-ның қақ ортасы (әр жағдайда).</p></div><p>\\(C\\) — \\(AB\\)-ның қақ ортасы болса, \\(AC = CB\\). Ортаның координатасы — шеткі координаталардың қосындысының жартысы:</p><div class=\"lf-formula\">\\[ c = (a + b) : 2 \\]<div class=\"lf-formula-label\">Кесінді ортасының координатасы</div></div><p><b>1)</b> \\(c = (4 + 8) : 2 = 12 : 2 = 6\\). Тексеру: \\(AC = 6 - 4 = 2\\), \\(CB = 8 - 6 = 2\\) — тең. ✓</p><p><b>2)</b> \\(c = (3 + 11) : 2 = 14 : 2 = 7\\). Тексеру: \\(AC = 7 - 3 = 4\\), \\(CB = 11 - 7 = 4\\) — тең. ✓</p><div class=\"lf-answer\">1) \\(C(6)\\); &nbsp; 2) \\(C(7)\\).</div><div class=\"lf-callout\">Қақ орта — шеткі екі санның «дәл ортасындағы» сан: одан \\(A\\)-ға дейін де, \\(B\\)-ға дейін де бірдей қашықтық.</div>",
+    ru: "<div class=\"lf-given\"><p><b>Дано:</b> 1) \\(A(4),\\; B(8)\\); &nbsp; 2) \\(A(3),\\; B(11)\\).</p><p><b>Найти:</b> \\(C = \\,?\\) — середину \\(AB\\) (в каждом случае).</p></div><p>Если \\(C\\) — середина \\(AB\\), то \\(AC = CB\\). Координата середины — половина суммы крайних координат:</p><div class=\"lf-formula\">\\[ c = (a + b) : 2 \\]<div class=\"lf-formula-label\">Координата середины отрезка</div></div><p><b>1)</b> \\(c = (4 + 8) : 2 = 12 : 2 = 6\\). Проверка: \\(AC = 6 - 4 = 2\\), \\(CB = 8 - 6 = 2\\) — равны. ✓</p><p><b>2)</b> \\(c = (3 + 11) : 2 = 14 : 2 = 7\\). Проверка: \\(AC = 7 - 3 = 4\\), \\(CB = 11 - 7 = 4\\) — равны. ✓</p><div class=\"lf-answer\">1) \\(C(6)\\); &nbsp; 2) \\(C(7)\\).</div><div class=\"lf-callout\">Середина — число «ровно посередине» между крайними: от него одинаковое расстояние и до \\(A\\), и до \\(B\\).</div>",
+  },
+
+  wireExplanation(root, ctx) {
+    if (ctx.visual && typeof ctx.visual.showAnswers === "function") ctx.visual.showAnswers();
+  },
 });
 })();

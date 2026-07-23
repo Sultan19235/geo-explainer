@@ -12,10 +12,12 @@ import type { Lang } from "@/lib/i18n/strings";
 import { pickText } from "@/lib/lesson/types";
 import type {
   LessonVisualFn,
+  LessonVisualHandle,
   PlayerGgbSource,
   PlayerTheory,
   PlayerTheorySection,
 } from "@/lib/lesson/player-adapter";
+import { ExplainReveal } from "./explain-reveal";
 import { GgbView } from "./ggb-view";
 import { LessonBlocks } from "./blocks";
 import { LessonHtml } from "./lesson-html";
@@ -127,7 +129,109 @@ function SectionText({
   );
 }
 
+// ─── Document layout: sections stacked as one vertical page ─────────────────
+// Word-problem theories (no GeoGebra anywhere): each section = title + text
+// full-width, plain-JS visual below, optional hidden part (answers/solution)
+// behind a teacher-revealed button — the same feel as document-mode problems.
+
+function TheoryDocSection({
+  section,
+  index,
+  lang,
+}: {
+  section: PlayerTheorySection;
+  index: number;
+  lang: Lang;
+}) {
+  const handleRef = useRef<LessonVisualHandle | undefined>(undefined);
+  const bodyText = "text-[length:calc(17px*var(--lesson-scale,1))]";
+
+  return (
+    <section className="border-b-[1.5px] border-[#d8dde5] px-5 py-6 last:border-b-0 md:px-7">
+      <div className="mx-auto w-full max-w-4xl">
+        <div className="flex items-center gap-2.5 border-b-2 border-[#16a34a] pb-2">
+          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[#16a34a] text-[12px] font-bold text-white">
+            {index + 1}
+          </span>
+          <h3 className={cn(bodyText, "font-bold text-[#15803d]")}>
+            {pickText(section.title, lang)}
+          </h3>
+        </div>
+        {section.html && (
+          <div className="mt-3.5">
+            <LessonHtml html={section.html} lang={lang} className={bodyText} />
+          </div>
+        )}
+        {section.visual && (
+          <VisualHost
+            visual={section.visual}
+            lang={lang}
+            onHandle={(handle) => {
+              handleRef.current = handle;
+            }}
+            className="mt-4"
+          />
+        )}
+        {section.doc && (
+          <div className="mt-4">
+            <ExplainReveal
+              doc={section.doc}
+              lang={lang}
+              handleRef={handleRef}
+              bodyText={bodyText}
+            />
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function TheoryDocPlayer({
+  theory,
+  lang,
+}: {
+  theory: PlayerTheory;
+  lang: Lang;
+}) {
+  return (
+    <div>
+      <div className="flex min-h-12 flex-wrap items-center gap-3 border-b-[1.5px] border-[#d8dde5] px-[18px] py-[10px]">
+        <span className="inline-flex items-center rounded bg-[#ecfdf5] px-[9px] py-[3px] text-[10.5px] font-bold uppercase tracking-[0.05em] text-[#16a34a]">
+          {WORDS.badge[lang] ?? WORDS.badge.kz}
+        </span>
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-[#1a1a2e]">
+          {pickText(theory.title, lang)}
+        </h2>
+      </div>
+      {theory.sections.map((section, index) => (
+        <TheoryDocSection
+          key={section.id}
+          section={section}
+          index={index}
+          lang={lang}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── Slide layout: split present/scroll player (GeoGebra topics, packs) ─────
+
 export function TheoryPlayer({
+  theory,
+  lang,
+}: {
+  theory: PlayerTheory;
+  lang: Lang;
+}) {
+  if (theory.layout === "doc") {
+    return <TheoryDocPlayer theory={theory} lang={lang} />;
+  }
+  return <TheorySlidesPlayer theory={theory} lang={lang} />;
+}
+
+function TheorySlidesPlayer({
   theory,
   lang,
 }: {

@@ -94,6 +94,8 @@ export type LessonProblemDef = {
     root: HTMLElement,
     ctx: LessonVisualContext & { visual?: LessonVisualHandle },
   ) => void;
+  // Custom reveal-button label (default «Түсіндіруді көрсету»).
+  explanationLabel?: { kz: string; ru?: string };
 };
 
 export type LessonTheorySection = {
@@ -106,9 +108,20 @@ export type LessonTheorySection = {
   // Builds this section's model on a clean construction (optional — text-only
   // sections render full-width).
   ggb?: (g: LessonToolkit) => void;
-  // Plain-JS visual in the model pane instead of a GeoGebra build (wins over
-  // ggb when both are present).
+  // Plain-JS visual instead of a GeoGebra build (wins over ggb when both are
+  // present). A theory file with NO ggb section renders as one vertical
+  // document — text on top, visual below, per section — instead of slides.
   visual?: LessonVisualFn;
+  // Optional hidden part (answers to the section's questions, the worked
+  // solution…), revealed by the teacher — same contract as problem
+  // explanation. Document-layout theories only.
+  explanation?: { kz: string; ru?: string };
+  wireExplanation?: (
+    root: HTMLElement,
+    ctx: LessonVisualContext & { visual?: LessonVisualHandle },
+  ) => void;
+  // Custom reveal-button label, e.g. «Жауаптарын көрсету».
+  explanationLabel?: { kz: string; ru?: string };
 };
 
 export type LessonTheoryDef = {

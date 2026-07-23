@@ -29,6 +29,8 @@ export type PlayerDoc = {
     root: HTMLElement,
     ctx: LessonVisualContext & { visual?: LessonVisualHandle },
   ) => void;
+  // Custom reveal-button label (default «Түсіндіруді көрсету»).
+  label?: { kz: string; ru?: string };
 };
 
 // What the bank drawer and the navigator need to know about a problem —
@@ -73,6 +75,8 @@ export type PlayerTheorySection = {
   ggb?: PlayerGgbSource;
   // Plain-JS visual in the model pane (wins over ggb).
   visual?: LessonVisualFn;
+  // Hidden-until-revealed part (document layout only).
+  doc?: PlayerDoc;
   sceneStep: number;
 };
 
@@ -80,6 +84,9 @@ export type PlayerTheory = {
   title: Localized;
   subtitle?: Localized;
   params?: Params;
+  // "doc" = one vertical document (text → visual → hidden part per section);
+  // "slides" = the split present/scroll player (GeoGebra topics, packs).
+  layout: "slides" | "doc";
   sections: PlayerTheorySection[];
 };
 
@@ -110,6 +117,7 @@ export function packToPlayerTheory(pack: TheoryPack): PlayerTheory {
     title: pack.title,
     subtitle: pack.subtitle,
     params: pack.params,
+    layout: "slides",
     sections: pack.sections.map((section) => ({
       id: section.id,
       title: section.title,
@@ -139,6 +147,7 @@ export function fileToPlayerProblem(
         visual: def.visual,
         explanation: def.explanation,
         wire: def.wireExplanation,
+        label: def.explanationLabel,
       }
     : undefined;
   return {
@@ -183,6 +192,13 @@ export function fileToPlayerTheory(defs: LessonTheoryDef[]): PlayerTheory | null
         title: section.title,
         html: section.html,
         visual: section.visual,
+        doc: section.explanation
+          ? {
+              explanation: section.explanation,
+              wire: section.wireExplanation,
+              label: section.explanationLabel,
+            }
+          : undefined,
         ggb: !section.visual && section.ggb
           ? {
               kind: "program",
@@ -204,6 +220,9 @@ export function fileToPlayerTheory(defs: LessonTheoryDef[]): PlayerTheory | null
   return {
     title: defs[0].title,
     subtitle: defs[0].subtitle,
+    // No GGB section anywhere → the word-problem document layout; any GGB
+    // section keeps the split slide player (geometry theories).
+    layout: sections.some((section) => section.ggb) ? "slides" : "doc",
     sections,
   };
 }

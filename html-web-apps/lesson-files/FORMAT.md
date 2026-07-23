@@ -162,9 +162,19 @@ Rules of thumb:
   explanation needs staging, stage it inside your own HTML/JS — the player
   contract stays one reveal button.
 - A visual that starts timers **must** return `destroy()`.
-- Theory sections may use the same mechanism: give a section `visual(root,
-  ctx)` instead of `ggb(g)` — it renders in the model pane, and a theory
-  file whose sections all use `visual`/text never loads GeoGebra.
+- `explanationLabel: { kz, ru }` renames the reveal button (default
+  «Түсіндіруді көрсету») — e.g. «Жауаптарын көрсету» for question sets.
+
+**Document-layout theory.** A theory file with **no `ggb` section anywhere**
+renders as the same kind of vertical page: every section = numbered title +
+`html` text full-width + optional `visual(root, ctx)` below + optional
+hidden part. Sections accept the same trio as problems — `explanation`,
+`wireExplanation`, `explanationLabel` — so «Сұрақтар» sections keep their
+answers hidden until the teacher reveals them (and the reveal can annotate
+the section's own figure via the visual's handle). Any section with `ggb`
+keeps the whole file on the split slide player (geometry theories).
+Reference: `5-1-2/theory.js` — static scenes, an animated chase with a
+replay button in its hidden part, and two question sections.
 
 ## 2. The toolkit `g`
 

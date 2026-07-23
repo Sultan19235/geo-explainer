@@ -19,8 +19,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ChevronUpIcon,
-  EyeIcon,
-  EyeOffIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lang } from "@/lib/i18n/strings";
@@ -31,6 +29,7 @@ import type {
   PlayerProblem,
 } from "@/lib/lesson/player-adapter";
 import { BoardCanvas } from "./board-canvas";
+import { ExplainReveal } from "./explain-reveal";
 import { GgbView } from "./ggb-view";
 import { LessonBlocks } from "./blocks";
 import { LessonHtml } from "./lesson-html";
@@ -42,8 +41,6 @@ const WORDS = {
   step: { kz: "қадам", ru: "шаг" },
   prev: { kz: "Алдыңғы", ru: "Назад" },
   next: { kz: "Келесі", ru: "Далее" },
-  explain: { kz: "Түсіндіруді көрсету", ru: "Показать объяснение" },
-  hideExplain: { kz: "Түсіндіруді жасыру", ru: "Скрыть объяснение" },
 } as const;
 
 // Compact mode keeps only the math-bearing content; prose is the teacher's
@@ -82,25 +79,9 @@ function DocProblemPlayer({
   mode = "full",
   className,
 }: ProblemPlayerProps & { doc: PlayerDoc }) {
-  const [explainOpen, setExplainOpen] = useState(false);
   const handleRef = useRef<LessonVisualHandle | undefined>(undefined);
-  const explainRef = useRef<HTMLDivElement>(null);
   const isBoard = mode === "board";
   const bodyText = "text-[length:calc(17px*var(--lesson-scale,1))]";
-
-  // Wire explanation interactivity once its HTML is in the DOM; re-wire on
-  // language switch (LessonHtml swaps the innerHTML) and when the visual
-  // re-mounts under the new language.
-  useEffect(() => {
-    if (!explainOpen || !doc.wire) return;
-    const root = explainRef.current;
-    if (!root) return;
-    try {
-      doc.wire(root, { lang, visual: handleRef.current });
-    } catch (error) {
-      console.error("lesson explanation wiring failed", error);
-    }
-  }, [explainOpen, lang, doc]);
 
   const statementNode = problem.statementHtml ? (
     <div className="shrink-0 border-b-[1.5px] border-[#d8dde5] bg-[#fbfcfe] px-5 py-4 md:px-7">
@@ -142,38 +123,12 @@ function DocProblemPlayer({
 
       <div className="px-5 py-5 md:px-7">
         <div className="mx-auto w-full max-w-4xl">
-          {!explainOpen ? (
-            <div className="flex justify-center py-2">
-              <button
-                type="button"
-                onClick={() => setExplainOpen(true)}
-                className="flex h-11 items-center gap-2 rounded-lg bg-[#2563eb] px-6 text-[14px] font-semibold text-white shadow-sm transition-colors hover:bg-[#1d4ed8]"
-              >
-                <EyeIcon className="size-4" />
-                {WORDS.explain[lang] ?? WORDS.explain.kz}
-              </button>
-            </div>
-          ) : (
-            <>
-              <div ref={explainRef}>
-                <LessonHtml
-                  html={doc.explanation}
-                  lang={lang}
-                  className={bodyText}
-                />
-              </div>
-              <div className="mt-4 flex justify-center">
-                <button
-                  type="button"
-                  onClick={() => setExplainOpen(false)}
-                  className="flex h-8 items-center gap-1.5 rounded-md bg-[#eef1f5] px-3.5 text-[12.5px] font-semibold text-[#6b7280] transition-colors hover:bg-[#e2e6ec] hover:text-[#1a1a2e]"
-                >
-                  <EyeOffIcon className="size-4" />
-                  {WORDS.hideExplain[lang] ?? WORDS.hideExplain.kz}
-                </button>
-              </div>
-            </>
-          )}
+          <ExplainReveal
+            doc={doc}
+            lang={lang}
+            handleRef={handleRef}
+            bodyText={bodyText}
+          />
         </div>
       </div>
     </div>

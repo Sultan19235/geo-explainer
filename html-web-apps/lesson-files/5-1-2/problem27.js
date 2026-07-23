@@ -13,49 +13,30 @@ __LESSON_META__*/
 // File-scoped: lesson files share the page global scope — helpers must not leak.
 (function () {
 
-// №27: three coordinate rays from O (Astana), unit = 60 km. Read off the
-// unit counts for Kostanay (11), Pavlodar (7), Zhezkazgan (10) → distances.
+// №27 — document-mode: a map-like static figure — three coordinate rays out
+// of Astana (unit = 60 km) with the cities at 11, 7 and 10 units. The
+// reveal writes the distance calculation onto each city.
 
-// 2D content renders in the 3D view top-down (SetPerspective("G") kills the
-// view in the current web3d build) — so framing uses the 6-arg 3D form.
-function crFrame(g, x0, x1, y0, y1) {
-  // Deterministic top-down camera: jump far off-axis first — a single
-  // near-parallel SetViewDirection keeps the previous azimuth and can leave
-  // the view mirrored/rotated depending on prior state.
-  g.cmd("SetViewDirection((0,-1,0),false)");
-  g.cmd("SetViewDirection((0,-0.001,1),false)");
-  if (g.api && g.api.setCoordSystem) g.api.setCoordSystem(x0, x1, y0, y1, -5, 5);
-}
-function crLabel(g, n, txt, x, y, color) {
-  g.cmd(n + '=Text("' + txt + '",(' + x + "," + y + "))");
-  g.col(n, color || g.DARK); g.lock(n);
-  return n;
-}
+var NS = "http://www.w3.org/2000/svg";
+var DARK = "#1a1a2e", GRAY = "#6b7280", BLUE = "#2563eb", GREEN = "#16a34a",
+    ORANGE = "#ea580c", PURPLE = "#7c3aed", RED = "#dc2626";
 
-// One angled ray from the origin: arrow, 12 perpendicular ticks, name label.
-// Returns all object names.
-function cityRay(g, id, angleDeg, labelTxt, labelX, labelY, color) {
-  var a = (angleDeg * Math.PI) / 180;
-  var dx = Math.cos(a), dy = Math.sin(a);
-  var names = [id + "v"];
-  g.cmd(id + "v=Vector((0,0),(" + 13 * dx + "," + 13 * dy + "))");
-  g.col(id + "v", color); g.thick(id + "v", 3); g.labelOff(id + "v"); g.lock(id + "v");
-  for (var k = 1; k <= 12; k++) {
-    var px = k * dx, py = k * dy;
-    var tn = id + "t" + k;
-    g.cmd(tn + "=Segment((" + (px - 0.28 * dy) + "," + (py + 0.28 * dx) + "),(" + (px + 0.28 * dy) + "," + (py - 0.28 * dx) + "))");
-    g.col(tn, color); g.thick(tn, 2); g.labelOff(tn); g.lock(tn);
-    names.push(tn);
-  }
-  names.push(crLabel(g, id + "n", labelTxt, labelX, labelY, color));
-  return names;
+function el(tag, attrs, parent) {
+  var node = document.createElementNS(NS, tag);
+  for (var key in attrs) node.setAttribute(key, attrs[key]);
+  if (parent) parent.appendChild(node);
+  return node;
 }
-
-function cityPoint(g, n, angleDeg, u, color) {
-  var a = (angleDeg * Math.PI) / 180;
-  g.cmd(n + "=Point({" + u * Math.cos(a) + "," + u * Math.sin(a) + ",0})");
-  g.pointSize(n, 6); g.col(n, color); g.cap(n, "?"); g.lock(n);
-  return n;
+function txt(parent, x, y, s, o) {
+  o = o || {};
+  var t = el("text", {
+    x: x, y: y, fill: o.fill || DARK,
+    "font-size": o.size || 15, "font-weight": o.weight || 500,
+    "text-anchor": o.anchor || "middle",
+    "font-family": "system-ui, -apple-system, 'Segoe UI', sans-serif"
+  }, parent);
+  t.textContent = s;
+  return t;
 }
 
 registerLessonProblem({
@@ -71,84 +52,71 @@ registerLessonProblem({
     ru: "<p>На рисунке изображены координатные лучи с началом отсчёта в точке \\(O\\) (Астана) и единичным отрезком \\(60\\) км. <b class=\"lf-find\">Найдите (приближённо) расстояния городов Костанай, Павлодар, Жезказган от Астаны.</b></p>",
   },
 
-  init(g) {
-    crFrame(g, -16.5, 15, -18.7, 12.8);
-    var all = [];
-    all = all.concat(cityRay(g, "k", 154, "Қостанай", -14.8, 7.2, g.BLUE));
-    all = all.concat(cityRay(g, "p", 20, "Павлодар", 12.4, 5.6, g.ORANGE));
-    all = all.concat(cityRay(g, "j", 249, "Жезқазған", -7.6, -13.9, g.PURPLE));
-    g.cmd("cO=Point({0,0,0})");
-    g.pointSize("cO", 6); g.col("cO", g.DARK); g.cap("cO", "O (Астана)"); g.lock("cO");
-    all.push("cO");
-    all.push(cityPoint(g, "cK", 154, 11, g.RED));
-    all.push(cityPoint(g, "cP", 20, 7, g.RED));
-    all.push(cityPoint(g, "cJ", 249, 10, g.RED));
-    g.hide(all);
+  visual(root, ctx) {
+    var ru = ctx.lang === "ru";
+    var svg = el("svg", { viewBox: "0 0 880 600", style: "width:100%;height:auto;display:block;max-width:820px;margin:0 auto" });
+    root.appendChild(svg);
+
+    txt(svg, 30, 34, ru ? "1 единичный отрезок = 60 км" : "1 бірлік кесінді = 60 км",
+      { size: 13.5, fill: GRAY, anchor: "start" });
+
+    var cx = 460, cy = 300, unit = 26;
+    function pt(angleDeg, u) {
+      var a = (angleDeg * Math.PI) / 180;
+      return { x: cx + u * unit * Math.cos(a), y: cy - u * unit * Math.sin(a) };
+    }
+
+    // One coordinate ray at an angle: axis line, an arrowhead, a tick per
+    // unit, the city dot at `units` with a "?" caption. Name and answer get
+    // separate offsets so neither sits on the ray.
+    function cityRay(angleDeg, units, name, color, nameDx, nameDy, ansDx, ansDy) {
+      var a = (angleDeg * Math.PI) / 180;
+      var end = pt(angleDeg, units + 1.4);
+      el("line", { x1: cx, y1: cy, x2: end.x, y2: end.y, stroke: color, "stroke-width": 2.5, "stroke-linecap": "round" }, svg);
+      var tip = pt(angleDeg, units + 1.85);
+      el("path", {
+        d: "M" + tip.x + " " + tip.y + " l-13 -5 v10 z",
+        fill: color,
+        transform: "rotate(" + -angleDeg + " " + tip.x + " " + tip.y + ")",
+      }, svg);
+      for (var k = 1; k <= units + 1; k++) {
+        var p = pt(angleDeg, k);
+        var nx = Math.sin(a) * 5, ny = Math.cos(a) * 5;
+        el("line", { x1: p.x - nx, y1: p.y - ny, x2: p.x + nx, y2: p.y + ny, stroke: color, "stroke-width": 1.8 }, svg);
+      }
+      var city = pt(angleDeg, units);
+      el("circle", { cx: city.x, cy: city.y, r: 6.5, fill: RED }, svg);
+      txt(svg, city.x + nameDx, city.y + nameDy, name, { size: 14.5, weight: 700, fill: color });
+      return txt(svg, city.x + ansDx, city.y + ansDy, "?", { size: 14.5, weight: 700, fill: RED });
+    }
+
+    var capK = cityRay(154, 11, ru ? "Костанай" : "Қостанай", BLUE, -10, -34, -58, 34);
+    var capP = cityRay(20, 7, ru ? "Павлодар" : "Павлодар", ORANGE, 46, -24, 56, 32);
+    var capJ = cityRay(249, 10, ru ? "Жезказган" : "Жезқазған", PURPLE, 72, 16, 72, 42);
+
+    el("circle", { cx: cx, cy: cy, r: 6.5, fill: DARK }, svg);
+    txt(svg, cx + 14, cy + 22, "O (Астана)", { size: 14.5, weight: 700, fill: DARK, anchor: "start" });
+
+    var answered = false;
+    return {
+      showAnswers: function () {
+        if (answered) return;
+        answered = true;
+        [[capK, "11 · 60 = 660 км"], [capP, "7 · 60 = 420 км"], [capJ, "10 · 60 = 600 км"]].forEach(function (c) {
+          c[0].textContent = c[1];
+          c[0].setAttribute("fill", GREEN);
+        });
+      },
+    };
   },
 
-  steps: [
-    {
-      title: { kz: "Шарты", ru: "Условие" },
-      html: {
-        kz: "<div class=\"lf-given\"><p><b>Берілгені:</b> санақ басы — \\(O\\) (Астана); бірлік кесінді \\(= 60\\) км; әр қала өз сәулесінде белгіленген.</p><p><b>Табу керек:</b> <b class=\"lf-find\">әр қалаға дейінгі қашықтық \\(= \\,?\\)</b> (км)</p></div>",
-        ru: "<div class=\"lf-given\"><p><b>Дано:</b> начало отсчёта — \\(O\\) (Астана); единичный отрезок \\(= 60\\) км; каждый город отмечен на своём луче.</p><p><b>Найти:</b> <b class=\"lf-find\">расстояние до каждого города \\(= \\,?\\)</b> (км)</p></div>",
-      },
-    },
-    {
-      title: { kz: "Сурет", ru: "Чертёж" },
-      html: {
-        kz: "<p>Астанадан үш бағытта үш координаталық сәуле шығады. Әр сәуленің штрихтарының арасы — бір бірлік кесінді, яғни \\(60\\) км.</p>",
-        ru: "<p>Из Астаны выходят три координатных луча. Расстояние между штрихами каждого луча — один единичный отрезок, то есть \\(60\\) км.</p>",
-      },
-      run(g) {
-        g.show("cO", "kn", "pn", "jn", "kv", "pv", "jv", "cK", "cP", "cJ");
-        for (var k = 1; k <= 12; k++) g.show("kt" + k, "pt" + k, "jt" + k);
-      },
-    },
-    {
-      title: { kz: "Теория", ru: "Теория" },
-      html: {
-        kz: "<div class=\"lf-formula\">\\[ S = n \\cdot e \\]<div class=\"lf-formula-label\">Қашықтық = бірлік саны × бірлік кесіндінің ұзындығы</div></div><p>Қаланың координатасы — \\(O\\)-дан қалаға дейінгі бірлік кесінділердің саны \\(n\\).</p>",
-        ru: "<div class=\"lf-formula\">\\[ S = n \\cdot e \\]<div class=\"lf-formula-label\">Расстояние = число единиц × длина единичного отрезка</div></div><p>Координата города — число единичных отрезков \\(n\\) от \\(O\\) до города.</p>",
-      },
-    },
-    {
-      title: { kz: "1-қадам · Қостанай", ru: "Шаг 1 · Костанай" },
-      html: {
-        kz: "<p>Қостанай сәулесінде штрихтарды санаймыз: 11 бірлік.</p>\\[ S = n \\cdot e \\]\\[ S = 11 \\cdot 60 = 660 \\text{ км} \\]",
-        ru: "<p>Считаем штрихи на луче Костаная: 11 единиц.</p>\\[ S = n \\cdot e \\]\\[ S = 11 \\cdot 60 = 660 \\text{ км} \\]",
-      },
-      run(g) {
-        g.cap("cK", "11 · 60 = 660 км");
-      },
-    },
-    {
-      title: { kz: "2-қадам · Павлодар", ru: "Шаг 2 · Павлодар" },
-      html: {
-        kz: "<p>Павлодар сәулесінде: 7 бірлік.</p>\\[ S = 7 \\cdot 60 = 420 \\text{ км} \\]",
-        ru: "<p>На луче Павлодара: 7 единиц.</p>\\[ S = 7 \\cdot 60 = 420 \\text{ км} \\]",
-      },
-      run(g) {
-        g.cap("cP", "7 · 60 = 420 км");
-      },
-    },
-    {
-      title: { kz: "3-қадам · Жезқазған", ru: "Шаг 3 · Жезказган" },
-      html: {
-        kz: "<p>Жезқазған сәулесінде: 10 бірлік.</p>\\[ S = 10 \\cdot 60 = 600 \\text{ км} \\]",
-        ru: "<p>На луче Жезказгана: 10 единиц.</p>\\[ S = 10 \\cdot 60 = 600 \\text{ км} \\]",
-      },
-      run(g) {
-        g.cap("cJ", "10 · 60 = 600 км");
-      },
-    },
-    {
-      title: { kz: "Жауабы", ru: "Ответ" },
-      html: {
-        kz: "<div class=\"lf-answer\">Астанадан: Қостанай — \\(\\approx 660\\) км, Павлодар — \\(\\approx 420\\) км, Жезқазған — \\(\\approx 600\\) км.</div><div class=\"lf-callout\">Нақты қашықтықтар да осыған жуық: карта бойынша ≈ 660, ≈ 420 және ≈ 600 км.</div>",
-        ru: "<div class=\"lf-answer\">От Астаны: Костанай — \\(\\approx 660\\) км, Павлодар — \\(\\approx 420\\) км, Жезказган — \\(\\approx 600\\) км.</div><div class=\"lf-callout\">Реальные расстояния близки к этим: по карте ≈ 660, ≈ 420 и ≈ 600 км.</div>",
-      },
-    },
-  ],
+  explanation: {
+    kz: "<div class=\"lf-given\"><p><b>Берілгені:</b> санақ басы — \\(O\\) (Астана); бірлік кесінді \\(= 60\\) км; әр қала өз сәулесінде белгіленген.</p><p><b>Табу керек:</b> әр қалаға дейінгі қашықтық \\(= \\,?\\) (км)</p></div><div class=\"lf-formula\">\\[ S = n \\cdot e \\]<div class=\"lf-formula-label\">Қашықтық = бірлік саны × бірлік кесіндінің ұзындығы</div></div><p><b>Қостанай:</b> сәулесінде 11 бірлік — \\(S = 11 \\cdot 60 = 660\\) км.</p><p><b>Павлодар:</b> 7 бірлік — \\(S = 7 \\cdot 60 = 420\\) км.</p><p><b>Жезқазған:</b> 10 бірлік — \\(S = 10 \\cdot 60 = 600\\) км.</p><div class=\"lf-answer\">Астанадан: Қостанай — \\(\\approx 660\\) км, Павлодар — \\(\\approx 420\\) км, Жезқазған — \\(\\approx 600\\) км.</div><div class=\"lf-callout\">Нақты қашықтықтар да осыған жуық: карта бойынша ≈ 660, ≈ 420 және ≈ 600 км.</div>",
+    ru: "<div class=\"lf-given\"><p><b>Дано:</b> начало отсчёта — \\(O\\) (Астана); единичный отрезок \\(= 60\\) км; каждый город отмечен на своём луче.</p><p><b>Найти:</b> расстояние до каждого города \\(= \\,?\\) (км)</p></div><div class=\"lf-formula\">\\[ S = n \\cdot e \\]<div class=\"lf-formula-label\">Расстояние = число единиц × длина единичного отрезка</div></div><p><b>Костанай:</b> на его луче 11 единиц — \\(S = 11 \\cdot 60 = 660\\) км.</p><p><b>Павлодар:</b> 7 единиц — \\(S = 7 \\cdot 60 = 420\\) км.</p><p><b>Жезказган:</b> 10 единиц — \\(S = 10 \\cdot 60 = 600\\) км.</p><div class=\"lf-answer\">От Астаны: Костанай — \\(\\approx 660\\) км, Павлодар — \\(\\approx 420\\) км, Жезказган — \\(\\approx 600\\) км.</div><div class=\"lf-callout\">Реальные расстояния близки к этим: по карте ≈ 660, ≈ 420 и ≈ 600 км.</div>",
+  },
+
+  wireExplanation(root, ctx) {
+    if (ctx.visual && typeof ctx.visual.showAnswers === "function") ctx.visual.showAnswers();
+  },
 });
 })();

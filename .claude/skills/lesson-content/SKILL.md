@@ -44,11 +44,13 @@ also uses it in other Claude environments). Summary of the contract:
 - **Document-mode (word-problem) files**: a def with `explanation` instead
   of `steps` renders as a vertical mini page — statement on top, optional
   plain-JS `visual(root, ctx)` (SVG/HTML, emoji actors, animation), then
-  the explanation hidden until the teacher reveals it; `wireExplanation`
-  connects explanation buttons to the visual's handle. GeoGebra is not
-  loaded for such files. Theory sections may use `visual` instead of `ggb`.
-  Contract: FORMAT.md §1b; examples: `5-1-2/problem19.js`, `problem23.js`,
-  `theory.js` §3. This is the DEFAULT style for grade 5–6 word problems
+  the explanation hidden until the teacher reveals it (`explanationLabel`
+  renames the button); `wireExplanation` connects explanation buttons to
+  the visual's handle. GeoGebra is not loaded for such files. A theory file
+  with NO ggb section renders the same way — stacked sections with per-
+  section visuals and hidden answers (`explanation` on the section).
+  Contract: FORMAT.md §1b; the whole `5-1-2/` folder is the reference set.
+  This is the DEFAULT style for grade 5–6 word problems AND their theory
   (user decision 2026-07-23) — GeoGebra stays for geometry topics.
 - **Steps only run forward**; going back replays init + steps 0..k on a
   clean board. Build everything in `init` hidden, reveal per step.

@@ -75,6 +75,10 @@
   .stepblock .shead { display:flex; align-items:center; gap:9px; border-bottom:2px solid #2563eb; padding-bottom:7px; margin-bottom:10px; }
   .stepblock .snum { width:22px; height:22px; border-radius:50%; background:#2563eb; color:#fff; font-size:11.5px; font-weight:700; display:grid; place-items:center; flex-shrink:0; }
   .stepblock h3 { font-size:1em; color:#2563eb; }
+  /* Document-layout theory sections are green, like the site's theory. */
+  .shead.theory { border-bottom-color:#16a34a; }
+  .shead.theory .snum { background:#16a34a; }
+  .stepblock .shead.theory h3 { color:#15803d; }
   #navbar { display:flex; align-items:center; justify-content:flex-end; gap:14px; border-top:1.5px solid #d8dde5; padding:9px 16px; }
   #navbar .counter { font-size:12.5px; font-weight:600; color:#6b7280; }
   #navbar .btn.primary { background:#2563eb; border-color:#2563eb; color:#fff; }
@@ -260,7 +264,7 @@ function renderFileList() {
 
 // ── activation & steps (mirrors the site player's algorithm) ──
 function activate(i) {
-  activeIdx = i; stepIdx = 0; docOpen = false;
+  activeIdx = i; stepIdx = 0; docOpen = false; docOpenSections = {};
   renderFileList();
   updateStageLayout();
   rebuildModel();
@@ -273,11 +277,17 @@ function isDocProblem(def) {
   return !!def && !isTheory() && !!def.explanation;
 }
 
-// Problems without init (and all document-mode problems) have no figure —
+// Document-layout theory = no ggb section anywhere: sections stack as one
+// vertical page in the text panel (text → visual → hidden part).
+function isDocTheory(def) {
+  return !!def && isTheory() && def.sections.every(function (s) { return !s.ggb; });
+}
+
+// Document-mode content and figure-less problems fill the whole stage —
 // hide the graph panel entirely.
 function updateStageLayout() {
   var def = currentDef();
-  var nofig = !!def && !isTheory() && (def.explanation ? true : !def.init);
+  var nofig = !!def && (isTheory() ? isDocTheory(def) : (def.explanation ? true : !def.init));
   document.getElementById('stage').classList.toggle('nofig', nofig);
   if (!nofig) fitApplet();
 }
@@ -311,27 +321,35 @@ function clearAllObjects() {
   } catch (e) {}
 }
 
-// Plain-JS visual lifecycle (theory sections + document-mode problems): one
-// live handle at a time; destroy() (if returned) runs before every re-mount.
-var visHandle = null;
-function destroyVisHandle() {
-  if (visHandle && typeof visHandle.destroy === 'function') {
-    try { visHandle.destroy(); } catch (e) {}
-  }
-  visHandle = null;
+// Plain-JS visual lifecycle (theory sections + document-mode content).
+// Document-layout theories mount several visuals at once, so handles are a
+// list; destroy() (if returned) runs before every re-mount.
+var visHandles = [];
+function destroyVisHandles() {
+  visHandles.forEach(function (h) {
+    if (h && typeof h.destroy === 'function') { try { h.destroy(); } catch (e) {} }
+  });
+  visHandles = [];
+}
+function mountVisual(fn, el) {
+  var handle = null;
+  try { handle = fn(el, { lang: lang }) || null; } catch (e) { console.error(e); }
+  if (handle) visHandles.push(handle);
+  return handle;
 }
 
 function rebuildModel() {
   var def = currentDef();
   var vh = document.getElementById('visual-holder');
-  destroyVisHandle();
+  destroyVisHandles();
   vh.style.display = 'none';
   vh.innerHTML = '';
-  if (!def || isDocProblem(def)) return; // doc visual mounts in the text panel
+  // Document-mode content mounts its visuals in the text panel instead.
+  if (!def || isDocProblem(def) || isDocTheory(def)) return;
   var section = isTheory() ? def.sections[stepIdx] : null;
   if (section && typeof section.visual === 'function') {
     vh.style.display = 'flex';
-    try { visHandle = section.visual(vh, { lang: lang }) || null; } catch (e) { console.error(e); }
+    mountVisual(section.visual, vh);
     return;
   }
   if (!api || !toolkit) return;
@@ -370,7 +388,7 @@ function resetView() {
 
 function navigate(d) {
   var def = currentDef();
-  if (!def || isDocProblem(def)) return;
+  if (!def || isDocProblem(def) || isDocTheory(def)) return;
   var max = (isTheory() ? def.sections.length : (def.steps || []).length) - 1;
   var next = Math.max(0, Math.min(max, stepIdx + d));
   if (next === stepIdx) return;
@@ -399,7 +417,52 @@ function pick(loc) {
   return (lang === 'ru' ? loc.ru : null) || loc.kz || '';
 }
 
-var docOpen = false; // explanation revealed? (reset per file in activate())
+var docOpen = false;        // problem explanation revealed?
+var docOpenSections = {};   // theory: revealed sections by index
+// (both reset per file in activate(); preserved across a language switch)
+
+// Hidden-until-revealed block, shared by doc problems and doc theory
+// sections. `source` carries explanation/wireExplanation/explanationLabel;
+// `handle` is the section's live visual handle.
+function buildReveal(source, handle, isOpen, setOpen) {
+  var wrap = document.createElement('div');
+  var revealRow = document.createElement('div');
+  revealRow.className = 'doc-reveal-row';
+  var reveal = document.createElement('button');
+  reveal.className = 'doc-reveal';
+  reveal.textContent = pick(source.explanationLabel) ||
+    (lang === 'ru' ? 'Показать объяснение' : 'Түсіндіруді көрсету');
+  revealRow.appendChild(reveal);
+  var body = document.createElement('div');
+  body.innerHTML = pick(source.explanation);
+  body.style.display = 'none';
+  var hide = document.createElement('button');
+  hide.className = 'doc-hide';
+  hide.textContent = lang === 'ru' ? 'Скрыть' : 'Жасыру';
+  hide.style.display = 'none';
+  function openExplain() {
+    setOpen(true);
+    revealRow.style.display = 'none';
+    body.style.display = '';
+    hide.style.display = '';
+    typeset(body);
+    if (typeof source.wireExplanation === 'function') {
+      try { source.wireExplanation(body, { lang: lang, visual: handle || undefined }); } catch (e) { console.error(e); }
+    }
+  }
+  reveal.onclick = openExplain;
+  hide.onclick = function () {
+    setOpen(false);
+    revealRow.style.display = '';
+    body.style.display = 'none';
+    hide.style.display = 'none';
+  };
+  wrap.appendChild(revealRow);
+  wrap.appendChild(body);
+  wrap.appendChild(hide);
+  if (isOpen) openExplain();
+  return wrap;
+}
 
 // Document-mode problem: statement stays in #statement, #steps hosts the
 // visual + the hidden-until-revealed explanation. No navbar.
@@ -410,51 +473,56 @@ function renderDocProblem(def) {
   st.style.display = '';
   st.innerHTML = '<div class="plabel">Есеп' + (def.number ? ' №' + def.number : '') + '</div>' + pick(def.statement);
 
-  destroyVisHandle();
+  destroyVisHandles();
   steps.innerHTML = '';
+  var handle = null;
   if (typeof def.visual === 'function') {
     var vis = document.createElement('div');
     vis.className = 'doc-visual';
     steps.appendChild(vis);
-    try { visHandle = def.visual(vis, { lang: lang }) || null; } catch (e) { console.error(e); }
+    handle = mountVisual(def.visual, vis);
   }
-
-  var body = document.createElement('div');
-  body.innerHTML = pick(def.explanation);
-  body.style.display = 'none';
-  var revealRow = document.createElement('div');
-  revealRow.className = 'doc-reveal-row';
-  var reveal = document.createElement('button');
-  reveal.className = 'doc-reveal';
-  reveal.textContent = lang === 'ru' ? 'Показать объяснение' : 'Түсіндіруді көрсету';
-  revealRow.appendChild(reveal);
-  var hide = document.createElement('button');
-  hide.className = 'doc-hide';
-  hide.textContent = lang === 'ru' ? 'Скрыть объяснение' : 'Түсіндіруді жасыру';
-  hide.style.display = 'none';
-  function openExplain() {
-    docOpen = true;
-    revealRow.style.display = 'none';
-    body.style.display = '';
-    hide.style.display = '';
-    typeset(body);
-    if (typeof def.wireExplanation === 'function') {
-      try { def.wireExplanation(body, { lang: lang, visual: visHandle || undefined }); } catch (e) { console.error(e); }
-    }
-  }
-  reveal.onclick = openExplain;
-  hide.onclick = function () {
-    docOpen = false;
-    revealRow.style.display = '';
-    body.style.display = 'none';
-    hide.style.display = 'none';
-  };
-  steps.appendChild(revealRow);
-  steps.appendChild(body);
-  steps.appendChild(hide);
-  if (docOpen) openExplain(); // keep reveal state across a language switch
+  steps.appendChild(buildReveal(def, handle, docOpen, function (v) { docOpen = v; }));
 
   typeset(st);
+  steps.scrollTop = 0;
+}
+
+// Document-layout theory: all sections stacked as one page — title + text,
+// visual below, optional hidden part per section.
+function renderDocTheory(def) {
+  var st = document.getElementById('statement');
+  var steps = document.getElementById('steps');
+  document.getElementById('navbar').style.display = 'none';
+  st.style.display = 'none';
+
+  destroyVisHandles();
+  steps.innerHTML = '';
+  def.sections.forEach(function (s, i) {
+    var sec = document.createElement('div');
+    sec.className = 'stepblock';
+    var head = document.createElement('div');
+    head.className = 'shead theory';
+    head.innerHTML = '<span class="snum">' + (i + 1) + '</span><h3>' + escapeHtml(pick(s.title)) + '</h3>';
+    sec.appendChild(head);
+    if (s.html) {
+      var body = document.createElement('div');
+      body.innerHTML = pick(s.html);
+      sec.appendChild(body);
+    }
+    var handle = null;
+    if (typeof s.visual === 'function') {
+      var vis = document.createElement('div');
+      vis.className = 'doc-visual';
+      sec.appendChild(vis);
+      handle = mountVisual(s.visual, vis);
+    }
+    if (s.explanation) {
+      sec.appendChild(buildReveal(s, handle, !!docOpenSections[i], function (v) { docOpenSections[i] = v; }));
+    }
+    steps.appendChild(sec);
+  });
+  typeset(steps);
   steps.scrollTop = 0;
 }
 
@@ -470,6 +538,7 @@ function renderText() {
   nav.style.display = '';
 
   if (isDocProblem(def)) { renderDocProblem(def); return; }
+  if (isDocTheory(def)) { renderDocTheory(def); return; }
 
   if (isTheory()) {
     st.style.display = 'none';

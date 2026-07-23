@@ -104,12 +104,17 @@ registerLessonTheory({
   (instead of `steps`) becomes a vertical mini page: full-width statement,
   then an optional `visual(root, ctx)` drawn with plain SVG/HTML/JS (emoji
   actors, animations with their own ▶ button), then the explanation —
-  hidden until the teacher clicks «Түсіндіруді көрсету». `wireExplanation`
-  (with `ctx.visual` = the visual's returned handle) lets the explanation
-  annotate/replay the figure. Full contract + rules: FORMAT.md §1b. Theory
-  sections can likewise swap `ggb(g)` for `visual(root, ctx)`. Reference
-  examples: `5-1-2/problem19.js` (static ray), `5-1-2/problem23.js`
-  (animated scene + replay button), `5-1-2/theory.js` section 3 (chase).
+  hidden until the teacher clicks «Түсіндіруді көрсету» (rename via
+  `explanationLabel`). `wireExplanation` (with `ctx.visual` = the visual's
+  returned handle) lets the explanation annotate/replay the figure. Full
+  contract + rules: FORMAT.md §1b.
+- **Theory the same way**: a theory file with no `ggb` section renders as
+  one vertical document — per section: title + text + `visual(root, ctx)` +
+  optional hidden `explanation` (use it for question sections' answers).
+  Reference examples: `5-1-2/theory.js` (statics, animated chase, hidden
+  answers), `problem19.js` (static ray, reveal annotates), `problem23.js`/
+  `problem24.js` (animated motion + replay), `problem25.js` (hop
+  animation), `problem27.js` (angled-ray map).
 
 ## 3. The toolkit `g` (complete reference)
 
