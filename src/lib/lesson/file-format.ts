@@ -39,6 +39,30 @@ export type LessonFileStep = {
   run?: (g: LessonToolkit) => void;
 };
 
+// ─── Document-mode ("mini-page") problems ───────────────────────────────────
+// A problem can be a self-contained mini page instead of a stepped
+// walkthrough: statement on top (full width), then a plain-JS visual
+// (SVG/HTML/CSS — GeoGebra is neither involved nor loaded), then an
+// explanation that stays hidden until the teacher reveals it. The presence
+// of `explanation` selects this layout; `init`/`steps` are ignored then.
+
+export type LessonVisualContext = { lang: "kz" | "ru" };
+
+// Whatever `visual` returns is passed to wireExplanation and kept for
+// cleanup. A destroy() member (if present) runs before every re-mount —
+// cancel rAF loops and timers there.
+export type LessonVisualHandle = {
+  destroy?: () => void;
+  [key: string]: unknown;
+};
+
+// Draws the figure into `root` (cleared beforehand). Re-invoked on language
+// switch, so all visible text must come from ctx.lang.
+export type LessonVisualFn = (
+  root: HTMLElement,
+  ctx: LessonVisualContext,
+) => LessonVisualHandle | void;
+
 export type LessonProblemDef = {
   format: number;
   id: string;
@@ -57,7 +81,19 @@ export type LessonProblemDef = {
   // Omitting init means the problem has no figure — the player renders the
   // statement and walkthrough full-width (text-first classroom layout).
   init?: (g: LessonToolkit) => void;
-  steps: LessonFileStep[];
+  // Absent on document-mode files (which have `explanation` instead).
+  steps?: LessonFileStep[];
+  // Document-mode fields (see LessonVisualFn above). `explanation` is the
+  // hidden-until-revealed teaching text; `visual` draws the figure with
+  // plain JS; `wireExplanation` runs after the explanation HTML is in the
+  // DOM (ctx.visual = the handle `visual` returned) to hook up buttons that
+  // drive the figure.
+  explanation?: { kz: string; ru?: string };
+  visual?: LessonVisualFn;
+  wireExplanation?: (
+    root: HTMLElement,
+    ctx: LessonVisualContext & { visual?: LessonVisualHandle },
+  ) => void;
 };
 
 export type LessonTheorySection = {
@@ -70,6 +106,9 @@ export type LessonTheorySection = {
   // Builds this section's model on a clean construction (optional — text-only
   // sections render full-width).
   ggb?: (g: LessonToolkit) => void;
+  // Plain-JS visual in the model pane instead of a GeoGebra build (wins over
+  // ggb when both are present).
+  visual?: LessonVisualFn;
 };
 
 export type LessonTheoryDef = {

@@ -47,8 +47,9 @@
 
   #text-panel { flex:1; min-width:0; display:flex; flex-direction:column; background:#fff; border-left:1.5px solid #d8dde5; }
 
-  /* Figure-less problem (def without init): text takes the whole stage,
-     larger classroom type, content centered — mirrors the site player. */
+  /* Figure-less problem (def without init) and document-mode problems: text
+     takes the whole stage, larger classroom type, content centered — mirrors
+     the site player. */
   #stage.nofig #graph-panel, #stage.nofig #resizer { display:none; }
   #stage.nofig #text-panel { border-left:none; }
   #stage.nofig #statement, #stage.nofig #steps {
@@ -56,6 +57,17 @@
     padding-left: max(20px, calc((100% - 900px) / 2));
     padding-right: max(20px, calc((100% - 900px) / 2));
   }
+
+  /* Theory section with a plain-JS visual: rendered over the GGB canvas. */
+  #visual-holder { position:absolute; inset:0; z-index:6; display:none; flex-direction:column; justify-content:center; overflow:auto; background:#fff; padding:16px; }
+
+  /* Document-mode problem (statement → visual → hidden explanation). */
+  .doc-visual { margin:2px 0 6px; }
+  .doc-reveal-row { display:flex; justify-content:center; padding:10px 0 16px; }
+  .doc-reveal { background:#2563eb; border:none; color:#fff; border-radius:8px; padding:11px 24px; font-size:14px; font-weight:600; cursor:pointer; }
+  .doc-reveal:hover { background:#1d4ed8; }
+  .doc-hide { display:block; margin:14px auto 4px; background:#eef1f5; border:none; color:#6b7280; border-radius:6px; padding:7px 14px; font-size:12.5px; font-weight:600; cursor:pointer; }
+  .doc-hide:hover { background:#e2e6ec; color:#1a1a2e; }
   #statement { border-bottom:1.5px solid #d8dde5; background:#fbfcfe; padding:14px 20px; max-height:42%; overflow-y:auto; font-size:var(--exp-font); line-height:1.7; }
   #statement .plabel { display:inline-block; background:#eff6ff; color:#2563eb; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; border-radius:4px; padding:3px 9px; margin-bottom:10px; }
   #steps { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:20px; font-size:var(--exp-font); line-height:1.7; }
@@ -111,6 +123,7 @@
     <div id="graph-panel">
       <div id="ggb-holder"><div id="ggb-element"></div></div>
       <div id="ggb-loading">GeoGebra жүктелуде…</div>
+      <div id="visual-holder"></div>
     </div>
     <div id="resizer"></div>
     <div id="text-panel">
@@ -247,17 +260,24 @@ function renderFileList() {
 
 // ── activation & steps (mirrors the site player's algorithm) ──
 function activate(i) {
-  activeIdx = i; stepIdx = 0;
+  activeIdx = i; stepIdx = 0; docOpen = false;
   renderFileList();
   updateStageLayout();
   rebuildModel();
   renderText();
 }
 
-// Problems without init have no figure — hide the graph panel entirely.
+// Document-mode problem = def with `explanation` (statement → visual →
+// hidden explanation, no steps, no GeoGebra).
+function isDocProblem(def) {
+  return !!def && !isTheory() && !!def.explanation;
+}
+
+// Problems without init (and all document-mode problems) have no figure —
+// hide the graph panel entirely.
 function updateStageLayout() {
   var def = currentDef();
-  var nofig = !!def && !isTheory() && !def.init;
+  var nofig = !!def && !isTheory() && (def.explanation ? true : !def.init);
   document.getElementById('stage').classList.toggle('nofig', nofig);
   if (!nofig) fitApplet();
 }
@@ -267,14 +287,15 @@ function isTheory() { return activeIdx >= 0 && files[activeIdx].kind === 'theory
 
 function modelSpec() {
   var def = currentDef();
-  if (!def) return null;
+  if (!def || isDocProblem(def)) return null;
   if (isTheory()) {
     var s = def.sections[stepIdx] || {};
     return { view: s.view, home: s.home, fit: s.fit, axes: s.axes, init: s.ggb || null, runs: [] };
   }
+  var steps = def.steps || [];
   var runs = [];
   for (var k = 0; k <= stepIdx; k++) {
-    if (def.steps[k] && typeof def.steps[k].run === 'function') runs.push(def.steps[k].run);
+    if (steps[k] && typeof steps[k].run === 'function') runs.push(steps[k].run);
   }
   return { view: def.view, home: def.home, fit: def.fit, axes: def.axes, init: def.init, runs: runs };
 }
@@ -290,7 +311,29 @@ function clearAllObjects() {
   } catch (e) {}
 }
 
+// Plain-JS visual lifecycle (theory sections + document-mode problems): one
+// live handle at a time; destroy() (if returned) runs before every re-mount.
+var visHandle = null;
+function destroyVisHandle() {
+  if (visHandle && typeof visHandle.destroy === 'function') {
+    try { visHandle.destroy(); } catch (e) {}
+  }
+  visHandle = null;
+}
+
 function rebuildModel() {
+  var def = currentDef();
+  var vh = document.getElementById('visual-holder');
+  destroyVisHandle();
+  vh.style.display = 'none';
+  vh.innerHTML = '';
+  if (!def || isDocProblem(def)) return; // doc visual mounts in the text panel
+  var section = isTheory() ? def.sections[stepIdx] : null;
+  if (section && typeof section.visual === 'function') {
+    vh.style.display = 'flex';
+    try { visHandle = section.visual(vh, { lang: lang }) || null; } catch (e) { console.error(e); }
+    return;
+  }
   if (!api || !toolkit) return;
   var spec = modelSpec();
   if (!spec) return;
@@ -307,8 +350,8 @@ function rebuildModel() {
 // Forward one step: just run the new step (no rebuild) — same as the site.
 function advanceModel() {
   var def = currentDef();
-  if (!def || isTheory() || !api) return;
-  var step = def.steps[stepIdx];
+  if (!def || isTheory() || isDocProblem(def) || !api) return;
+  var step = (def.steps || [])[stepIdx];
   if (step && typeof step.run === 'function') {
     try { step.run(toolkit); } catch (e) { console.error(e); }
   }
@@ -327,8 +370,8 @@ function resetView() {
 
 function navigate(d) {
   var def = currentDef();
-  if (!def) return;
-  var max = (isTheory() ? def.sections.length : def.steps.length) - 1;
+  if (!def || isDocProblem(def)) return;
+  var max = (isTheory() ? def.sections.length : (def.steps || []).length) - 1;
   var next = Math.max(0, Math.min(max, stepIdx + d));
   if (next === stepIdx) return;
   if (isTheory()) {
@@ -356,6 +399,65 @@ function pick(loc) {
   return (lang === 'ru' ? loc.ru : null) || loc.kz || '';
 }
 
+var docOpen = false; // explanation revealed? (reset per file in activate())
+
+// Document-mode problem: statement stays in #statement, #steps hosts the
+// visual + the hidden-until-revealed explanation. No navbar.
+function renderDocProblem(def) {
+  var st = document.getElementById('statement');
+  var steps = document.getElementById('steps');
+  document.getElementById('navbar').style.display = 'none';
+  st.style.display = '';
+  st.innerHTML = '<div class="plabel">Есеп' + (def.number ? ' №' + def.number : '') + '</div>' + pick(def.statement);
+
+  destroyVisHandle();
+  steps.innerHTML = '';
+  if (typeof def.visual === 'function') {
+    var vis = document.createElement('div');
+    vis.className = 'doc-visual';
+    steps.appendChild(vis);
+    try { visHandle = def.visual(vis, { lang: lang }) || null; } catch (e) { console.error(e); }
+  }
+
+  var body = document.createElement('div');
+  body.innerHTML = pick(def.explanation);
+  body.style.display = 'none';
+  var revealRow = document.createElement('div');
+  revealRow.className = 'doc-reveal-row';
+  var reveal = document.createElement('button');
+  reveal.className = 'doc-reveal';
+  reveal.textContent = lang === 'ru' ? 'Показать объяснение' : 'Түсіндіруді көрсету';
+  revealRow.appendChild(reveal);
+  var hide = document.createElement('button');
+  hide.className = 'doc-hide';
+  hide.textContent = lang === 'ru' ? 'Скрыть объяснение' : 'Түсіндіруді жасыру';
+  hide.style.display = 'none';
+  function openExplain() {
+    docOpen = true;
+    revealRow.style.display = 'none';
+    body.style.display = '';
+    hide.style.display = '';
+    typeset(body);
+    if (typeof def.wireExplanation === 'function') {
+      try { def.wireExplanation(body, { lang: lang, visual: visHandle || undefined }); } catch (e) { console.error(e); }
+    }
+  }
+  reveal.onclick = openExplain;
+  hide.onclick = function () {
+    docOpen = false;
+    revealRow.style.display = '';
+    body.style.display = 'none';
+    hide.style.display = 'none';
+  };
+  steps.appendChild(revealRow);
+  steps.appendChild(body);
+  steps.appendChild(hide);
+  if (docOpen) openExplain(); // keep reveal state across a language switch
+
+  typeset(st);
+  steps.scrollTop = 0;
+}
+
 function renderText() {
   var def = currentDef();
   var empty = document.getElementById('empty');
@@ -366,6 +468,8 @@ function renderText() {
   empty.style.display = 'none';
   steps.style.display = '';
   nav.style.display = '';
+
+  if (isDocProblem(def)) { renderDocProblem(def); return; }
 
   if (isTheory()) {
     st.style.display = 'none';
@@ -422,6 +526,10 @@ function setLang(l) {
   lang = l;
   document.getElementById('btn-kz').classList.toggle('active', l === 'kz');
   document.getElementById('btn-ru').classList.toggle('active', l === 'ru');
+  // Plain-JS theory visuals carry language-dependent text — re-mount them.
+  var def = currentDef();
+  var section = def && isTheory() ? def.sections[stepIdx] : null;
+  if (section && typeof section.visual === 'function') rebuildModel();
   renderText();
   renderFileList();
 }

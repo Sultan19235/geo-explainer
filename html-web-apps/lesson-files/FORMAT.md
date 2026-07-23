@@ -102,6 +102,70 @@ statement + walkthrough full-width in larger classroom type. Use this for
 pure-text problems (arithmetic, logic) — never pair an omitted `init` with
 steps that call `run`, there is no board to draw on.
 
+## 1b. Document-mode ("mini-page") problems — word-problem topics
+
+For word problems (grades 5–6: motion, story scenes, number rays) the figure
+is drawn with **plain JavaScript — SVG/HTML/CSS**, not GeoGebra, and the
+layout is one vertical mini page instead of the stepped two-pane player:
+
+```
+statement (full width, on top)
+   ↓
+visual — SVG scene, animated where it helps (own ▶ button)
+   ↓
+explanation — HIDDEN on open; the teacher reveals it with one button
+```
+
+```js
+registerLessonProblem({
+  format: 1, id: "…", number: "23", title: {…}, difficulty: "med", tags: […],
+  statement: { kz: "…", ru: "…" },
+
+  // Presence of `explanation` selects document mode. No `steps`, no `init` —
+  // GeoGebra is not even loaded for topics authored this way.
+  explanation: { kz: "…hidden html…", ru: "…" },   // same lf-* classes + KaTeX
+
+  // Optional figure. Root div is cleared before each call; re-invoked on
+  // language switch, so ALL visible text must come from ctx.lang.
+  visual(root, ctx) {
+    // build SVG/HTML into root; start rAF animations if you like
+    return {
+      play() { /* … */ },              // anything you want to expose
+      showAnswers() { /* … */ },
+      destroy() { /* cancel rAF/timers — called before every re-mount */ },
+    };
+  },
+
+  // Optional: runs after the explanation HTML is inserted (and again on
+  // language switch while open). ctx.visual = the handle `visual` returned —
+  // wire explanation buttons to drive the figure.
+  wireExplanation(root, ctx) {
+    if (ctx.visual) ctx.visual.showAnswers();
+    root.querySelectorAll(".lf-replay").forEach((b) => {
+      b.onclick = () => ctx.visual && ctx.visual.play();
+    });
+  },
+});
+```
+
+Rules of thumb:
+
+- **Self-contained**: every file brings its own tiny SVG helpers (`el`,
+  `txt`, `ray`) — no shared scene library, no external assets. Emoji make
+  great actors (🐕 🐈 🏠 ⛺ 🐎).
+- **Responsive**: draw into an `<svg viewBox="0 0 W H" style="width:100%;
+  height:auto">` — it scales to any pane. Keep W ≈ 800–880.
+- **True scale still applies**: build the ray at the problem's real numbers.
+- **Animate uniform motion linearly** (constant speed is the point!), one
+  real second per problem time unit; show live badges (t, S) while playing.
+- **Explanation starts hidden every time** the problem is opened. If a long
+  explanation needs staging, stage it inside your own HTML/JS — the player
+  contract stays one reveal button.
+- A visual that starts timers **must** return `destroy()`.
+- Theory sections may use the same mechanism: give a section `visual(root,
+  ctx)` instead of `ggb(g)` — it renders in the model pane, and a theory
+  file whose sections all use `visual`/text never loads GeoGebra.
+
 ## 2. The toolkit `g`
 
 Same vocabulary as the old HTML template, minus the applet argument:

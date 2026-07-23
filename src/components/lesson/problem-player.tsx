@@ -19,22 +19,31 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ChevronUpIcon,
+  EyeIcon,
+  EyeOffIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lang } from "@/lib/i18n/strings";
 import { pickText } from "@/lib/lesson/types";
-import type { PlayerProblem } from "@/lib/lesson/player-adapter";
+import type {
+  LessonVisualHandle,
+  PlayerDoc,
+  PlayerProblem,
+} from "@/lib/lesson/player-adapter";
 import { BoardCanvas } from "./board-canvas";
 import { GgbView } from "./ggb-view";
 import { LessonBlocks } from "./blocks";
 import { LessonHtml } from "./lesson-html";
 import type { SolveMode } from "./solve-mode";
 import { SplitRow } from "./split-row";
+import { VisualHost } from "./visual-host";
 
 const WORDS = {
   step: { kz: "қадам", ru: "шаг" },
   prev: { kz: "Алдыңғы", ru: "Назад" },
   next: { kz: "Келесі", ru: "Далее" },
+  explain: { kz: "Түсіндіруді көрсету", ru: "Показать объяснение" },
+  hideExplain: { kz: "Түсіндіруді жасыру", ru: "Скрыть объяснение" },
 } as const;
 
 // Compact mode keeps only the math-bearing content; prose is the teacher's
@@ -44,19 +53,142 @@ const WORDS = {
 const COMPACT_BLOCK_TYPES = new Set(["given", "find", "formula", "answer"]);
 const COMPACT_HTML_RE = /lf-(formula|given|answer)/;
 
-export function ProblemPlayer({
-  problem,
-  lang,
-  mode = "full",
-  hotkeys = false,
-  className,
-}: {
+type ProblemPlayerProps = {
   problem: PlayerProblem;
   lang: Lang;
   mode?: SolveMode;
   hotkeys?: boolean;
   className?: string;
-}) {
+};
+
+export function ProblemPlayer(props: ProblemPlayerProps) {
+  // Document-mode ("mini-page") problems get their own layout; hook counts
+  // differ between the two players, so dispatch before any hooks run.
+  if (props.problem.doc) {
+    return <DocProblemPlayer {...props} doc={props.problem.doc} />;
+  }
+  return <SteppedProblemPlayer {...props} />;
+}
+
+// ─── Document mode: statement → visual → hidden explanation ─────────────────
+// One vertically scrolling mini page per problem (word-problem topics).
+// Толық/Қысқаша behave identically here (there are no steps to compact);
+// Тақта keeps its full-width whiteboard.
+
+function DocProblemPlayer({
+  problem,
+  doc,
+  lang,
+  mode = "full",
+  className,
+}: ProblemPlayerProps & { doc: PlayerDoc }) {
+  const [explainOpen, setExplainOpen] = useState(false);
+  const handleRef = useRef<LessonVisualHandle | undefined>(undefined);
+  const explainRef = useRef<HTMLDivElement>(null);
+  const isBoard = mode === "board";
+  const bodyText = "text-[length:calc(17px*var(--lesson-scale,1))]";
+
+  // Wire explanation interactivity once its HTML is in the DOM; re-wire on
+  // language switch (LessonHtml swaps the innerHTML) and when the visual
+  // re-mounts under the new language.
+  useEffect(() => {
+    if (!explainOpen || !doc.wire) return;
+    const root = explainRef.current;
+    if (!root) return;
+    try {
+      doc.wire(root, { lang, visual: handleRef.current });
+    } catch (error) {
+      console.error("lesson explanation wiring failed", error);
+    }
+  }, [explainOpen, lang, doc]);
+
+  const statementNode = problem.statementHtml ? (
+    <div className="shrink-0 border-b-[1.5px] border-[#d8dde5] bg-[#fbfcfe] px-5 py-4 md:px-7">
+      <div className="mx-auto w-full max-w-4xl">
+        <LessonHtml
+          html={problem.statementHtml}
+          lang={lang}
+          className={bodyText}
+        />
+      </div>
+    </div>
+  ) : null;
+
+  if (isBoard) {
+    return (
+      <div className={cn("flex min-h-0 flex-col", className)}>
+        {statementNode}
+        <BoardCanvas storeKey={problem.key} lang={lang} />
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn("flex min-h-0 flex-col overflow-y-auto", className)}>
+      {statementNode}
+
+      {doc.visual && (
+        <div className="shrink-0 border-b-[1.5px] border-[#d8dde5] px-5 py-4 md:px-7">
+          <VisualHost
+            visual={doc.visual}
+            lang={lang}
+            onHandle={(handle) => {
+              handleRef.current = handle;
+            }}
+            className="mx-auto w-full max-w-4xl"
+          />
+        </div>
+      )}
+
+      <div className="px-5 py-5 md:px-7">
+        <div className="mx-auto w-full max-w-4xl">
+          {!explainOpen ? (
+            <div className="flex justify-center py-2">
+              <button
+                type="button"
+                onClick={() => setExplainOpen(true)}
+                className="flex h-11 items-center gap-2 rounded-lg bg-[#2563eb] px-6 text-[14px] font-semibold text-white shadow-sm transition-colors hover:bg-[#1d4ed8]"
+              >
+                <EyeIcon className="size-4" />
+                {WORDS.explain[lang] ?? WORDS.explain.kz}
+              </button>
+            </div>
+          ) : (
+            <>
+              <div ref={explainRef}>
+                <LessonHtml
+                  html={doc.explanation}
+                  lang={lang}
+                  className={bodyText}
+                />
+              </div>
+              <div className="mt-4 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setExplainOpen(false)}
+                  className="flex h-8 items-center gap-1.5 rounded-md bg-[#eef1f5] px-3.5 text-[12.5px] font-semibold text-[#6b7280] transition-colors hover:bg-[#e2e6ec] hover:text-[#1a1a2e]"
+                >
+                  <EyeOffIcon className="size-4" />
+                  {WORDS.hideExplain[lang] ?? WORDS.hideExplain.kz}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Stepped mode: GeoGebra model + walkthrough (geometry topics) ───────────
+
+function SteppedProblemPlayer({
+  problem,
+  lang,
+  mode = "full",
+  hotkeys = false,
+  className,
+}: ProblemPlayerProps) {
   const [state, setState] = useState({ index: 0, animate: false });
   const [statementOpen, setStatementOpen] = useState(true);
   const stepsRef = useRef<HTMLDivElement>(null);

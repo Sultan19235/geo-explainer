@@ -13,59 +13,47 @@ __LESSON_META__*/
 // File-scoped: lesson files share the page global scope — helpers must not leak.
 (function () {
 
-// №23: Aldar-Köse walks to Shygaibai's house at A on the ray; unit = 40 m,
-// speed 80 m/min. Find A's coordinate and the walking time.
+// №23 — document-mode problem with an ANIMATED scene: Aldar Köse rides from
+// O to Shygaibai's house at A(8); unit = 40 m, speed 80 m/min. The teacher
+// plays the motion (1 s of animation = 1 minute); the explanation reveal
+// annotates the figure and gets its own replay button.
 
-// 2D content renders in the 3D view top-down (SetPerspective("G") kills the
-// view in the current web3d build) — so framing uses the 6-arg 3D form.
-function crFrame(g, x0, x1, y0, y1) {
-  // Deterministic top-down camera: jump far off-axis first — a single
-  // near-parallel SetViewDirection keeps the previous azimuth and can leave
-  // the view mirrored/rotated depending on prior state.
-  g.cmd("SetViewDirection((0,-1,0),false)");
-  g.cmd("SetViewDirection((0,-0.001,1),false)");
-  if (g.api && g.api.setCoordSystem) g.api.setCoordSystem(x0, x1, y0, y1, -5, 5);
+var NS = "http://www.w3.org/2000/svg";
+var DARK = "#1a1a2e", GRAY = "#6b7280", RED = "#dc2626", GREEN = "#16a34a", PURPLE = "#7c3aed";
+
+function el(tag, attrs, parent) {
+  var node = document.createElementNS(NS, tag);
+  for (var key in attrs) node.setAttribute(key, attrs[key]);
+  if (parent) parent.appendChild(node);
+  return node;
 }
-function crRay(g, id, maxV, yo, o) {
+function txt(parent, x, y, s, o) {
   o = o || {};
-  var st = o.step || 1, tick = o.tick || 0.18, big = o.big || 0;
-  var lo = o.labelOff || 0.7, lx = o.lx || 0.1, over = o.over || 1;
-  var names = [id + "v"];
-  g.cmd(id + "v=Vector((0," + yo + "),(" + (maxV + over) + "," + yo + "))");
-  g.col(id + "v", g.DARK); g.thick(id + "v", 3); g.labelOff(id + "v"); g.lock(id + "v");
-  for (var k = 0; k <= maxV; k += st) {
-    var h = big && k % big === 0 ? tick * 1.7 : tick;
-    var tn = id + "t" + k;
-    g.cmd(tn + "=Segment((" + k + "," + (yo - h) + "),(" + k + "," + (yo + h) + "))");
-    g.col(tn, g.DARK); g.thick(tn, 2); g.labelOff(tn); g.lock(tn);
-    names.push(tn);
+  var t = el("text", {
+    x: x, y: y, fill: o.fill || DARK,
+    "font-size": o.size || 16, "font-weight": o.weight || 500,
+    "text-anchor": o.anchor || "middle",
+    "font-family": "system-ui, -apple-system, 'Segoe UI', sans-serif"
+  }, parent);
+  t.textContent = s;
+  return t;
+}
+function ray(svg, o) {
+  var X = function (v) { return o.x0 + v * o.unit; };
+  var end = X(o.maxV) + (o.over || 30);
+  el("line", { x1: X(0), y1: o.y, x2: end, y2: o.y, stroke: DARK, "stroke-width": 3, "stroke-linecap": "round" }, svg);
+  el("path", { d: "M" + (end + 12) + " " + o.y + " l-14 -6 v12 z", fill: DARK }, svg);
+  for (var v = 0; v <= o.maxV; v += (o.step || 1)) {
+    var h = o.big && v % o.big === 0 ? (o.tick || 7) * 1.7 : (o.tick || 7);
+    el("line", { x1: X(v), y1: o.y - h, x2: X(v), y2: o.y + h, stroke: DARK, "stroke-width": 2 }, svg);
   }
   (o.labels || []).forEach(function (v) {
-    names.push(crLabel(g, id + "l" + v, String(v), v - lx * String(v).length, yo - lo));
+    txt(svg, X(v), o.y + (o.labelDy || 30), String(v), { size: 15, weight: 600 });
   });
-  return names;
+  txt(svg, X(0) - 10, o.y - 12, "O", { size: 16, weight: 600, anchor: "end" });
+  return X;
 }
-function crLabel(g, n, txt, x, y, color) {
-  g.cmd(n + '=Text("' + txt + '",(' + x + "," + y + "))");
-  g.col(n, color || g.DARK); g.lock(n);
-  return n;
-}
-// Point({…}) forces point semantics — a lowercase name with bare tuple
-// syntax (n=(x,y)) would silently create a VECTOR instead.
-function crPoint(g, n, x, yo, capTxt, color, size) {
-  g.cmd(n + "=Point({" + x + "," + yo + ",0})");
-  g.pointSize(n, size || 5);
-  g.col(n, color || g.BLUE);
-  g.cap(n, capTxt || n);
-  if (capTxt === null) g.labelOff(n);
-  g.lock(n);
-  return n;
-}
-function crSpan(g, n, a, b, y, capTxt, color) {
-  g.cmd(n + "=Segment((" + a + "," + y + "),(" + b + "," + y + "))");
-  g.col(n, color || g.PURPLE); g.thick(n, 4); g.cap(n, capTxt); g.lock(n);
-  return n;
-}
+function fmtMin(v) { return (Math.round(v * 10) / 10).toFixed(1).replace(".", ","); }
 
 registerLessonProblem({
   format: 1,
@@ -80,85 +68,104 @@ registerLessonProblem({
     ru: "<p>Алдар-Косе идёт к дому Шыгайбая со скоростью \\(80\\) м/мин. На координатном луче дом Шыгайбая изображён точкой \\(A\\), а единичный отрезок соответствует \\(40\\) метрам. 1) <b class=\"lf-find\">Найдите координату точки \\(A\\)</b>; 2) <b class=\"lf-find\">за сколько минут Алдар-Косе дойдёт до дома?</b></p>",
   },
 
-  init(g) {
-    crFrame(g, -1.6, 12.8, -7.4, 7);
-    var r = crRay(g, "r", 10, 0, { tick: 0.18, labelOff: 0.8, lx: 0.11, over: 1.2, labels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] });
-    r.push(crLabel(g, "lo", "O", -0.15, 1));
-    g.hide(r);
-    g.hide(
-      crLabel(g, "eA", "🐎", -0.5, 2.6),
-      crLabel(g, "eH", "⛺", 7.6, 2.6),
-      crPoint(g, "pA", 8, 0, "A = ?", g.RED, 6),
-      crSpan(g, "sd", 0, 8, -2.2, "? м", g.PURPLE),
-    );
-    // Meter sub-labels (gray, under the number labels).
-    [2, 4, 6, 8, 10].forEach(function (v) {
-      g.hide(crLabel(g, "m" + v, String(v * 40) + " м", v - 0.5, -3.4, g.GRAY));
+  visual(root, ctx) {
+    var ru = ctx.lang === "ru";
+    var svg = el("svg", { viewBox: "0 0 880 250", style: "width:100%;height:auto;display:block" });
+    root.appendChild(svg);
+
+    // Legend: what one unit and the speed are.
+    txt(svg, 70, 34,
+      ru ? "1 единичный отрезок = 40 м · скорость 80 м/мин" : "1 бірлік кесінді = 40 м · жылдамдық 80 м/мин",
+      { size: 13.5, fill: GRAY, anchor: "start" });
+
+    var X = ray(svg, { x0: 70, y: 150, unit: 66, maxV: 10, labels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] });
+
+    // Shygaibai's house at A(8) — raised well above the rider's lane so the
+    // arriving horse stops under the tent instead of covering it.
+    txt(svg, X(8), 80, "⛺", { size: 30 });
+    el("circle", { cx: X(8), cy: 150, r: 6, fill: RED }, svg);
+    var capA = txt(svg, X(8), 44, "A = ?", { size: 16, weight: 700, fill: RED });
+    var check = txt(svg, X(8) + 28, 74, "✓", { size: 22, weight: 700, fill: GREEN });
+    check.style.display = "none";
+
+    // Aldar Köse — the moving actor, riding just above the ray.
+    var rider = el("g", {}, svg);
+    txt(rider, X(0), 140, "🐎", { size: 30 });
+
+    // Answer annotations (shown on explanation reveal).
+    var span = el("g", {}, svg);
+    el("line", { x1: X(0), y1: 206, x2: X(8), y2: 206, stroke: PURPLE, "stroke-width": 4, "stroke-linecap": "round" }, span);
+    el("line", { x1: X(0), y1: 198, x2: X(0), y2: 214, stroke: PURPLE, "stroke-width": 2.5 }, span);
+    el("line", { x1: X(8), y1: 198, x2: X(8), y2: 214, stroke: PURPLE, "stroke-width": 2.5 }, span);
+    txt(span, X(4), 234, "320 м", { size: 15, weight: 700, fill: PURPLE });
+    span.style.display = "none";
+
+    // Controls + live badges under the figure.
+    var bar = document.createElement("div");
+    bar.style.cssText = "display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:10px;";
+    var btn = document.createElement("button");
+    btn.textContent = ru ? "▶ Запустить" : "▶ Ойнату";
+    btn.style.cssText = "background:#2563eb;color:#fff;border:none;border-radius:8px;padding:9px 20px;font-size:14px;font-weight:600;cursor:pointer;";
+    var tBadge = document.createElement("span");
+    var sBadge = document.createElement("span");
+    [tBadge, sBadge].forEach(function (b) {
+      b.style.cssText = "background:#f1f3f7;color:#1a1a2e;border-radius:999px;padding:7px 16px;font-size:13.5px;font-weight:600;";
     });
+    bar.appendChild(btn); bar.appendChild(tBadge); bar.appendChild(sBadge);
+    root.appendChild(bar);
+
+    var raf = 0;
+    function setState(p) { // p ∈ [0,1] → 4 minutes, 320 m, 8 units
+      var dx = p * (X(8) - X(0));
+      rider.setAttribute("transform", "translate(" + dx + ",0)");
+      tBadge.textContent = "t = " + fmtMin(4 * p) + " мин";
+      sBadge.textContent = "S = " + Math.round(320 * p) + " м";
+      check.style.display = p >= 1 ? "" : "none";
+    }
+    function play() {
+      cancelAnimationFrame(raf);
+      var t0 = 0;
+      btn.textContent = ru ? "⟲ Ещё раз" : "⟲ Қайталау";
+      function frame(now) {
+        if (!t0) t0 = now;
+        var p = Math.min(1, (now - t0) / 4000); // 1 s of animation = 1 minute
+        setState(p);
+        if (p < 1) raf = requestAnimationFrame(frame);
+      }
+      setState(0);
+      raf = requestAnimationFrame(frame);
+    }
+    btn.onclick = play;
+    setState(0);
+
+    var answered = false;
+    return {
+      play: play,
+      showAnswers: function () {
+        if (answered) return;
+        answered = true;
+        capA.textContent = "A(8)";
+        capA.setAttribute("fill", GREEN);
+        span.style.display = "";
+      },
+      destroy: function () { cancelAnimationFrame(raf); },
+    };
   },
 
-  steps: [
-    {
-      title: { kz: "Шарты", ru: "Условие" },
-      html: {
-        kz: "<div class=\"lf-given\"><p><b>Берілгені:</b> жылдамдық \\(v = 80\\) м/мин; бірлік кесінді \\(= 40\\) м; үй — \\(A\\) нүктесінде.</p><p><b>Табу керек:</b> <b class=\"lf-find\">1) \\(A\\)-ның координатасы; 2) жол уақыты \\(t = \\,?\\)</b></p></div>",
-        ru: "<div class=\"lf-given\"><p><b>Дано:</b> скорость \\(v = 80\\) м/мин; единичный отрезок \\(= 40\\) м; дом — в точке \\(A\\).</p><p><b>Найти:</b> <b class=\"lf-find\">1) координату \\(A\\); 2) время пути \\(t = \\,?\\)</b></p></div>",
-      },
-    },
-    {
-      title: { kz: "Сурет", ru: "Чертёж" },
-      html: {
-        kz: "<p>Алдаркөсе санақ басында (\\(O\\)) тұр, Шығайбайдың үйі — \\(A\\) нүктесінде. Штрихтарды санап, \\(A\\)-ның координатасын анықтаймыз.</p>",
-        ru: "<p>Алдар-Косе стоит в начале отсчёта (\\(O\\)), дом Шыгайбая — в точке \\(A\\). Считая штрихи, определим координату \\(A\\).</p>",
-      },
-      run(g) {
-        g.show("rv", "lo", "eA", "eH", "pA");
-        for (var k = 0; k <= 10; k++) g.show("rt" + k, "rl" + k);
-      },
-    },
-    {
-      title: { kz: "Теория", ru: "Теория" },
-      html: {
-        kz: "<div class=\"lf-formula\">\\[ S = n \\cdot e \\]<div class=\"lf-formula-label\">Қашықтық = бірлік саны × бірлік кесіндінің ұзындығы</div></div><div class=\"lf-formula\">\\[ t = S : v \\]<div class=\"lf-formula-label\">Уақыт = қашықтық : жылдамдық</div></div>",
-        ru: "<div class=\"lf-formula\">\\[ S = n \\cdot e \\]<div class=\"lf-formula-label\">Расстояние = число единиц × длина единичного отрезка</div></div><div class=\"lf-formula\">\\[ t = S : v \\]<div class=\"lf-formula-label\">Время = расстояние : скорость</div></div>",
-      },
-    },
-    {
-      title: { kz: "1-қадам · A нүктесінің координатасы", ru: "Шаг 1 · Координата точки A" },
-      html: {
-        kz: "<p>\\(O\\)-дан \\(A\\)-ға дейін 8 бірлік кесінді бар:</p><div class=\"lf-answer\">1) \\(A(8)\\)</div>",
-        ru: "<p>От \\(O\\) до \\(A\\) — 8 единичных отрезков:</p><div class=\"lf-answer\">1) \\(A(8)\\)</div>",
-      },
-      run(g) {
-        g.cap("pA", "A(8)");
-      },
-    },
-    {
-      title: { kz: "2-қадам · Қашықтық", ru: "Шаг 2 · Расстояние" },
-      html: {
-        kz: "<p>Бір бірлік кесінді — \\(40\\) м, ал \\(A\\)-ға дейін 8 бірлік:</p>\\[ S = n \\cdot e \\]\\[ S = 8 \\cdot 40 = 320 \\text{ м} \\]<p>\\(S = 320\\) м — келесі қадамда керек.</p>",
-        ru: "<p>Один единичный отрезок — \\(40\\) м, а до \\(A\\) — 8 единиц:</p>\\[ S = n \\cdot e \\]\\[ S = 8 \\cdot 40 = 320 \\text{ м} \\]<p>\\(S = 320\\) м — понадобится на следующем шаге.</p>",
-      },
-      run(g) {
-        g.cap("sd", "320 м");
-        g.show("sd");
-        [2, 4, 6, 8, 10].forEach(function (v) { g.show("m" + v); });
-      },
-    },
-    {
-      title: { kz: "3-қадам · Уақыт", ru: "Шаг 3 · Время" },
-      html: {
-        kz: "<p>Жылдамдық \\(80\\) м/мин:</p>\\[ t = S : v \\]\\[ t = 320 : 80 = 4 \\text{ мин} \\]",
-        ru: "<p>Скорость \\(80\\) м/мин:</p>\\[ t = S : v \\]\\[ t = 320 : 80 = 4 \\text{ мин} \\]",
-      },
-    },
-    {
-      title: { kz: "Жауабы", ru: "Ответ" },
-      html: {
-        kz: "<div class=\"lf-answer\">1) \\(A(8)\\); &nbsp; 2) Алдаркөсе үйге \\(4\\) минутта жетеді.</div><div class=\"lf-callout\">Тексеру: 4 минутта \\(80 \\cdot 4 = 320\\) м жүреді — дәл \\(A\\)-ға дейінгі қашықтық. ✓</div>",
-        ru: "<div class=\"lf-answer\">1) \\(A(8)\\); &nbsp; 2) Алдар-Косе дойдёт до дома за \\(4\\) минуты.</div><div class=\"lf-callout\">Проверка: за 4 минуты он пройдёт \\(80 \\cdot 4 = 320\\) м — ровно расстояние до \\(A\\). ✓</div>",
-      },
-    },
-  ],
+  explanation: {
+    kz: "<div class=\"lf-given\"><p><b>Берілгені:</b> жылдамдық \\(v = 80\\) м/мин; бірлік кесінді \\(= 40\\) м; үй — \\(A\\) нүктесінде.</p><p><b>Табу керек:</b> 1) \\(A\\)-ның координатасы; 2) жол уақыты \\(t\\).</p></div><p><b>1)</b> Суреттегі штрихтарды санаймыз: \\(O\\)-дан үйге дейін 8 бірлік кесінді бар, демек</p><div class=\"lf-answer\">1) \\(A(8)\\)</div><p><b>2)</b> Бір бірлік кесінді — \\(40\\) м, ал \\(A\\)-ға дейін 8 бірлік:</p><div class=\"lf-formula\">\\[ S = 8 \\cdot 40 = 320 \\text{ м} \\]<div class=\"lf-formula-label\">Қашықтық</div></div><div class=\"lf-formula\">\\[ t = S : v = 320 : 80 = 4 \\text{ мин} \\]<div class=\"lf-formula-label\">Уақыт</div></div><div class=\"lf-answer\">1) \\(A(8)\\); &nbsp; 2) Алдаркөсе үйге \\(4\\) минутта жетеді.</div><div class=\"lf-callout\">Тексеру: 4 минутта \\(80 \\cdot 4 = 320\\) м жүреді — дәл \\(A\\)-ға дейінгі қашықтық. ✓</div><p style=\"text-align:center;margin-top:14px\"><button class=\"lf-replay\" style=\"background:#eef1f5;border:1.5px solid #d8dde5;color:#2563eb;border-radius:8px;padding:8px 18px;font-size:13.5px;font-weight:600;cursor:pointer\">▶ Қозғалысты тағы көру</button></p>",
+    ru: "<div class=\"lf-given\"><p><b>Дано:</b> скорость \\(v = 80\\) м/мин; единичный отрезок \\(= 40\\) м; дом — в точке \\(A\\).</p><p><b>Найти:</b> 1) координату \\(A\\); 2) время пути \\(t\\).</p></div><p><b>1)</b> Считаем штрихи на рисунке: от \\(O\\) до дома — 8 единичных отрезков, значит</p><div class=\"lf-answer\">1) \\(A(8)\\)</div><p><b>2)</b> Один единичный отрезок — \\(40\\) м, а до \\(A\\) — 8 единиц:</p><div class=\"lf-formula\">\\[ S = 8 \\cdot 40 = 320 \\text{ м} \\]<div class=\"lf-formula-label\">Расстояние</div></div><div class=\"lf-formula\">\\[ t = S : v = 320 : 80 = 4 \\text{ мин} \\]<div class=\"lf-formula-label\">Время</div></div><div class=\"lf-answer\">1) \\(A(8)\\); &nbsp; 2) Алдар-Косе дойдёт до дома за \\(4\\) минуты.</div><div class=\"lf-callout\">Проверка: за 4 минуты он пройдёт \\(80 \\cdot 4 = 320\\) м — ровно расстояние до \\(A\\). ✓</div><p style=\"text-align:center;margin-top:14px\"><button class=\"lf-replay\" style=\"background:#eef1f5;border:1.5px solid #d8dde5;color:#2563eb;border-radius:8px;padding:8px 18px;font-size:13.5px;font-weight:600;cursor:pointer\">▶ Посмотреть движение ещё раз</button></p>",
+  },
+
+  wireExplanation(root, ctx) {
+    var visual = ctx.visual;
+    if (visual && typeof visual.showAnswers === "function") visual.showAnswers();
+    var buttons = root.querySelectorAll(".lf-replay");
+    Array.prototype.forEach.call(buttons, function (b) {
+      b.onclick = function () {
+        if (visual && typeof visual.play === "function") visual.play();
+      };
+    });
+  },
 });
 })();

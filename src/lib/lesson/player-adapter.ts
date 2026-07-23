@@ -3,13 +3,33 @@
 // content carries blocks; file content carries bilingual HTML. Both carry a
 // GgbView source (registry scene or file program).
 
-import type { LessonProblemDef, LessonTheoryDef } from "./file-format";
+import type {
+  LessonProblemDef,
+  LessonTheoryDef,
+  LessonVisualContext,
+  LessonVisualFn,
+  LessonVisualHandle,
+} from "./file-format";
 import { sceneFromFileProgram, type BuiltScene } from "./scenes";
 import type { Block, Localized, Params, ProblemPack, TheoryPack } from "./types";
 
 export type PlayerGgbSource =
   | { kind: "scene"; sceneId: string; params: Params }
   | { kind: "program"; program: BuiltScene; programKey: string };
+
+export type { LessonVisualFn, LessonVisualHandle } from "./file-format";
+
+// Document-mode ("mini-page") problem content: statement on top, plain-JS
+// visual, explanation hidden until the teacher reveals it. No steps, no
+// GeoGebra.
+export type PlayerDoc = {
+  visual?: LessonVisualFn;
+  explanation: { kz: string; ru?: string };
+  wire?: (
+    root: HTMLElement,
+    ctx: LessonVisualContext & { visual?: LessonVisualHandle },
+  ) => void;
+};
 
 // What the bank drawer and the navigator need to know about a problem —
 // metadata from the DB row, plus the statement once the file is parsed
@@ -40,6 +60,9 @@ export type PlayerProblem = {
   steps: PlayerStep[];
   // Absent for figure-less problems — the player renders text full-width.
   ggb?: PlayerGgbSource;
+  // Present for document-mode problems — the mini-page layout replaces the
+  // stepped two-pane player entirely.
+  doc?: PlayerDoc;
 };
 
 export type PlayerTheorySection = {
@@ -48,6 +71,8 @@ export type PlayerTheorySection = {
   blocks?: Block[];
   html?: { kz: string; ru?: string };
   ggb?: PlayerGgbSource;
+  // Plain-JS visual in the model pane (wins over ggb).
+  visual?: LessonVisualFn;
   sceneStep: number;
 };
 
@@ -107,17 +132,27 @@ export function fileToPlayerProblem(
   def: LessonProblemDef,
   fallbackNumber?: string,
 ): PlayerProblem {
+  // `explanation` switches the file to document mode: no steps, no GeoGebra
+  // (init, if present, is ignored — nothing mounts a GgbView).
+  const doc: PlayerDoc | undefined = def.explanation
+    ? {
+        visual: def.visual,
+        explanation: def.explanation,
+        wire: def.wireExplanation,
+      }
+    : undefined;
   return {
     key: def.id,
     number: def.number ?? fallbackNumber ?? "",
     title: def.title,
     statementHtml: def.statement,
-    steps: def.steps.map((step, index) => ({
+    doc,
+    steps: (doc ? [] : def.steps ?? []).map((step, index) => ({
       name: step.title,
       html: step.html,
       sceneStep: index,
     })),
-    ggb: def.init
+    ggb: !doc && def.init
       ? {
           kind: "program",
           programKey: def.id,
@@ -127,7 +162,7 @@ export function fileToPlayerProblem(
             fit: def.fit,
             axes: def.axes,
             init: def.init as unknown as (g: unknown) => void,
-            stepRuns: def.steps.map(
+            stepRuns: (def.steps ?? []).map(
               (step) =>
                 step.run as unknown as ((g: unknown) => void) | undefined,
             ),
@@ -147,7 +182,8 @@ export function fileToPlayerTheory(defs: LessonTheoryDef[]): PlayerTheory | null
         id,
         title: section.title,
         html: section.html,
-        ggb: section.ggb
+        visual: section.visual,
+        ggb: !section.visual && section.ggb
           ? {
               kind: "program",
               programKey: id,

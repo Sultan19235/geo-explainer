@@ -73,6 +73,42 @@ function crPoint(g, n, x, yo, capTxt, color, size) {
   return n;
 }
 
+// ── Plain-SVG helpers for `visual` sections (no GeoGebra involved) ──────────
+var SVG_NS = "http://www.w3.org/2000/svg";
+var V_DARK = "#1a1a2e", V_GRAY = "#6b7280", V_BLUE = "#2563eb", V_GREEN = "#16a34a", V_PURPLE = "#7c3aed";
+function vEl(tag, attrs, parent) {
+  var node = document.createElementNS(SVG_NS, tag);
+  for (var key in attrs) node.setAttribute(key, attrs[key]);
+  if (parent) parent.appendChild(node);
+  return node;
+}
+function vTxt(parent, x, y, s, o) {
+  o = o || {};
+  var t = vEl("text", {
+    x: x, y: y, fill: o.fill || V_DARK,
+    "font-size": o.size || 15, "font-weight": o.weight || 500,
+    "text-anchor": o.anchor || "middle",
+    "font-family": "system-ui, -apple-system, 'Segoe UI', sans-serif"
+  }, parent);
+  t.textContent = s;
+  return t;
+}
+function vRay(svg, o) {
+  var X = function (v) { return o.x0 + v * o.unit; };
+  var end = X(o.maxV) + (o.over || 26);
+  vEl("line", { x1: X(0), y1: o.y, x2: end, y2: o.y, stroke: V_DARK, "stroke-width": 3, "stroke-linecap": "round" }, svg);
+  vEl("path", { d: "M" + (end + 12) + " " + o.y + " l-14 -6 v12 z", fill: V_DARK }, svg);
+  for (var v = 0; v <= o.maxV; v += (o.step || 1)) {
+    var h = o.big && v % o.big === 0 ? (o.tick || 6) * 1.7 : (o.tick || 6);
+    vEl("line", { x1: X(v), y1: o.y - h, x2: X(v), y2: o.y + h, stroke: V_DARK, "stroke-width": 1.6 }, svg);
+  }
+  (o.labels || []).forEach(function (v) {
+    vTxt(svg, X(v), o.y + (o.labelDy || 28), String(v), { size: 14, weight: 600 });
+  });
+  vTxt(svg, X(0) - 9, o.y - 11, "O", { size: 15, weight: 600, anchor: "end" });
+  return X;
+}
+
 registerLessonTheory({
   format: 1,
   id: "coord-ray-theory",
@@ -130,20 +166,88 @@ registerLessonTheory({
         kz: "<p>Ит пен мысықтың ара қашықтығы: \\(16 - 4 = 12\\) м. Ит әр секунд сайын мысыққа \\(10 - 7 = 3\\) м жақындайды.</p><div class=\"lf-formula\">\\[ t = S : (v_1 - v_2) \\]<div class=\"lf-formula-label\">Қуып жету уақыты</div></div><div class=\"lf-answer\">\\( (16-4) : (10-7) = 12 : 3 = 4 \\) с — ит мысықты 4 секундта қуып жетеді.</div><div class=\"lf-callout\">Ара қашықтық секунд сайын 3 м-ге кемиді: 12 → 9 → 6 → 3 → 0. Ит мысықты 44 м белгісінде қуып жетеді: \\(4 + 10 \\cdot 4 = 16 + 7 \\cdot 4 = 44\\).</div>",
         ru: "<p>Расстояние между собакой и кошкой: \\(16 - 4 = 12\\) м. Каждую секунду собака приближается к кошке на \\(10 - 7 = 3\\) м.</p><div class=\"lf-formula\">\\[ t = S : (v_1 - v_2) \\]<div class=\"lf-formula-label\">Время погони</div></div><div class=\"lf-answer\">\\( (16-4) : (10-7) = 12 : 3 = 4 \\) с — собака догонит кошку через 4 секунды.</div><div class=\"lf-callout\">Расстояние сокращается на 3 м каждую секунду: 12 → 9 → 6 → 3 → 0. Собака догонит кошку на отметке 44 м: \\(4 + 10 \\cdot 4 = 16 + 7 \\cdot 4 = 44\\).</div>",
       },
-          ggb(g) {
-        crFrame(g, -5, 71, -35, 41);
-        crRay(g, "r", 60, 0, { step: 2, big: 10, tick: 0.9, labelOff: 3.6, lx: 0.6, over: 4.5, labels: [0, 10, 20, 30, 40, 50, 60] });
-        crLabel(g, "hme", "🏠", -2.5, 4);
-        crLabel(g, "dge", "🐕", 2.5, 4);
-        crLabel(g, "cte", "🐈", 14.5, 4);
-        crPoint(g, "dgp", 4, 0, "4", g.BLUE, 6);
-        crPoint(g, "ctp", 16, 0, "16", g.PURPLE, 6);
-        crPoint(g, "meet", 44, 0, "44 м · 4 с", g.GREEN, 6);
-        g.cmd("gap=Segment((4,-6),(16,-6))");
-        g.col("gap", g.ORANGE);
-        g.thick("gap", 4);
-        g.cap("gap", "12 м");
-        g.lock("gap");
+          visual(root, ctx) {
+        var ru = ctx.lang === "ru";
+        var svg = vEl("svg", { viewBox: "0 0 800 270", style: "width:100%;height:auto;display:block" });
+        root.appendChild(svg);
+
+        vTxt(svg, 60, 30, ru ? "Собака: 10 м/с · Кошка: 7 м/с" : "Ит: 10 м/с · Мысық: 7 м/с",
+          { size: 15, fill: V_GRAY, anchor: "start" });
+
+        var X = vRay(svg, { x0: 60, y: 180, unit: 11.2, maxV: 60, step: 2, big: 10, labels: [0, 10, 20, 30, 40, 50, 60] });
+
+        vTxt(svg, X(0), 148, "🏠", { size: 30 });
+        vEl("circle", { cx: X(4), cy: 180, r: 5, fill: V_BLUE }, svg);
+        vTxt(svg, X(4), 162, "4", { size: 13, weight: 700, fill: V_BLUE });
+        vEl("circle", { cx: X(16), cy: 180, r: 5, fill: V_PURPLE }, svg);
+        vTxt(svg, X(16), 162, "16", { size: 13, weight: 700, fill: V_PURPLE });
+
+        // Meet point — hidden until the chase finishes; the label sits above
+        // the actors' lane so the emojis can't cover it.
+        var meet = vEl("g", {}, svg);
+        vEl("circle", { cx: X(44), cy: 180, r: 6, fill: V_GREEN }, meet);
+        vTxt(meet, X(44), 104, "44 м · 4 с", { size: 15, weight: 700, fill: V_GREEN });
+        meet.style.display = "none";
+
+        // Moving actors (translate along the ray while playing). The cat is
+        // drawn a step ahead so at the meet they stand side by side —
+        // "caught" instead of two stacked emojis.
+        var dog = vEl("g", {}, svg);
+        vTxt(dog, X(4), 146, "🐕", { size: 32 });
+        var cat = vEl("g", {}, svg);
+        vTxt(cat, X(16) + 18, 146, "🐈", { size: 32 });
+
+        // Shrinking-gap indicator under the ray.
+        var gapLine = vEl("line", { x1: X(4), y1: 236, x2: X(16), y2: 236, stroke: "#ea580c", "stroke-width": 4, "stroke-linecap": "round" }, svg);
+        var gapCap = vTxt(svg, (X(4) + X(16)) / 2, 260, "12 м", { size: 14, weight: 700, fill: "#ea580c" });
+
+        var bar = document.createElement("div");
+        bar.style.cssText = "display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:10px;";
+        var btn = document.createElement("button");
+        btn.textContent = ru ? "▶ Запустить погоню" : "▶ Қуалауды бастау";
+        btn.style.cssText = "background:#2563eb;color:#fff;border:none;border-radius:8px;padding:9px 20px;font-size:14px;font-weight:600;cursor:pointer;";
+        var tBadge = document.createElement("span");
+        var gBadge = document.createElement("span");
+        [tBadge, gBadge].forEach(function (b) {
+          b.style.cssText = "background:#f1f3f7;color:#1a1a2e;border-radius:999px;padding:7px 16px;font-size:13.5px;font-weight:600;";
+        });
+        bar.appendChild(btn); bar.appendChild(tBadge); bar.appendChild(gBadge);
+        root.appendChild(bar);
+
+        var raf = 0;
+        function setState(p) { // p ∈ [0,1] → 4 seconds of chase
+          var t = 4 * p;
+          var dogX = 4 + 10 * t, catX = 16 + 7 * t, gap = 12 - 3 * t;
+          dog.setAttribute("transform", "translate(" + ((dogX - 4) * 11.2) + ",0)");
+          cat.setAttribute("transform", "translate(" + ((catX - 16) * 11.2) + ",0)");
+          gapLine.setAttribute("x1", X(dogX));
+          gapLine.setAttribute("x2", X(catX));
+          gapCap.setAttribute("x", (X(dogX) + X(catX)) / 2);
+          gapCap.textContent = (Math.round(gap * 10) / 10) + " м";
+          var done = p >= 1;
+          gapLine.style.display = done ? "none" : "";
+          gapCap.style.display = done ? "none" : "";
+          meet.style.display = done ? "" : "none";
+          tBadge.textContent = "t = " + (Math.round(t * 10) / 10) + " с";
+          gBadge.textContent = (ru ? "расстояние: " : "ара қашықтық: ") + (Math.round(gap * 10) / 10) + " м";
+        }
+        function play() { // real time: 1 s of animation = 1 second of chase
+          cancelAnimationFrame(raf);
+          var t0 = 0;
+          btn.textContent = ru ? "⟲ Ещё раз" : "⟲ Қайталау";
+          function frame(now) {
+            if (!t0) t0 = now;
+            var p = Math.min(1, (now - t0) / 4000);
+            setState(p);
+            if (p < 1) raf = requestAnimationFrame(frame);
+          }
+          setState(0);
+          raf = requestAnimationFrame(frame);
+        }
+        btn.onclick = play;
+        setState(0);
+
+        return { play: play, destroy: function () { cancelAnimationFrame(raf); } };
       },
     },
 

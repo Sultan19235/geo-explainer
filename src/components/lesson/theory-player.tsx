@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import type { Lang } from "@/lib/i18n/strings";
 import { pickText } from "@/lib/lesson/types";
 import type {
+  LessonVisualFn,
   PlayerGgbSource,
   PlayerTheory,
   PlayerTheorySection,
@@ -19,6 +20,7 @@ import { GgbView } from "./ggb-view";
 import { LessonBlocks } from "./blocks";
 import { LessonHtml } from "./lesson-html";
 import { SplitRow } from "./split-row";
+import { VisualHost } from "./visual-host";
 
 const WORDS = {
   badge: { kz: "Теория", ru: "Теория" },
@@ -61,6 +63,29 @@ function TheoryGgb({
       lang={lang}
       className={className}
     />
+  );
+}
+
+// Plain-JS section visual in the model pane (word-problem topics) — same
+// slide layout as a GGB section, no GeoGebra involved.
+function TheoryVisual({
+  visual,
+  lang,
+  className,
+}: {
+  visual: LessonVisualFn;
+  lang: Lang;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex h-full min-h-0 flex-col justify-center overflow-auto bg-white p-4 md:p-5",
+        className,
+      )}
+    >
+      <VisualHost visual={visual} lang={lang} className="w-full" />
+    </div>
   );
 }
 
@@ -186,7 +211,13 @@ export function TheoryPlayer({
         <SplitRow
           className="h-[520px] md:h-[560px]"
           left={
-            section?.ggb ? (
+            section?.visual ? (
+              <TheoryVisual
+                visual={section.visual}
+                lang={lang}
+                className="border-b-[1.5px] border-[#d8dde5] md:border-b-0"
+              />
+            ) : section?.ggb ? (
               <TheoryGgb
                 ggb={section.ggb}
                 sceneStep={section.sceneStep}
@@ -239,18 +270,26 @@ export function TheoryPlayer({
         // present-mode height and splitter so it reads from the back rows.
         <div className="flex flex-col divide-y-[1.5px] divide-[#d8dde5]">
           {theory.sections.map((item, itemIndex) =>
-            item.ggb ? (
+            item.ggb || item.visual ? (
               <SplitRow
                 key={item.id}
                 className="h-[520px] md:h-[560px]"
                 left={
-                  <TheoryGgb
-                    ggb={item.ggb}
-                    sceneStep={item.sceneStep}
-                    animate={false}
-                    lang={lang}
-                    className="border-b-[1.5px] border-[#d8dde5] md:border-b-0"
-                  />
+                  item.visual ? (
+                    <TheoryVisual
+                      visual={item.visual}
+                      lang={lang}
+                      className="border-b-[1.5px] border-[#d8dde5] md:border-b-0"
+                    />
+                  ) : item.ggb ? (
+                    <TheoryGgb
+                      ggb={item.ggb}
+                      sceneStep={item.sceneStep}
+                      animate={false}
+                      lang={lang}
+                      className="border-b-[1.5px] border-[#d8dde5] md:border-b-0"
+                    />
+                  ) : null
                 }
                 right={
                   <SectionText

@@ -100,6 +100,16 @@ registerLessonTheory({
 - **No figure? Omit `init` entirely** (and `view`/`home`/`fit` and every
   step's `run`). The player then renders the problem text-first: full-width
   statement + walkthrough, no GeoGebra pane. Right for pure-text problems.
+- **Word problems → document mode, NOT GeoGebra.** A def with `explanation`
+  (instead of `steps`) becomes a vertical mini page: full-width statement,
+  then an optional `visual(root, ctx)` drawn with plain SVG/HTML/JS (emoji
+  actors, animations with their own ▶ button), then the explanation —
+  hidden until the teacher clicks «Түсіндіруді көрсету». `wireExplanation`
+  (with `ctx.visual` = the visual's returned handle) lets the explanation
+  annotate/replay the figure. Full contract + rules: FORMAT.md §1b. Theory
+  sections can likewise swap `ggb(g)` for `visual(root, ctx)`. Reference
+  examples: `5-1-2/problem19.js` (static ray), `5-1-2/problem23.js`
+  (animated scene + replay button), `5-1-2/theory.js` section 3 (chase).
 
 ## 3. The toolkit `g` (complete reference)
 
