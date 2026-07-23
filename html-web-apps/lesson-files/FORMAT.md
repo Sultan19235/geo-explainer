@@ -166,15 +166,18 @@ Rules of thumb:
   «Түсіндіруді көрсету») — e.g. «Жауаптарын көрсету» for question sets.
 
 **Document-layout theory.** A theory file with **no `ggb` section anywhere**
-renders as the same kind of vertical page: every section = numbered title +
-`html` text full-width + optional `visual(root, ctx)` below + optional
-hidden part. Sections accept the same trio as problems — `explanation`,
-`wireExplanation`, `explanationLabel` — so «Сұрақтар» sections keep their
-answers hidden until the teacher reveals them (and the reveal can annotate
-the section's own figure via the visual's handle). Any section with `ggb`
-keeps the whole file on the split slide player (geometry theories).
+renders as **paged slides — one section at a time**, stepped with Алдыңғы /
+Келесі arrows (the teacher controls the pace; the class can't scroll ahead).
+Each slide = numbered title + `html` text full-width + optional
+`visual(root, ctx)` below + optional hidden part; a tall slide scrolls
+inside its fixed frame. Sections accept the same trio as problems —
+`explanation`, `wireExplanation`, `explanationLabel` — so «Сұрақтар» slides
+keep their answers hidden until the teacher reveals them (and the reveal can
+annotate the slide's own figure via the visual's handle). Moving to another
+slide re-closes any revealed part. Any section with `ggb` keeps the whole
+file on the older split present/scroll player (geometry theories).
 Reference: `5-1-2/theory.js` — static scenes, an animated chase with a
-replay button in its hidden part, and two question sections.
+replay button in its hidden part, and two question slides.
 
 ## 2. The toolkit `g`
 

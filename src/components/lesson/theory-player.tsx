@@ -129,10 +129,12 @@ function SectionText({
   );
 }
 
-// ─── Document layout: sections stacked as one vertical page ─────────────────
-// Word-problem theories (no GeoGebra anywhere): each section = title + text
+// ─── Document layout: one section per SLIDE, prev/next navigation ───────────
+// Word-problem theories (no GeoGebra anywhere): each slide = title + text
 // full-width, plain-JS visual below, optional hidden part (answers/solution)
-// behind a teacher-revealed button — the same feel as document-mode problems.
+// behind a teacher-revealed button. One section at a time keeps the class on
+// the teacher's slide; a tall section scrolls inside the fixed frame.
+// Changing slides remounts the section, so hidden parts start closed again.
 
 function TheoryDocSection({
   section,
@@ -147,7 +149,7 @@ function TheoryDocSection({
   const bodyText = "text-[length:calc(17px*var(--lesson-scale,1))]";
 
   return (
-    <section className="border-b-[1.5px] border-[#d8dde5] px-5 py-6 last:border-b-0 md:px-7">
+    <section className="px-5 py-6 md:px-7">
       <div className="mx-auto w-full max-w-4xl">
         <div className="flex items-center gap-2.5 border-b-2 border-[#16a34a] pb-2">
           <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[#16a34a] text-[12px] font-bold text-white">
@@ -194,6 +196,19 @@ function TheoryDocPlayer({
   theory: PlayerTheory;
   lang: Lang;
 }) {
+  const [index, setIndex] = useState(0);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const total = theory.sections.length;
+  const section = theory.sections[index];
+
+  // A new slide starts at its top (tall slides scroll internally).
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: 0 });
+  }, [index]);
+
+  const goPrev = () => setIndex((i) => Math.max(0, i - 1));
+  const goNext = () => setIndex((i) => Math.min(total - 1, i + 1));
+
   return (
     <div>
       <div className="flex min-h-12 flex-wrap items-center gap-3 border-b-[1.5px] border-[#d8dde5] px-[18px] py-[10px]">
@@ -204,14 +219,41 @@ function TheoryDocPlayer({
           {pickText(theory.title, lang)}
         </h2>
       </div>
-      {theory.sections.map((section, index) => (
-        <TheoryDocSection
-          key={section.id}
-          section={section}
-          index={index}
-          lang={lang}
-        />
-      ))}
+
+      <div ref={bodyRef} className="h-[520px] overflow-y-auto md:h-[580px]">
+        {section && (
+          <TheoryDocSection
+            key={section.id}
+            section={section}
+            index={index}
+            lang={lang}
+          />
+        )}
+      </div>
+
+      <div className="flex items-center justify-end gap-4 border-t-[1.5px] border-[#d8dde5] px-5 py-2.5">
+        <button
+          type="button"
+          onClick={goPrev}
+          disabled={index <= 0}
+          className="flex h-9 items-center gap-1.5 rounded-md bg-[#eef1f5] px-4 text-[13px] font-semibold text-[#6b7280] transition-colors enabled:hover:bg-[#e2e6ec] enabled:hover:text-[#1a1a2e] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <ChevronLeftIcon className="size-4" />
+          {WORDS.prev[lang] ?? WORDS.prev.kz}
+        </button>
+        <span className="text-[13px] font-semibold text-[#6b7280]">
+          {index + 1} / {total}
+        </span>
+        <button
+          type="button"
+          onClick={goNext}
+          disabled={index >= total - 1}
+          className="flex h-9 items-center gap-1.5 rounded-md bg-[#2563eb] px-4 text-[13px] font-semibold text-white transition-colors enabled:hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {WORDS.next[lang] ?? WORDS.next.kz}
+          <ChevronRightIcon className="size-4" />
+        </button>
+      </div>
     </div>
   );
 }

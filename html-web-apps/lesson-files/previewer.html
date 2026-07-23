@@ -388,7 +388,16 @@ function resetView() {
 
 function navigate(d) {
   var def = currentDef();
-  if (!def || isDocProblem(def) || isDocTheory(def)) return;
+  if (!def || isDocProblem(def)) return;
+  if (isDocTheory(def)) {
+    var maxDoc = def.sections.length - 1;
+    var nextDoc = Math.max(0, Math.min(maxDoc, stepIdx + d));
+    if (nextDoc === stepIdx) return;
+    stepIdx = nextDoc;
+    docOpenSections = {}; // every slide starts with its hidden part closed
+    renderText();
+    return;
+  }
   var max = (isTheory() ? def.sections.length : (def.steps || []).length) - 1;
   var next = Math.max(0, Math.min(max, stepIdx + d));
   if (next === stepIdx) return;
@@ -488,40 +497,46 @@ function renderDocProblem(def) {
   steps.scrollTop = 0;
 }
 
-// Document-layout theory: all sections stacked as one page — title + text,
-// visual below, optional hidden part per section.
+// Document-layout theory: ONE section per slide — title + text, visual
+// below, optional hidden part — stepped with the prev/next navbar. Tall
+// slides scroll inside the panel.
 function renderDocTheory(def) {
   var st = document.getElementById('statement');
   var steps = document.getElementById('steps');
-  document.getElementById('navbar').style.display = 'none';
+  document.getElementById('navbar').style.display = '';
   st.style.display = 'none';
 
   destroyVisHandles();
   steps.innerHTML = '';
-  def.sections.forEach(function (s, i) {
-    var sec = document.createElement('div');
-    sec.className = 'stepblock';
-    var head = document.createElement('div');
-    head.className = 'shead theory';
-    head.innerHTML = '<span class="snum">' + (i + 1) + '</span><h3>' + escapeHtml(pick(s.title)) + '</h3>';
-    sec.appendChild(head);
-    if (s.html) {
-      var body = document.createElement('div');
-      body.innerHTML = pick(s.html);
-      sec.appendChild(body);
-    }
-    var handle = null;
-    if (typeof s.visual === 'function') {
-      var vis = document.createElement('div');
-      vis.className = 'doc-visual';
-      sec.appendChild(vis);
-      handle = mountVisual(s.visual, vis);
-    }
-    if (s.explanation) {
-      sec.appendChild(buildReveal(s, handle, !!docOpenSections[i], function (v) { docOpenSections[i] = v; }));
-    }
-    steps.appendChild(sec);
-  });
+  var i = stepIdx;
+  var s = def.sections[i];
+  if (!s) return;
+  var sec = document.createElement('div');
+  sec.className = 'stepblock';
+  var head = document.createElement('div');
+  head.className = 'shead theory';
+  head.innerHTML = '<span class="snum">' + (i + 1) + '</span><h3>' + escapeHtml(pick(s.title)) + '</h3>';
+  sec.appendChild(head);
+  if (s.html) {
+    var body = document.createElement('div');
+    body.innerHTML = pick(s.html);
+    sec.appendChild(body);
+  }
+  var handle = null;
+  if (typeof s.visual === 'function') {
+    var vis = document.createElement('div');
+    vis.className = 'doc-visual';
+    sec.appendChild(vis);
+    handle = mountVisual(s.visual, vis);
+  }
+  if (s.explanation) {
+    sec.appendChild(buildReveal(s, handle, !!docOpenSections[i], function (v) { docOpenSections[i] = v; }));
+  }
+  steps.appendChild(sec);
+
+  document.getElementById('counter').textContent = (i + 1) + ' / ' + def.sections.length;
+  document.getElementById('btn-prev').disabled = i === 0;
+  document.getElementById('btn-next').disabled = i >= def.sections.length - 1;
   typeset(steps);
   steps.scrollTop = 0;
 }

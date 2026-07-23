@@ -108,9 +108,10 @@ registerLessonTheory({
   `explanationLabel`). `wireExplanation` (with `ctx.visual` = the visual's
   returned handle) lets the explanation annotate/replay the figure. Full
   contract + rules: FORMAT.md §1b.
-- **Theory the same way**: a theory file with no `ggb` section renders as
-  one vertical document — per section: title + text + `visual(root, ctx)` +
-  optional hidden `explanation` (use it for question sections' answers).
+- **Theory the same way, paged**: a theory file with no `ggb` section
+  renders as one-section-per-slide with prev/next arrows (teacher-paced, not
+  a long scroll) — per slide: title + text + `visual(root, ctx)` + optional
+  hidden `explanation` (use it for question sections' answers).
   Reference examples: `5-1-2/theory.js` (statics, animated chase, hidden
   answers), `problem19.js` (static ray, reveal annotates), `problem23.js`/
   `problem24.js` (animated motion + replay), `problem25.js` (hop
