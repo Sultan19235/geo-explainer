@@ -62,16 +62,6 @@ export default async function LessonTopicsPage() {
               )}
             </Link>
           ))}
-
-          <Link
-            href="/labs/present"
-            className="rounded-xl border-[1.5px] border-dashed border-[#d8dde5] bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-[#2563eb] hover:shadow-[0_4px_12px_rgba(37,99,235,0.12)]"
-          >
-            <div className="text-[15px] font-bold">Презентациялар</div>
-            <div className="mt-0.5 text-xs text-[#6b7280]">
-              Сынып презентациялары — тақта режимі (labs)
-            </div>
-          </Link>
         </div>
       </div>
     </div>

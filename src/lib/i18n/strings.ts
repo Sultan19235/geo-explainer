@@ -259,9 +259,6 @@ export const STRINGS = {
     hub_problems_count: (n: number) => `${n} есеп`,
     hub_quizzes_count: (n: number) => `${n} тест`,
     hub_quizzes_empty: "Әзірге тест жоқ",
-    hub_present_title: "Сабақ презентациясы",
-    hub_present_subtitle: "Тақтада көрсетуге арналған интерактивті слайдтар",
-    hub_present_count: (n: number) => `${n} слайд`,
     quizzes_subtitle: "Тесттер",
 
     // Admin
@@ -270,7 +267,6 @@ export const STRINGS = {
     admin_nav_problems: "Есептер",
     admin_nav_quizzes: "Тесттер",
     admin_nav_lessons: "Сабақтар",
-    admin_nav_present: "Презентациялар",
     admin_nav_teachers: "Мұғалімдер",
     admin_back_home: "← Басты бет",
     admin_nav_collapse: "Мәзірді жинау",
@@ -728,9 +724,6 @@ export const STRINGS = {
     hub_problems_count: (n: number) => `${n} задач`,
     hub_quizzes_count: (n: number) => `${n} тестов`,
     hub_quizzes_empty: "Тестов пока нет",
-    hub_present_title: "Презентация урока",
-    hub_present_subtitle: "Интерактивные слайды для показа на доске",
-    hub_present_count: (n: number) => `${n} слайдов`,
     quizzes_subtitle: "Тесты",
 
     // Admin
@@ -739,7 +732,6 @@ export const STRINGS = {
     admin_nav_problems: "Задачи",
     admin_nav_quizzes: "Тесты",
     admin_nav_lessons: "Уроки",
-    admin_nav_present: "Презентации",
     admin_nav_teachers: "Учителя",
     admin_back_home: "← Главная",
     admin_nav_collapse: "Свернуть меню",

@@ -10,7 +10,6 @@ import {
   LayersIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
-  PresentationIcon,
   SquareFunctionIcon,
   UsersIcon,
 } from "lucide-react";
@@ -34,11 +33,6 @@ const NAV_ITEMS = [
     href: "/admin/lessons",
     key: "admin_nav_lessons" as const,
     Icon: BookOpenIcon,
-  },
-  {
-    href: "/admin/presentations",
-    key: "admin_nav_present" as const,
-    Icon: PresentationIcon,
   },
   {
     href: "/admin/teachers",

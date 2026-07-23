@@ -5,7 +5,6 @@ import {
   BookOpenIcon,
   ChevronRightIcon,
   ClipboardListIcon,
-  PresentationIcon,
 } from "lucide-react";
 import { useT } from "@/lib/i18n/context";
 import type { Lang } from "@/lib/i18n/strings";
@@ -34,15 +33,10 @@ export function LessonHubClient({
   topic,
   problemCount,
   quizCount,
-  presentation,
-  showLearn,
 }: {
   topic: Topic;
   problemCount: number;
   quizCount: number;
-  presentation: { id: string; slides: number } | null;
-  /** Hidden for presentation-taught topics with no theory/problems behind it. */
-  showLearn: boolean;
 }) {
   const { t, lang } = useT();
   const localizedName = topicName(topic, lang);
@@ -66,26 +60,14 @@ export function LessonHubClient({
         )}
 
         <div className="grid gap-4 sm:grid-cols-2">
-          {presentation && (
-            <HubCard
-              href={`/labs/present/${presentation.id}`}
-              badgeClass="bg-[#fbf0da] text-[#8a5d08]"
-              icon={<PresentationIcon className="size-6" />}
-              title={t("hub_present_title")}
-              subtitle={t("hub_present_subtitle")}
-              meta={t("hub_present_count")(presentation.slides)}
-            />
-          )}
-          {showLearn && (
-            <HubCard
-              href={`${base}/learn`}
-              badgeClass="bg-[#ecfdf5] text-[#16a34a]"
-              icon={<BookOpenIcon className="size-6" />}
-              title={t("hub_learn_title")}
-              subtitle={t("hub_learn_subtitle")}
-              meta={t("hub_problems_count")(problemCount)}
-            />
-          )}
+          <HubCard
+            href={`${base}/learn`}
+            badgeClass="bg-[#ecfdf5] text-[#16a34a]"
+            icon={<BookOpenIcon className="size-6" />}
+            title={t("hub_learn_title")}
+            subtitle={t("hub_learn_subtitle")}
+            meta={t("hub_problems_count")(problemCount)}
+          />
           <HubCard
             href={`${base}/quizzes`}
             badgeClass="bg-[#eff6ff] text-[#2563eb]"
