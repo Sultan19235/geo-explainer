@@ -32,6 +32,15 @@ registerDrillTopic({
     },
   ],
 
+  // Difficulty ladder for level-mode rooms: each rung is a preset of the
+  // option ticks above (omitted groups run on defaults). Easiest first.
+  levels: [
+    { label: { kz: "Қосу", ru: "Сложение" }, config: { ops: ["add"], range: ["small"] } },
+    { label: { kz: "Азайту", ru: "Вычитание" }, config: { ops: ["sub"], range: ["small"] } },
+    { label: { kz: "Аралас", ru: "Смешанный" }, config: { ops: ["add", "sub"], range: ["small"] } },
+    { label: { kz: "Үлкен сандар", ru: "Большие числа" }, config: { ops: ["add", "sub"], range: ["big"] } },
+  ],
+
   generate(rng, config) {
     const limit = pick(rng, config.range) === "big" ? 20 : 10;
     const op = pick(rng, config.ops);

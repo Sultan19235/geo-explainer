@@ -118,7 +118,7 @@ async function uploadDrillGeneratorFile(
   if (!code.includes("registerDrillTopic")) {
     throw new Error("generator file must call registerDrillTopic({...})");
   }
-  let meta: { topic?: unknown; options?: unknown };
+  let meta: { topic?: unknown; options?: unknown; levels?: unknown };
   try {
     meta = JSON.parse(metaRaw);
   } catch {
@@ -134,6 +134,7 @@ async function uploadDrillGeneratorFile(
       topic: meta.topic,
       file: true,
       fileOptions: meta.options,
+      ...(meta.levels !== undefined ? { fileLevels: meta.levels } : {}),
     },
     questions: [],
   };

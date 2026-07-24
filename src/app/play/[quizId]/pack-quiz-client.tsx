@@ -65,8 +65,14 @@ import { getDrillTopic } from "@/lib/drill/registry";
 import { UploadedDrillSource } from "@/lib/drill/uploaded/source";
 import {
   decodeDrillConfig,
+  decodeLevelSettings,
   defaultConfig,
+  levelPassCount,
+  resolveLevelConfig,
   type DrillConfig,
+  type DrillLevel,
+  type DrillLevelSettings,
+  type DrillOptionGroup,
   type DrillProblem,
   type DrillTopic,
 } from "@/lib/drill/types";
@@ -131,6 +137,10 @@ type PackExtra = {
   // the TOP level of the saved JSON next to the SavedBase keys — `raceAns` is
   // the one new key the spec reserves there (§1), collision-checked.
   raceAns: Record<string, RaceAnswerRecord>;
+  // Level-mode drill rooms only: the 1-based ladder rung being played, so a
+  // reload resumes at the same level (the batch restarts — mid-batch progress
+  // is deliberately not restored; a fresh attempt is fairer than a guess).
+  lvl?: number;
 };
 
 function identityOrder(count: number): number[] {
@@ -299,7 +309,23 @@ function LiveMode({
           }
         }
       }
-      return { seed: raw.seed, idx, done: raw.done === true, answered, raceAns };
+      // Level-mode rung: restore only a sane 1-based integer (the flow clamps
+      // it to the ladder's actual height on mount).
+      const lvl =
+        typeof raw.lvl === "number" &&
+        Number.isInteger(raw.lvl) &&
+        raw.lvl >= 1 &&
+        raw.lvl <= 99
+          ? raw.lvl
+          : undefined;
+      return {
+        seed: raw.seed,
+        idx,
+        done: raw.done === true,
+        answered,
+        raceAns,
+        ...(lvl !== undefined ? { lvl } : {}),
+      };
     },
   });
 
@@ -335,6 +361,28 @@ function LiveMode({
     !isRace &&
     (tourneyParam || session.tourneySummary !== null) &&
     generator?.type === "drill";
+
+  // Level mode (drill ladders): active only when the join link carries the
+  // teacher's `lvl=` settings AND the topic actually ships a ladder. Same
+  // channel as the drill ticks (`dopt=`) — the server never stores it. Race
+  // and tournament rooms ignore the flag entirely.
+  const lvlParam = searchParams.get("lvl");
+  const levelMode = useMemo<{
+    settings: DrillLevelSettings;
+    levels: DrillLevel[];
+    options: DrillOptionGroup[];
+  } | null>(() => {
+    if (!generator || generator.type !== "drill") return null;
+    const settings = decodeLevelSettings(lvlParam);
+    if (!settings) return null;
+    const topic = generator.file ? null : getDrillTopic(generator.topic);
+    const levels = generator.file ? generator.fileLevels : topic?.levels;
+    if (!levels || levels.length < 2) return null;
+    const options = generator.file
+      ? (generator.fileOptions ?? [])
+      : (topic?.options ?? []);
+    return { settings, levels, options };
+  }, [generator, lvlParam]);
 
   // Which student aids the teacher allowed for this room. The server's word
   // (v7, tamper-proof) wins; the join link's `off=` param covers rooms on
@@ -404,7 +452,18 @@ function LiveMode({
       {!isRace &&
         !isTourney &&
         session.phase === "active" &&
-        (generator ? (
+        (generator && levelMode && generator.type === "drill" ? (
+          // Level mode: the ladder machine owns batches, pass/fail screens
+          // and per-level configs (uploaded files run in its own worker).
+          <LevelFlow
+            generator={generator}
+            levelMode={levelMode}
+            session={session}
+            pack={fullPack}
+            features={features}
+            generatorCode={generatorCode}
+          />
+        ) : generator ? (
           // Generator quiz: endless machine-made questions, no "done" — the
           // stream runs until the teacher ends the room. Uploaded drill
           // generators pre-generate their batch in the sandbox worker first.
@@ -1013,6 +1072,345 @@ function GeneratedFlow({
           className="mt-4 h-12 w-full text-base font-semibold"
         >
           {t("next_button")}
+          <ArrowRight className="size-4" aria-hidden />
+        </Button>
+      )}
+
+      {features.calculator && (
+        <>
+          <button
+            type="button"
+            onClick={() => setCalcOpen(true)}
+            className="fixed bottom-4 right-4 flex items-center gap-2 rounded-full border border-primary/25 bg-card px-4 py-2.5 text-sm font-semibold text-primary shadow-lg shadow-blue-950/10"
+          >
+            <Calculator className="size-4" aria-hidden />
+            {t("calc_button")}
+          </button>
+          <CalculatorPanel
+            open={calcOpen}
+            title={t("calc_button")}
+            closeLabel={t("close_button")}
+            onClose={() => setCalcOpen(false)}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══ LEVEL FLOW (drill ladders — Деңгейлер) ════════════════════════════════
+// The self-paced ladder machine: play a batch of `settings.size` questions at
+// the current rung's difficulty; ≥ pass% correct unlocks the next rung, less
+// retries the same rung with FRESH problems (the global seq never rewinds, so
+// no student ever sees a repeat). Registry topics generate synchronously; an
+// uploaded file keeps ONE sandbox worker alive for the whole room and
+// generates each batch on demand. The rung rides every /submit (reportLevel)
+// so the teacher's board draws the ladder, and persists in the saved blob so
+// a reload resumes at the same level (with a fresh batch).
+
+function LevelFlow({
+  generator,
+  levelMode,
+  session,
+  pack,
+  features,
+  generatorCode,
+}: {
+  generator: PackGenerator & { type: "drill" };
+  levelMode: {
+    settings: DrillLevelSettings;
+    levels: DrillLevel[];
+    options: DrillOptionGroup[];
+  };
+  session: Session;
+  pack: QuizPack;
+  features: QuizFeatures;
+  generatorCode: string | null;
+}) {
+  const { lang } = useLanguage();
+  const t = engineT(lang);
+  const { settings, levels, options } = levelMode;
+  const height = levels.length;
+  const need = levelPassCount(settings);
+  const [calcOpen, setCalcOpen] = useState(false);
+
+  // 1-based rung, restored from the saved blob (clamped to this ladder).
+  const [rung, setRung] = useState(() => {
+    const saved = session.extra.lvl;
+    return typeof saved === "number" && saved >= 1
+      ? Math.min(Math.floor(saved), height)
+      : 1;
+  });
+  // The top-rung celebration fires once; afterwards the student keeps
+  // practicing at the top difficulty, batch after batch.
+  const [conquered, setConquered] = useState(false);
+
+  const [drillSeed] = useState(() => Math.floor(Math.random() * 2 ** 31));
+  // Monotonic across every batch and retry — a seq is never reused.
+  const seqStart = useRef(1);
+  // One worker for the whole room (uploaded files only), loaded lazily.
+  const sourceRef = useRef<UploadedDrillSource | null>(null);
+  useEffect(() => {
+    return () => {
+      sourceRef.current?.dispose();
+      sourceRef.current = null;
+    };
+  }, []);
+
+  const [batch, setBatch] = useState<PackQuestion[] | null>(null);
+  const [batchErr, setBatchErr] = useState<string | null>(null);
+  const [done, setDone] = useState(0); // answered in the current batch
+  const [correct, setCorrect] = useState(0);
+  const [screen, setScreen] = useState<"play" | "result">("play");
+  const [record, setRecord] = useState<AnswerRecord | null>(null);
+  const [inputValue, setInputValue] = useState("");
+  const [optOrder, setOptOrder] = useState<number[]>([]);
+
+  const loadBatch = useCallback(
+    async (forRung: number) => {
+      setBatch(null);
+      setBatchErr(null);
+      setDone(0);
+      setCorrect(0);
+      setRecord(null);
+      setInputValue("");
+      setScreen("play");
+      const config = resolveLevelConfig({ options }, levels[forRung - 1]);
+      const from = seqStart.current;
+      seqStart.current += settings.size;
+      let questions: PackQuestion[];
+      if (generator.file) {
+        if (!generatorCode) {
+          setBatchErr("generator code missing");
+          return;
+        }
+        if (!sourceRef.current) {
+          const load = await UploadedDrillSource.load(generatorCode, {
+            validate: false,
+          });
+          if (!load.ok) {
+            setBatchErr(load.errors.join("; "));
+            return;
+          }
+          sourceRef.current = load.source;
+        }
+        const result = await sourceRef.current.generate(
+          drillSeed,
+          config,
+          from,
+          settings.size,
+        );
+        if (!result.ok) {
+          setBatchErr(result.errors.join("; "));
+          return;
+        }
+        questions = result.problems.map((p, i) =>
+          drillProblemToPackQuestion(p, `gen-${from + i}`),
+        );
+      } else {
+        const topic = getDrillTopic(generator.topic);
+        questions = Array.from({ length: settings.size }, (_, i) =>
+          topic
+            ? generateDrillPackQuestion(topic, config, drillSeed, from + i)
+            : UNKNOWN_TOPIC_QUESTION(from + i),
+        );
+      }
+      setOptOrder(randomOrder(choiceCount(questions[0])));
+      setBatch(questions);
+    },
+    [generator, generatorCode, levels, options, settings.size, drillSeed],
+  );
+
+  // Rung entry: tell the board, persist for reload, build the batch.
+  useEffect(() => {
+    session.reportLevel(rung);
+    session.updateExtra({ lvl: rung });
+    void loadBatch(rung);
+    // session/loadBatch identities are stable enough; this must run per rung.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rung]);
+
+  const question = batch && done < batch.length ? batch[done] : null;
+
+  const answer = (rec: AnswerRecord) => {
+    if (record || !question) return;
+    session.recordAnswer(rec.ok);
+    if (rec.ok) setCorrect((c) => c + 1);
+    setRecord(rec);
+  };
+
+  const next = () => {
+    if (!batch) return;
+    const n = done + 1;
+    setRecord(null);
+    setInputValue("");
+    setDone(n);
+    if (n >= batch.length) {
+      setScreen("result");
+    } else {
+      setOptOrder(randomOrder(choiceCount(batch[n])));
+    }
+  };
+
+  // Clearing the whole ladder fires once: the sticky finished flag reaches
+  // the teacher's board, and later top-level batches celebrate normally.
+  const passed = correct >= need;
+  const topRun = screen === "result" && passed && rung >= height;
+  useEffect(() => {
+    if (topRun && !conquered) {
+      setConquered(true);
+      session.markFinished();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topRun]);
+
+  // ── End-of-batch screen ──────────────────────────────────────────────────
+  if (screen === "result") {
+    return (
+      <CenterFrame>
+        {passed && <Confetti />}
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
+          <p className="text-4xl" aria-hidden>
+            {topRun ? "🏆" : passed ? "🎉" : "💪"}
+          </p>
+          <h2 className="mt-2 text-xl font-bold">
+            {topRun
+              ? t("lvl_all_done_title")
+              : passed
+                ? t("lvl_result_title_pass")
+                : t("lvl_result_title_fail")}
+          </h2>
+          <p className="mt-3 text-3xl font-bold tabular-nums">
+            {correct}/{settings.size}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("lvl_need")
+              .replace("{need}", String(need))
+              .replace("{size}", String(settings.size))}
+          </p>
+          {topRun ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              {t("lvl_all_done_desc")}
+            </p>
+          ) : passed ? (
+            <p className="mt-3 text-sm font-semibold text-primary">
+              {t("lvl_unlocked").replace("{n}", String(rung + 1))}
+            </p>
+          ) : null}
+          <Button
+            onClick={() => {
+              if (passed && rung < height) setRung(rung + 1);
+              else void loadBatch(rung);
+            }}
+            className="mt-5 h-12 w-full text-base font-semibold"
+          >
+            {topRun
+              ? t("lvl_practice_more")
+              : passed
+                ? t("lvl_continue")
+                : t("lvl_retry")}
+            <ArrowRight className="size-4" aria-hidden />
+          </Button>
+        </div>
+      </CenterFrame>
+    );
+  }
+
+  // ── Batch loading / error ────────────────────────────────────────────────
+  if (batchErr) {
+    return (
+      <CenterFrame>
+        <p className="max-w-sm rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-center text-sm text-red-700">
+          {lang === "ru"
+            ? "Задания не загрузились — обновите страницу."
+            : "Есептер жүктелмеді — бетті жаңартыңыз."}
+          <span className="mt-1 block font-mono text-[11px] text-red-500">
+            {batchErr}
+          </span>
+        </p>
+      </CenterFrame>
+    );
+  }
+  if (!batch || !question) {
+    return (
+      <CenterFrame>
+        <Loader2 className="size-8 animate-spin text-primary" aria-hidden />
+        <p className="mt-3 text-sm text-muted-foreground">{t("lvl_loading")}</p>
+      </CenterFrame>
+    );
+  }
+
+  // ── Play ─────────────────────────────────────────────────────────────────
+  return (
+    <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col px-4 pb-8 pt-4">
+      <header className="mb-4 flex items-center gap-2">
+        <span className="flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-bold text-primary tabular-nums">
+          <Trophy className="size-3.5" aria-hidden />
+          {t("level_label")} {rung}/{height}
+        </span>
+        <span className="rounded-full border border-border bg-card px-3 py-1 text-xs font-bold tabular-nums">
+          {done + 1}/{settings.size}
+        </span>
+        {session.stats.streak >= 3 && (
+          <span className="flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700">
+            <Flame className="size-3.5" aria-hidden />
+            {session.stats.streak}
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          {session.timeLeft !== null && <TimerPill seconds={session.timeLeft} />}
+        </div>
+      </header>
+
+      {/* Batch progress: filled = answered (green/red by outcome). */}
+      <div className="mb-4 flex gap-1" aria-hidden>
+        {Array.from({ length: settings.size }, (_, i) => (
+          <span
+            key={i}
+            className={cn(
+              "h-1.5 flex-1 rounded-full",
+              i < done
+                ? "bg-primary"
+                : i === done && record
+                  ? record.ok
+                    ? "bg-primary"
+                    : "bg-red-400"
+                  : "bg-border",
+            )}
+          />
+        ))}
+      </div>
+
+      <QuestionCard
+        key={question.id}
+        question={question}
+        lang={lang}
+        optOrder={optOrder}
+        record={record}
+        features={features}
+        packFormulas={pack.formulas}
+        inputValue={inputValue}
+        onInputChange={setInputValue}
+        onPick={(displayIndex) => {
+          const pick = optOrder[displayIndex];
+          answer({ ok: pick === 0, pick });
+        }}
+        onCheckInput={() => {
+          if (!inputValue.trim()) return;
+          answer({
+            ok: checkInputAnswer(inputValue, question),
+            given: inputValue,
+          });
+        }}
+        onCheckDrag={(ok, given) => answer({ ok, given })}
+      />
+
+      {record && (
+        <Button
+          onClick={next}
+          className="mt-4 h-12 w-full text-base font-semibold"
+        >
+          {done + 1 >= settings.size ? t("finish_button") : t("next_button")}
           <ArrowRight className="size-4" aria-hidden />
         </Button>
       )}

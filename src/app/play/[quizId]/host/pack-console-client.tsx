@@ -69,8 +69,11 @@ import { mulberry32 } from "@/lib/drill/rng";
 import { UploadedDrillSource } from "@/lib/drill/uploaded/source";
 import {
   defaultConfig,
+  DEFAULT_LEVEL_SETTINGS,
   encodeDrillConfig,
+  encodeLevelSettings,
   type DrillConfig,
+  type DrillLevel,
   type DrillOptionGroup,
 } from "@/lib/drill/types";
 
@@ -137,6 +140,10 @@ function pctColor(pct: number) {
 
 function sortStudents(students: Map<string, LiveStudent>) {
   return Array.from(students.values()).sort((a, b) => {
+    // Level rooms: the ladder IS the ranking — higher rung first, percent
+    // breaks ties. Everywhere else level is undefined and this term is 0.
+    const lvl = (b.level ?? 0) - (a.level ?? 0);
+    if (lvl !== 0) return lvl;
     const pA = a.total > 0 ? a.score / a.total : 0;
     const pB = b.total > 0 ? b.score / b.total : 0;
     return pB !== pA ? pB - pA : b.score - a.score;
@@ -164,6 +171,9 @@ type RoomCtx = {
   genSections: SectionId[];
   genModes: GraphQuizMode[];
   genDrill?: DrillConfig; // drill generator: the teacher's option ticks
+  // Level-mode settings for ladder topics (on/off + threshold + batch size);
+  // absent for topics without a ladder and for pre-level saved blobs.
+  lvl?: { on: boolean; pass: number; size: number };
   features?: QuizFeatures;
   mode?: "self" | "race" | "tourney";
   raceSec?: number; // room default seconds per question
@@ -483,6 +493,7 @@ export function PackConsoleClient({
         genSections,
         genModes,
         genDrill: drillTopic ? genDrill : undefined,
+        lvl: hasLadder ? { on: lvlOn, pass: lvlPass, size: lvlSize } : undefined,
         features,
         mode,
         raceSec,
@@ -543,6 +554,21 @@ export function PackConsoleClient({
         }
       : {},
   );
+  // Level mode (drill ladders): available only when the topic ships a
+  // `levels` ladder. Defaults ON — a ladder is authored to be climbed — with
+  // the threshold/batch-size knobs the teacher can adjust before opening.
+  // Only self-paced rooms run it (race/tournament have their own engines).
+  const drillLevels: DrillLevel[] | null =
+    generator?.type === "drill"
+      ? generator.file
+        ? (generator.fileLevels ?? null)
+        : (getDrillTopic(generator.topic)?.levels ?? null)
+      : null;
+  const hasLadder = drillLevels !== null && drillLevels.length >= 2;
+  const [lvlOn, setLvlOn] = useState(true);
+  const [lvlPass, setLvlPass] = useState(DEFAULT_LEVEL_SETTINGS.pass);
+  const [lvlSize, setLvlSize] = useState(DEFAULT_LEVEL_SETTINGS.size);
+  const levelActive = hasLadder && lvlOn && mode === "self";
   // Student aids for this room (figure / formulas / hints / calculator).
   // All on by default; the teacher's last choice is restored after mount
   // (not in the initializer — localStorage would desync SSR hydration).
@@ -604,7 +630,13 @@ export function PackConsoleClient({
   // never emitted for race links: option order must stay canonical so the
   // board's distribution letters match every phone (belt and braces — the
   // mode switch already forces orderMode to custom).
-  const doptValue = drillTopic ? encodeDrillConfig(genDrill) : "";
+  // Level rooms: the ladder's per-level presets drive the config, so the
+  // teacher ticks don't ride the link — `lvl=` does instead.
+  const doptValue =
+    drillTopic && !levelActive ? encodeDrillConfig(genDrill) : "";
+  const lvlValue = levelActive
+    ? encodeLevelSettings({ pass: lvlPass, size: lvlSize })
+    : "";
   const joinParams = [
     qParam ? `q=${encodeURIComponent(qParam)}` : null,
     orderMode === "shuffle" && mode !== "race" ? "shuffle=1" : null,
@@ -615,6 +647,7 @@ export function PackConsoleClient({
     generator?.type === "graph-quadratic" ? `sec=${genSections.join(",")}` : null,
     generator?.type === "graph-quadratic" ? `modes=${genModes.join(",")}` : null,
     doptValue ? `dopt=${encodeURIComponent(doptValue)}` : null,
+    lvlValue ? `lvl=${lvlValue}` : null,
     offList.length > 0 ? `off=${offList.join(",")}` : null,
   ]
     .filter(Boolean)
@@ -716,6 +749,18 @@ export function PackConsoleClient({
         }
         if (Object.keys(restored).length > 0) {
           setGenDrill((cur) => ({ ...cur, ...restored }));
+        }
+      }
+      // Level settings, clamped to the codec's ranges so a stale blob can't
+      // smuggle an out-of-range value into the join link.
+      if (hasLadder && ctx.lvl && typeof ctx.lvl === "object") {
+        const l = ctx.lvl as Record<string, unknown>;
+        if (typeof l.on === "boolean") setLvlOn(l.on);
+        if (typeof l.pass === "number" && Number.isFinite(l.pass)) {
+          setLvlPass(Math.min(100, Math.max(50, Math.round(l.pass))));
+        }
+        if (typeof l.size === "number" && Number.isFinite(l.size)) {
+          setLvlSize(Math.min(20, Math.max(4, Math.round(l.size))));
         }
       }
       if (ctx.features && typeof ctx.features === "object") {
@@ -835,6 +880,13 @@ export function PackConsoleClient({
           drillTopic={drillTopic}
           genDrill={genDrill}
           setGenDrill={setGenDrill}
+          drillLevels={drillLevels}
+          lvlOn={lvlOn}
+          setLvlOn={setLvlOn}
+          lvlPass={lvlPass}
+          setLvlPass={setLvlPass}
+          lvlSize={lvlSize}
+          setLvlSize={setLvlSize}
           features={features}
           onToggleFeature={toggleFeature}
           mode={mode}
@@ -928,6 +980,7 @@ export function PackConsoleClient({
             quizTitle={quizTitle}
             code={session.code}
             students={session.students}
+            ladder={levelActive && drillLevels ? drillLevels : null}
             timeLeft={session.timeLeft}
             onEnd={() => {
               if (window.confirm(t("c_end_confirm"))) void session.end();
@@ -997,6 +1050,13 @@ function SetupScreen({
   drillTopic,
   genDrill,
   setGenDrill,
+  drillLevels,
+  lvlOn,
+  setLvlOn,
+  lvlPass,
+  setLvlPass,
+  lvlSize,
+  setLvlSize,
   features,
   onToggleFeature,
   mode,
@@ -1049,6 +1109,13 @@ function SetupScreen({
   drillTopic: DrillTopicTicks | null;
   genDrill: DrillConfig;
   setGenDrill: React.Dispatch<React.SetStateAction<DrillConfig>>;
+  drillLevels: DrillLevel[] | null;
+  lvlOn: boolean;
+  setLvlOn: React.Dispatch<React.SetStateAction<boolean>>;
+  lvlPass: number;
+  setLvlPass: (n: number) => void;
+  lvlSize: number;
+  setLvlSize: (n: number) => void;
   features: QuizFeatures;
   onToggleFeature: (key: keyof QuizFeatures) => void;
   mode: "self" | "race" | "tourney";
@@ -1070,6 +1137,8 @@ function SetupScreen({
   const total = questions.length;
   const selectedCount = selectedIds.length;
   const isDrillGen = generator?.type === "drill";
+  const hasLadder = drillLevels !== null && drillLevels.length >= 2;
+  const levelActive = hasLadder && lvlOn && mode === "self";
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   // id → question + its stable "№ in the pack" (shown even when filters hide
@@ -1309,10 +1378,109 @@ function SetupScreen({
           </>
         )}
 
+        {/* level mode (drill ladders): on/off + threshold + batch size. When
+            ON, the ladder's per-level presets drive the difficulty, so the
+            option tick groups below disappear — one source of truth. */}
+        {hasLadder && mode === "self" && drillLevels && (
+          <div className="mt-4 rounded-xl border-[1.5px] border-border p-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <p className="flex items-center gap-1.5 text-sm font-bold">
+                <Trophy className="size-4 text-primary" aria-hidden />
+                {t("c_lvl_title")}
+              </p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={lvlOn}
+                onClick={() => setLvlOn((v) => !v)}
+                className={cn(
+                  "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+                  lvlOn ? "bg-primary" : "bg-border",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-0.5 size-5 rounded-full bg-white shadow transition-[left]",
+                    lvlOn ? "left-[22px]" : "left-0.5",
+                  )}
+                />
+                <span className="sr-only">{t("c_lvl_toggle")}</span>
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("c_lvl_hint")}
+            </p>
+            {lvlOn && (
+              <>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {drillLevels.map((level, i) => (
+                    <span
+                      key={i}
+                      className="rounded-full border border-primary/25 bg-accent px-2.5 py-1 text-xs font-semibold text-primary"
+                    >
+                      {i + 1}. {locDrill(level.label, lang)}
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <p className="mb-1.5 text-xs font-bold text-muted-foreground">
+                      {t("c_lvl_pass")}
+                    </p>
+                    <div className="flex gap-1.5">
+                      {[50, 60, 70, 80, 90].map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          aria-pressed={lvlPass === p}
+                          onClick={() => setLvlPass(p)}
+                          className={cn(
+                            "flex-1 rounded-lg border-[1.5px] px-1 py-1.5 text-xs font-bold tabular-nums transition-colors",
+                            lvlPass === p
+                              ? "border-primary bg-accent text-primary"
+                              : "border-border text-muted-foreground hover:bg-accent/50",
+                          )}
+                        >
+                          {p}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="mb-1.5 text-xs font-bold text-muted-foreground">
+                      {t("c_lvl_size")}
+                    </p>
+                    <div className="flex gap-1.5">
+                      {[5, 8, 10, 15, 20].map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          aria-pressed={lvlSize === n}
+                          onClick={() => setLvlSize(n)}
+                          className={cn(
+                            "flex-1 rounded-lg border-[1.5px] px-1 py-1.5 text-xs font-bold tabular-nums transition-colors",
+                            lvlSize === n
+                              ? "border-primary bg-accent text-primary"
+                              : "border-border text-muted-foreground hover:bg-accent/50",
+                          )}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* drill generator: the topic's own option groups as tick tiles.
             Pre-ticked with the topic defaults (each group must keep ≥1), the
-            same rule the /labs/drill setup screen uses. */}
+            same rule the /labs/drill setup screen uses. Hidden in level mode
+            — the ladder presets own the difficulty then. */}
         {drillTopic &&
+          !levelActive &&
           drillTopic.options.map((group) => (
             <div key={group.id} className="mt-4">
               <p className="mb-2 text-sm font-bold">
@@ -2638,6 +2806,7 @@ function LiveScreen({
   quizTitle,
   code,
   students,
+  ladder,
   timeLeft,
   onEnd,
   onOpenQr,
@@ -2647,6 +2816,9 @@ function LiveScreen({
   quizTitle: string;
   code: string;
   students: Map<string, LiveStudent>;
+  // Level rooms: the ladder the room runs — drives the distribution strip
+  // and the per-card level chips. null everywhere else.
+  ladder: DrillLevel[] | null;
   timeLeft: number;
   onEnd: () => void;
   onOpenQr: () => void;
@@ -2659,6 +2831,15 @@ function LiveScreen({
   const away = sorted.filter(
     (s) => !s.focused && s.connected !== false,
   ).length;
+  // Ladder distribution: how many students sit on each rung right now.
+  // Students whose client hasn't reported a level yet count as rung 1.
+  const rungCounts = ladder
+    ? ladder.map(
+        (_, i) =>
+          sorted.filter((s) => (s.level ?? 1) === i + 1 && s.connected !== false)
+            .length,
+      )
+    : null;
 
   return (
     <div className="w-full px-3 py-3 sm:px-4">
@@ -2716,6 +2897,40 @@ function LiveScreen({
         </div>
       </header>
 
+      {/* Level rooms: the class ladder at a glance — one chip per rung with
+          its live student count. */}
+      {ladder && rungCounts && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <span className="flex items-center gap-1 text-xs font-bold text-muted-foreground">
+            <Trophy className="size-3.5 text-primary" aria-hidden />
+            {t("c_lvl_ladder")}:
+          </span>
+          {ladder.map((level, i) => (
+            <span
+              key={i}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold tabular-nums",
+                rungCounts[i] > 0
+                  ? "border-primary/30 bg-accent text-primary"
+                  : "border-border bg-card text-muted-foreground",
+              )}
+            >
+              {i + 1}. {locDrill(level.label, lang)}
+              <span
+                className={cn(
+                  "grid min-w-5 place-items-center rounded-full px-1 text-[11px] font-bold",
+                  rungCounts[i] > 0
+                    ? "bg-primary text-white"
+                    : "bg-border text-muted-foreground",
+                )}
+              >
+                {rungCounts[i]}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
+
       {sorted.length === 0 ? (
         <p className="mt-16 text-center text-sm text-muted-foreground">
           {t("c_no_students")}
@@ -2727,6 +2942,7 @@ function LiveScreen({
               key={s.studentId}
               student={s}
               rank={i + 1}
+              showLevel={ladder !== null}
               onKick={() => onKick(s)}
             />
           ))}
@@ -2748,10 +2964,13 @@ function fmtAway(seconds: number) {
 function StudentCard({
   student: s,
   rank,
+  showLevel = false,
   onKick,
 }: {
   student: LiveStudent;
   rank: number;
+  // Level rooms: show the ladder-rung chip (an unreported level renders 1).
+  showLevel?: boolean;
   onKick: () => void;
 }) {
   const { lang } = useLanguage();
@@ -2808,6 +3027,15 @@ function StudentCard({
         <span className="min-w-0 flex-1 truncate text-sm font-bold">
           {s.name}
         </span>
+        {showLevel && (
+          <span
+            title={t("level_label")}
+            className="flex shrink-0 items-center gap-0.5 rounded-full border border-primary/30 bg-accent px-1.5 py-0.5 text-xs font-bold tabular-nums text-primary"
+          >
+            <Trophy className="size-3" aria-hidden />
+            {s.level ?? 1}
+          </span>
+        )}
         <span
           className={cn(
             "font-mono text-base font-bold tabular-nums",

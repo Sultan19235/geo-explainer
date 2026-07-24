@@ -24,6 +24,16 @@
  *   POST /tourney/answer  → student's duel answer (graded server-side, exact port)
  *   POST /tourney/advance → teacher drives the tournament state machine (hostSecret)
  *
+ * v10 over v9: level-mode drill rooms (Деңгейлер) — one OPTIONAL field.
+ * /submit additionally accepts `level` (the ladder rung the student is on,
+ * int 1..99), client-reported exactly like score/total in self-paced rooms,
+ * monotonic within a run (a stale heartbeat can't demote; a deliberate
+ * joining:true re-join resets it) and ignored in race/tournament rooms. The
+ * field rides the regular student record into /live snapshots and update
+ * broadcasts, so the console board can draw the ladder. Rooms whose clients
+ * never send `level` behave byte-for-byte as v9 — no new endpoints, no
+ * nginx changes.
+ *
  * v9 over v8: tournament mode (Турнир) — FIFA-playoff duel rooms on drill
  * generator packs. Spec: docs/TOURNAMENT_MODE_SPEC.md (normative for every
  * message shape). server/ becomes THREE files: this entry point plus two pure
@@ -537,6 +547,7 @@ function cleanNumber(value, max) {
 // score, low enough to keep the scoreboard readable and bound the field.
 const MAX_SCORE_VALUE = 10_000_000;   // score / total
 const MAX_TELEMETRY_VALUE = 1_000_000; // tabSwitches / awaySeconds
+const MAX_LEVEL_VALUE = 99;            // ladder rung in level-mode drill rooms
 
 // ─── In-memory session store ───────────────────────────────────────────────
 const sessions = new Map();
@@ -2068,7 +2079,7 @@ app.get('/resolve', (req, res) => {
 // resets the sticky finished flag for a fresh run.
 app.post('/submit', (req, res) => {
   const { code, studentId, name, score, total, finished,
-          focused, tabSwitches, awaySeconds, answers } = req.body;
+          focused, tabSwitches, awaySeconds, answers, level } = req.body;
   const joining = req.body.joining === true;
 
   if (!code || !studentId) return res.status(400).json({ error: 'Missing fields' });
@@ -2125,6 +2136,16 @@ app.post('/submit', (req, res) => {
     answers:     serverOwned
       ? (prev ? prev.answers : undefined)
       : cleanAnswers(answers) || (prev ? prev.answers : undefined),
+    // v10: ladder rung in level-mode drill rooms. Client-reported like
+    // score/total; monotonic within a run (a stale heartbeat can't demote),
+    // reset by a deliberate re-join. undefined (non-level rooms, old
+    // clients) serializes to no field at all.
+    level:       serverOwned
+      ? (prev ? prev.level : undefined)
+      : Math.max(
+          Math.floor(cleanNumber(level, MAX_LEVEL_VALUE)),
+          (!joining && prev && prev.level) || 0
+        ) || undefined,
     updatedAt:   Date.now()
   };
 
@@ -2158,6 +2179,7 @@ app.post('/submit', (req, res) => {
   const changed = !prev
     || prev.score !== student.score
     || prev.total !== student.total
+    || prev.level !== student.level
     || prev.finished !== student.finished
     || prev.focused !== student.focused
     || prev.connected !== student.connected
@@ -2823,7 +2845,7 @@ app.post('/tourney/advance', (req, res) => {
 // disclosed only to a request carrying the operator key. With LIVE_STATUS_KEY
 // unset the detail is unavailable to everyone, which is the safe default.
 app.get('/health', (req, res) => {
-  const body = { ok: true, version: 9 };
+  const body = { ok: true, version: 10 };
   const statusKey = process.env.LIVE_STATUS_KEY;
   if (statusKey && req.query.key === statusKey) {
     body.sessions = sessions.size;

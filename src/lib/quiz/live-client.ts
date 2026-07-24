@@ -559,6 +559,9 @@ export type SubmitPayload = {
   tabSwitches: number;
   awaySeconds: number;
   answers?: AnswerMap;
+  // v10: level-mode drill rooms — the ladder rung the student is on (1-based).
+  // Omitted everywhere else; a v9 server simply drops the field.
+  level?: number;
   // Deliberate (re-)join, not a passive heartbeat: clears a kick verdict and
   // the server's sticky finished flag for a fresh run.
   joining?: boolean;
@@ -789,6 +792,8 @@ export type StudentRecord = {
   // v6: false once the student's page is gone (leave beacon or >45s of
   // heartbeat silence). Absent on old servers — treat as connected.
   connected?: boolean;
+  // v10: ladder rung in level-mode drill rooms; absent everywhere else.
+  level?: number;
 };
 
 export type LiveEvent =

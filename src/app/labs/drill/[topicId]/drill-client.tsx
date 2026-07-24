@@ -16,6 +16,7 @@ export function DrillClient({ topicId }: { topicId: string }) {
       title={topic.title}
       subtitle={topic.subtitle}
       options={topic.options}
+      levels={topic.levels}
       backHref="/labs/drill"
       makeProblem={(seq, config, seed) =>
         topic.generate(mulberry32((seed + seq * 2654435761) >>> 0), config)

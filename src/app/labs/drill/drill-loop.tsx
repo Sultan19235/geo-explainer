@@ -15,11 +15,13 @@ import { DrillKeypad } from "@/components/quiz/drill-keypad";
 import { DrillVisualView } from "@/components/quiz/drill-visual";
 import { LanguageToggle } from "@/components/language-toggle";
 import { useLanguage } from "@/lib/i18n/context";
-import type {
-  DrillConfig,
-  DrillOptionGroup,
-  DrillProblem,
-  DrillText,
+import {
+  resolveLevelConfig,
+  type DrillConfig,
+  type DrillLevel,
+  type DrillOptionGroup,
+  type DrillProblem,
+  type DrillText,
 } from "@/lib/drill/types";
 import { equalsExact, parseExact, toKatex } from "@/lib/drill/exact";
 import { drillT, locDrill } from "@/lib/drill/strings";
@@ -39,6 +41,7 @@ export function DrillLoop({
   title,
   subtitle,
   options,
+  levels,
   backHref,
   makeProblem,
   prepare,
@@ -46,6 +49,9 @@ export function DrillLoop({
   title: DrillText;
   subtitle: DrillText;
   options: DrillOptionGroup[];
+  /** The topic's difficulty ladder, when it ships one — the setup screen
+   * offers the rungs as one-tap presets (authors eyeball each rung here). */
+  levels?: DrillLevel[];
   backHref: string;
   /** Sync problem for a sequence number — called only after `prepare` resolved. */
   makeProblem: (seq: number, config: DrillConfig, seed: number) => DrillProblem;
@@ -57,6 +63,8 @@ export function DrillLoop({
   const t = drillT(lang);
 
   const [config, setConfig] = useState<DrillConfig>(() => configFromDefaults(options));
+  // Which ladder rung the ticks currently mirror; null = hand-picked config.
+  const [levelIdx, setLevelIdx] = useState<number | null>(null);
   const [seed] = useState(() => Math.floor(Math.random() * 0x7fffffff));
   const [seq, setSeq] = useState(0);
   const [retries, setRetries] = useState<PendingRetry[]>([]);
@@ -130,7 +138,13 @@ export function DrillLoop({
     }
   };
 
+  const pickLevel = (i: number) => {
+    setLevelIdx(i);
+    setConfig(resolveLevelConfig({ options }, levels![i]));
+  };
+
   const toggleChoice = (groupId: string, choiceId: string) => {
+    setLevelIdx(null); // hand edit → the ticks no longer mirror a rung
     setConfig((cur) => {
       const selected = cur[groupId] ?? [];
       if (selected.includes(choiceId)) {
@@ -178,6 +192,34 @@ export function DrillLoop({
             <p className="mt-0.5 text-xs text-muted-foreground">
               {locDrill(subtitle, lang)}
             </p>
+
+            {/* ladder rungs as one-tap presets: picking one sets the ticks
+                below to that rung's config (still hand-editable after) */}
+            {levels && levels.length > 0 && (
+              <div className="mt-4">
+                <div className="mb-1.5 text-sm font-semibold">
+                  {t("levels_title")}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {levels.map((level, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      aria-pressed={levelIdx === i}
+                      onClick={() => pickLevel(i)}
+                      className={cn(
+                        "rounded-full border-[1.5px] px-3 py-1.5 text-sm font-semibold transition-colors",
+                        levelIdx === i
+                          ? "border-primary bg-accent text-primary"
+                          : "border-border bg-background text-foreground hover:bg-accent",
+                      )}
+                    >
+                      {i + 1}. {locDrill(level.label, lang)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {options.map((group) => (
               <div key={group.id} className="mt-4">

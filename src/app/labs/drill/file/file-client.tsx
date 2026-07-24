@@ -52,6 +52,7 @@ export function FileDrillClient() {
         title={loaded.meta.title}
         subtitle={loaded.meta.subtitle}
         options={loaded.meta.options}
+        levels={loaded.meta.levels}
         backHref="/labs/drill/file"
         prepare={async (config: DrillConfig, seed: number) => {
           const result = await loaded.source.generate(seed, config, 1, BATCH_SIZE);

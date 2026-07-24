@@ -107,17 +107,38 @@ export type DrillOptionGroup = {
 /** Selected choice ids per option group id. */
 export type DrillConfig = Record<string, string[]>;
 
+/** One rung of a difficulty ladder: a named preset of option selections.
+ * `config` may cover only some groups — the rest run on defaults. */
+export type DrillLevel = {
+  label: DrillText;
+  config: DrillConfig;
+};
+
 export type DrillTopic = {
   id: string;
   title: DrillText;
   subtitle: DrillText;
   options: DrillOptionGroup[];
+  /** Optional difficulty ladder (2–10 rungs). A topic without levels is a
+   * single-level drill — nothing about the endless flow changes. */
+  levels?: DrillLevel[];
   generate: (rng: Rng, config: DrillConfig) => DrillProblem;
 };
 
 export function defaultConfig(topic: Pick<DrillTopic, "options">): DrillConfig {
   const config: DrillConfig = {};
   for (const group of topic.options) config[group.id] = [...group.defaults];
+  return config;
+}
+
+/** The effective config a ladder rung plays with: defaults overridden by the
+ * level's preset. generate() never knows levels exist — it just gets a config. */
+export function resolveLevelConfig(
+  topic: Pick<DrillTopic, "options">,
+  level: Pick<DrillLevel, "config">,
+): DrillConfig {
+  const config = defaultConfig(topic);
+  for (const [groupId, ids] of Object.entries(level.config)) config[groupId] = [...ids];
   return config;
 }
 
@@ -145,6 +166,39 @@ export function decodeDrillConfig(raw: string | null): DrillConfig | null {
     if (ids.length > 0) config[groupId] = ids;
   }
   return Object.keys(config).length > 0 ? config : null;
+}
+
+// ─── Level-mode settings codec ──────────────────────────────────────────────
+// When a topic has a ladder and the teacher runs it in level mode, the two
+// room settings ride the join link as one `lvl=` param: "70x10" = pass at
+// 70% of a 10-question batch. Absent param = level mode off (plain endless).
+
+export type DrillLevelSettings = {
+  /** Pass threshold, percent of the batch that must be correct (50–100). */
+  pass: number;
+  /** Questions per level batch (4–20). */
+  size: number;
+};
+
+export const DEFAULT_LEVEL_SETTINGS: DrillLevelSettings = { pass: 70, size: 10 };
+
+export function encodeLevelSettings(s: DrillLevelSettings): string {
+  return `${s.pass}x${s.size}`;
+}
+
+export function decodeLevelSettings(raw: string | null): DrillLevelSettings | null {
+  if (!raw) return null;
+  const m = /^(\d{1,3})x(\d{1,2})$/.exec(raw);
+  if (!m) return null;
+  const pass = Number(m[1]);
+  const size = Number(m[2]);
+  if (pass < 50 || pass > 100 || size < 4 || size > 20) return null;
+  return { pass, size };
+}
+
+/** Correct answers needed to pass a batch: ceil(size × pass%), min 1. */
+export function levelPassCount(s: DrillLevelSettings): number {
+  return Math.max(1, Math.ceil((s.size * s.pass) / 100));
 }
 
 /** Selected ids for a group, falling back to defaults so generate() never sees an empty group. */

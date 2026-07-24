@@ -21,6 +21,8 @@ export const DRILL_STRINGS = {
     stat_streak: "Қатарынан",
     settings_button: "Баптау",
     input_empty: "Жауап",
+    levels_title: "Деңгейлер",
+    levels_custom: "Өз баптауым",
   },
   ru: {
     setup_title: "Настройка",
@@ -38,6 +40,8 @@ export const DRILL_STRINGS = {
     stat_streak: "Подряд",
     settings_button: "Настройка",
     input_empty: "Ответ",
+    levels_title: "Уровни",
+    levels_custom: "Своя настройка",
   },
 } as const;
 

@@ -5,8 +5,12 @@ import { exact, equalsExact, parseExact, toKatex, toPlain } from "../src/lib/dri
 import { mulberry32 } from "../src/lib/drill/rng";
 import {
   decodeDrillConfig,
+  decodeLevelSettings,
   defaultConfig,
   encodeDrillConfig,
+  encodeLevelSettings,
+  levelPassCount,
+  resolveLevelConfig,
 } from "../src/lib/drill/types";
 import { radianDegreeTopic } from "../src/lib/drill/topics/radian-degree";
 import { DRILL_TOPICS } from "../src/lib/drill/registry";
@@ -201,7 +205,42 @@ const drillQ = (extra: object) => ({
     check("example meta id", loaded.topic.meta.id === "integer-add");
     const p = loaded.topic.generate(mulberry32(5), { ops: ["add"], range: ["small"] });
     check("example visual present", p.visual?.type === "number-line");
+    // Levels ladder: rides the meta, resolves against defaults.
+    check("example levels in meta", loaded.topic.meta.levels?.length === 4);
+    const lvl = loaded.topic.meta.levels?.[3];
+    const cfg = lvl
+      ? resolveLevelConfig({ options: loaded.topic.meta.options }, lvl)
+      : null;
+    check(
+      "level 4 resolves to big mixed",
+      cfg !== null &&
+        cfg.range.join(",") === "big" &&
+        cfg.ops.join(",") === "add,sub",
+    );
   }
+
+  // Levels validation: unknown ids and bad shapes fail the upload.
+  check(
+    "harness: level with unknown choice rejected",
+    loadAndValidateDrillTopicCode(
+      code.replace('config: { ops: ["add"], range: ["small"] }', 'config: { ops: ["nope"] }'),
+    ).topic === null,
+  );
+  check(
+    "harness: level with unknown group rejected",
+    loadAndValidateDrillTopicCode(
+      code.replace('config: { ops: ["add"], range: ["small"] }', 'config: { bogus: ["add"] }'),
+    ).topic === null,
+  );
+  check(
+    "harness: single-level ladder rejected",
+    loadAndValidateDrillTopicCode(
+      code.replace(
+        /levels: \[[\s\S]*?\n  \],/,
+        'levels: [{ label: { kz: "Оңай", ru: "Лёгкий" }, config: {} }],',
+      ),
+    ).topic === null,
+  );
 
   // Harness rejections: broken code, wrong shape, non-determinism.
   check(
@@ -282,6 +321,77 @@ const drillQ = (extra: object) => ({
     ],
   });
   check(`figure: pack question accepted (${packRes.errors.join("; ")})`, packRes.errors.length === 0);
+}
+
+// ── level-settings codec (`lvl=` join-link param) ──
+{
+  check(
+    "lvl codec round-trip",
+    (() => {
+      const s = { pass: 70, size: 10 };
+      const back = decodeLevelSettings(encodeLevelSettings(s));
+      return back !== null && back.pass === 70 && back.size === 10;
+    })(),
+  );
+  check("lvl codec: garbage rejected", decodeLevelSettings("70-10") === null);
+  check("lvl codec: out-of-range pass rejected", decodeLevelSettings("40x10") === null);
+  check("lvl codec: out-of-range size rejected", decodeLevelSettings("70x30") === null);
+  check("lvl codec: null passthrough", decodeLevelSettings(null) === null);
+  check("pass count 70% of 10 is 7", levelPassCount({ pass: 70, size: 10 }) === 7);
+  check("pass count rounds up (70% of 8 → 6)", levelPassCount({ pass: 70, size: 8 }) === 6);
+  check("pass count min 1", levelPassCount({ pass: 50, size: 4 }) === 2);
+}
+
+// ── fileLevels snapshot through validatePack ──
+{
+  const fileOptions = [
+    {
+      id: "ops",
+      label: { kz: "т", ru: "т" },
+      choices: [
+        { id: "add", label: { kz: "т", ru: "т" } },
+        { id: "sub", label: { kz: "т", ru: "т" } },
+      ],
+      defaults: ["add"],
+    },
+  ];
+  const base = {
+    title: "t",
+    generator: {
+      type: "drill",
+      topic: "my-file-topic",
+      file: true,
+      fileOptions,
+    },
+    questions: [],
+  };
+  const good = validatePack({
+    ...base,
+    generator: {
+      ...base.generator,
+      fileLevels: [
+        { label: { kz: "1", ru: "1" }, config: { ops: ["add"] } },
+        { label: { kz: "2", ru: "2" }, config: { ops: ["add", "sub"] } },
+      ],
+    },
+  });
+  check(
+    `pack: fileLevels accepted (${good.errors.join("; ")})`,
+    good.errors.length === 0 &&
+      good.pack?.generator?.type === "drill" &&
+      good.pack.generator.fileLevels?.length === 2,
+  );
+  const bad = validatePack({
+    ...base,
+    generator: {
+      ...base.generator,
+      fileLevels: [
+        { label: { kz: "1", ru: "1" }, config: { ops: ["nope"] } },
+        { label: { kz: "2", ru: "2" }, config: {} },
+      ],
+    },
+  });
+  check("pack: fileLevels with unknown choice rejected", bad.errors.length > 0);
 }
 
 if (failures === 0) console.log("drill-sanity: ALL OK");

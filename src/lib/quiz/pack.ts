@@ -37,10 +37,11 @@ import {
   keysForAnswer,
   type DrillConfig,
   type DrillKey,
+  type DrillLevel,
   type DrillOptionGroup,
   type DrillVisual,
 } from "@/lib/drill/types";
-import { validateOptionGroups, validateVisual } from "@/lib/drill/topic-schema";
+import { validateLevels, validateOptionGroups, validateVisual } from "@/lib/drill/topic-schema";
 
 export type PackLang = "kz" | "ru";
 
@@ -161,9 +162,11 @@ export type PackGenerator =
       // Uploaded generator file (admin "generator .js" upload): the code
       // lives in storage next to the pack (drillGenPath). fileOptions is the
       // option-groups snapshot taken at upload so the teacher console renders
-      // its ticks without ever executing the file.
+      // its ticks without ever executing the file; fileLevels is the same
+      // snapshot for the topic's difficulty ladder (when the file has one).
       file?: true;
       fileOptions?: DrillOptionGroup[];
+      fileLevels?: DrillLevel[];
     };
 
 export type QuizPack = {
@@ -528,11 +531,28 @@ export function validatePack(raw: unknown): {
           (e) => `"generator.fileOptions": ${e}`,
         );
         errors.push(...optionErrors);
-        if (topicId && optionErrors.length === 0) {
+        let levelErrors: string[] = [];
+        if (g.fileLevels !== undefined && optionErrors.length === 0) {
+          levelErrors = validateLevels(
+            g.fileLevels,
+            (g.fileOptions ?? []) as DrillOptionGroup[],
+          ).map((e) => `"generator.fileLevels": ${e}`);
+          errors.push(...levelErrors);
+        }
+        if (topicId && optionErrors.length === 0 && levelErrors.length === 0) {
           const fileOptions = g.fileOptions as DrillOptionGroup[];
           const { config, ok } = cleanConfig(fileOptions, `file topic "${topicId}"`);
           if (ok) {
-            generator = { type: "drill", topic: topicId, config, file: true, fileOptions };
+            generator = {
+              type: "drill",
+              topic: topicId,
+              config,
+              file: true,
+              fileOptions,
+              ...(g.fileLevels !== undefined
+                ? { fileLevels: g.fileLevels as DrillLevel[] }
+                : {}),
+            };
           }
         }
       } else {

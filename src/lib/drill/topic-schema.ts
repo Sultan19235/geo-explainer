@@ -26,7 +26,9 @@ import { getDrillTopic } from "./registry";
 import {
   isDrillKey,
   keysForAnswer,
+  resolveLevelConfig,
   type DrillConfig,
+  type DrillLevel,
   type DrillOptionGroup,
   type DrillProblem,
   type DrillText,
@@ -39,6 +41,8 @@ const ID_RE = /^[a-z0-9][a-z0-9-]{1,39}$/;
 const MAX_CODE_BYTES = 200_000;
 const MAX_OPTION_GROUPS = 4;
 const MAX_CHOICES = 8;
+const MIN_LEVELS = 2;
+const MAX_LEVELS = 10;
 
 export type UploadedTopicMeta = {
   apiVersion: number;
@@ -46,6 +50,7 @@ export type UploadedTopicMeta = {
   title: DrillText;
   subtitle: DrillText;
   options: DrillOptionGroup[];
+  levels?: DrillLevel[];
 };
 
 export type EvaluatedTopic = {
@@ -138,6 +143,7 @@ export function evaluateDrillTopicCode(
         title: t.title,
         subtitle: t.subtitle,
         options: t.options,
+        ...(t.levels !== undefined ? { levels: t.levels } : {}),
       },
       generate: t.generate.bind(t),
     },
@@ -209,6 +215,51 @@ export function validateOptionGroups(raw: unknown): string[] {
   return errors;
 }
 
+/** Validate a difficulty ladder against its option groups. Exported: pack.ts
+ * reuses it for the `fileLevels` snapshot a file-generator pack carries. */
+export function validateLevels(raw: unknown, options: DrillOptionGroup[]): string[] {
+  const errors: string[] = [];
+  if (!Array.isArray(raw)) return ['"levels" must be a list of {label, config} objects.'];
+  if (raw.length < MIN_LEVELS || raw.length > MAX_LEVELS) {
+    errors.push(`"levels" needs ${MIN_LEVELS}–${MAX_LEVELS} entries (or drop the field entirely).`);
+  }
+  raw.forEach((l, i) => {
+    const label = `levels[${i + 1}]`;
+    const level = l as DrillLevel;
+    if (typeof level !== "object" || level === null) {
+      errors.push(`${label}: must be an object.`);
+      return;
+    }
+    if (!isText(level.label)) {
+      errors.push(`${label}: "label" needs {"kz": "...", "ru": "..."}.`);
+    }
+    if (typeof level.config !== "object" || level.config === null || Array.isArray(level.config)) {
+      errors.push(`${label}: "config" must be an object of { optionGroupId: [choiceIds] }.`);
+      return;
+    }
+    for (const [groupId, ids] of Object.entries(level.config)) {
+      const group = options.find((g) => g.id === groupId);
+      if (!group) {
+        errors.push(
+          `${label}: unknown option group "${groupId}" — groups: ${options.map((g) => g.id).join(", ") || "(none)"}.`,
+        );
+        continue;
+      }
+      if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id) => typeof id === "string")) {
+        errors.push(`${label}: config.${groupId} must be a non-empty list of choice id strings.`);
+        continue;
+      }
+      const unknown = ids.filter((id) => !group.choices.some((c) => c.id === id));
+      if (unknown.length > 0) {
+        errors.push(
+          `${label}: config.${groupId} has unknown choice(s) ${unknown.map((u) => `"${u}"`).join(", ")} — choices: ${group.choices.map((c) => c.id).join(", ")}.`,
+        );
+      }
+    }
+  });
+  return errors;
+}
+
 function validateTopicShape(raw: unknown): string[] {
   if (typeof raw !== "object" || raw === null) {
     return ["registerDrillTopic must receive an object."];
@@ -226,6 +277,9 @@ function validateTopicShape(raw: unknown): string[] {
   if (!isText(t.title)) errors.push('"title" needs {"kz": "...", "ru": "..."}.');
   if (!isText(t.subtitle)) errors.push('"subtitle" needs {"kz": "...", "ru": "..."}.');
   errors.push(...validateOptionGroups(t.options ?? []));
+  if (t.levels !== undefined && errors.length === 0) {
+    errors.push(...validateLevels(t.levels, (t.options ?? []) as DrillOptionGroup[]));
+  }
   if (typeof t.generate !== "function") {
     errors.push('"generate" must be a function (rng, config) → problem.');
   }
@@ -386,7 +440,7 @@ export function validateVisual(v: unknown, label: string): string[] {
 const PROBLEMS_PER_CONFIG = 40;
 const MAX_REPORTED_ERRORS = 12;
 
-function harnessConfigs(options: DrillOptionGroup[]): DrillConfig[] {
+function harnessConfigs(options: DrillOptionGroup[], levels?: DrillLevel[]): DrillConfig[] {
   const defaults: DrillConfig = {};
   for (const g of options) defaults[g.id] = [...g.defaults];
   const configs: DrillConfig[] = [defaults];
@@ -394,6 +448,11 @@ function harnessConfigs(options: DrillOptionGroup[]): DrillConfig[] {
     for (const c of g.choices) {
       configs.push({ ...defaults, [g.id]: [c.id] });
     }
+  }
+  // Every ladder rung's effective config gets the same battery — a level a
+  // student can reach must never crash or produce an untypeable answer.
+  for (const level of levels ?? []) {
+    configs.push(resolveLevelConfig({ options }, level));
   }
   return configs;
 }
@@ -404,7 +463,7 @@ export function validateDrillTopic(topic: EvaluatedTopic): string[] {
     if (errors.length < MAX_REPORTED_ERRORS) errors.push(e);
   };
 
-  for (const config of harnessConfigs(topic.meta.options)) {
+  for (const config of harnessConfigs(topic.meta.options, topic.meta.levels)) {
     const cfgLabel = JSON.stringify(config);
     for (let i = 0; i < PROBLEMS_PER_CONFIG && errors.length < MAX_REPORTED_ERRORS; i++) {
       const seed = (i * 2654435761 + 12345) >>> 0;

@@ -64,6 +64,9 @@ export function QuizForm({ action, topics, initial, submitLabelKey }: Props) {
             JSON.stringify({
               topic: result.meta.id,
               options: result.meta.options,
+              ...(result.meta.levels !== undefined
+                ? { levels: result.meta.levels }
+                : {}),
             }),
           );
         }

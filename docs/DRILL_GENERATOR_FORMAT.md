@@ -37,6 +37,10 @@ registerDrillTopic({
       defaults: ["add"],                   // non-empty subset of choice ids
     },
   ],
+  levels: [                                // OPTIONAL difficulty ladder, see below
+    { label: { kz: "Оңай", ru: "Лёгкий" }, config: { kinds: ["add"] } },
+    { label: { kz: "Орта", ru: "Средний" }, config: { kinds: ["add", "sub"] } },
+  ],
   generate(rng, config) {
     // rng: () => number in [0,1) — THE ONLY source of randomness.
     // config: { kinds: ["add", ...] } — selected choice ids per group id
@@ -48,6 +52,32 @@ registerDrillTopic({
 
 `registerDrillTopic` must be called exactly once. All text is
 `{ kz: "...", ru: "..." }` — both languages required.
+
+## Difficulty ladder — `levels` (optional)
+
+A topic may ship a ladder of 2–10 **levels**. Each level is just a named
+preset of the option ticks — `config` lists choice ids per group id exactly
+like `generate` receives them; groups a level omits run on the topic
+`defaults`. `generate()` never knows levels exist.
+
+```js
+levels: [
+  { label: { kz: "Оңай",  ru: "Лёгкий"  }, config: { range: ["small"], ops: ["add"] } },
+  { label: { kz: "Орта",  ru: "Средний" }, config: { range: ["small"] } },
+  { label: { kz: "Қиын",  ru: "Сложный" }, config: { range: ["big"] } },
+],
+```
+
+What levels unlock: in a live room the teacher can run the topic in **level
+mode** — every student climbs the ladder (a batch of N questions per level;
+scoring at or above the teacher-chosen threshold advances to the next level,
+below it retries the same level with fresh problems). The teacher's board
+shows who is on which rung. Topics without `levels` behave exactly as before.
+
+Order the entries easiest → hardest. The `/labs/drill/file` previewer shows
+the rungs as one-tap presets so every level can be play-tested before upload.
+The harness validates each level (unknown group/choice ids fail the upload)
+and runs the full problem battery on every rung's effective config.
 
 ## The problem object
 

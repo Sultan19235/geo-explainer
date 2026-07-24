@@ -131,6 +131,11 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     // Sticky "answered everything" flag: every heartbeat re-reports it, so a
     // 15s beat can't silently un-finish the student on the teacher's board.
     finished: false,
+    // v10: ladder rung in level-mode drill rooms; 0 = not a level room. The
+    // flow layer owns the level machine and reports rungs via reportLevel —
+    // this hook only rides the value on every /submit (server keeps it
+    // monotonic, so a heartbeat that races a restore can't demote).
+    level: 0,
     focused: true,
     tabSwitches: 0,
     awaySeconds: 0,
@@ -227,6 +232,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
             tabSwitches: s.tabSwitches,
             awaySeconds: away,
             answers: Object.keys(s.answers).length > 0 ? s.answers : undefined,
+            level: s.level > 0 ? s.level : undefined,
             joining: opts?.joining || undefined,
           },
           { keepalive: opts?.keepalive },
@@ -499,6 +505,18 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     [saveState, sendScore],
   );
 
+  // v10: the level flow reports the ladder rung the student is on (1-based).
+  // Every later heartbeat re-reports it, so the board's ladder can't go stale.
+  const reportLevel = useCallback(
+    (level: number) => {
+      const s = session.current;
+      if (!Number.isFinite(level) || level <= 0 || level === s.level) return;
+      s.level = Math.floor(level);
+      void sendScore();
+    },
+    [sendScore],
+  );
+
   // Reports the "finished" flag (student answered everything) — the teacher
   // console shows the card as done. Sticky in the session ref, so every later
   // heartbeat keeps re-reporting it.
@@ -584,6 +602,7 @@ export function useLiveSession<TExtra extends Record<string, unknown>>(
     tourneySummary,
     recordAnswer,
     markFinished,
+    reportLevel,
     rejoin,
     extra,
     updateExtra,
